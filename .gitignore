@@ -1,0 +1,23 @@
+# 依赖与构建产物
+node_modules/
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
+# 本插件没有构建步骤（lib/*.js 即产物），这些目录只是本地调试时会冒出来的
+dist/
+build/
+*.tgz
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.tmp/
+tmp/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,8 @@
+# 让换行在这台 Windows 上也保持 LF：文件是我按 LF 写的，
+# 不锁住的话 git 会在检出时换成 CRLF，每次编辑都产生整文件 diff。
+* text=auto eol=lf
+
+# 二进制文件按二进制存
+*.png binary
+*.jpg binary
+*.ico binary

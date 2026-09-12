@@ -1,0 +1,55 @@
+{
+  "name": "dsh-custom-css",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH Web GUI 扩展：在 设置 → 通用 的「外观」下方提供一行自定义 CSS 编辑器。",
+  "license": "MIT",
+  "author": "FOX4096",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FOX4096/dsh-custom-css.git"
+  },
+  "homepage": "https://github.com/FOX4096/dsh-custom-css#readme",
+  "bugs": {
+    "url": "https://github.com/FOX4096/dsh-custom-css/issues"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "custom-css",
+    "theme",
+    "appearance"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-general"
+      ]
+    }
+  }
+}
