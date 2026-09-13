@@ -1,0 +1,21 @@
+# https://editorconfig.org
+# 仓库里两种缩进风格是刻意的：lib/ 的浏览器半用制表符（与 DSH 自身产物一致），
+# 其余文档与配置用两空格。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{js,mjs,cjs}]
+indent_style = tab
+indent_size = 4
+
+[*.{md,yml,yaml,json,css}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

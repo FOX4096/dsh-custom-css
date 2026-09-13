@@ -36,8 +36,11 @@
     "assets/icon.svg",
     "cordis.patch.yml",
     "compat.json",
+    "examples",
     "README.md",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "keywords": [

@@ -200,13 +200,26 @@ dsh-custom-css/
 │   ├── index.js        # host 半：样式表目录 + 围栏内的 JSON 接口
 │   └── client.js       # 浏览器半：设置行、编辑器、补全、校验、规则面板
 ├── tests/
-│   ├── loader-smoke.cjs    # 假 host 里真跑 client.js（含校验、补全、规则面板）
-│   └── host-api-smoke.mjs  # 假 webServer 驱动 host 路由（含穿越拒绝、fail-closed）
+│   ├── loader-smoke.cjs    # 假 host 里真跑 client.js（含校验、补全、规则面板、开关、分量）
+│   ├── host-api-smoke.mjs  # 假 webServer 驱动 host 路由（含穿越拒绝、fail-closed、/toggle）
+│   └── compat-matrix.mjs   # 跨版本兼容断言（槽位 + inject id），npm run compat
 ├── .github/
-│   └── workflows/ci.yml    # CI：Node 20/22 × 语法自检 + 两套冒烟测试（无依赖，几秒跑完）
+│   ├── workflows/ci.yml        # CI：Node 20/22 × 语法自检 + 冒烟测试 + 兼容断言
+│   ├── workflows/publish.yml   # 推 v* tag → OIDC 受信发布（带 provenance）+ 自动建 Release
+│   ├── ISSUE_TEMPLATE/         # Bug / 功能建议模板
+│   └── pull_request_template.md
+├── examples/
+│   ├── showcase.css        # 可直接导入的示例样式表（只用设计变量，不选哈希类名）
+│   └── README.md           # 用它 + 写自定义样式的三条经验
 ├── assets/
 │   ├── icon.svg            # 图标（矢量，README 顶部用的就是它）
-│   └── icon-512.png        # 同一图标 512px，带透明通道，可用于仓库头像 / 社交预览
+│   ├── icon-512.png        # 同一图标 512px，带透明通道，可用于仓库头像
+│   ├── social-preview.svg  # 社交预览卡（1280×640）源文件
+│   └── social-preview.png  # 同上，位图版
+├── compat.json             # 跨版本兼容契约（槽位 / inject id / 已验证版本）
+├── .editorconfig
+├── CONTRIBUTING.md         # 本地跑起来、硬约束、发版流程
+├── SECURITY.md             # 攻击面与私密报告渠道
 ├── LICENSE
 ├── CHANGELOG.md
 └── README.md
@@ -231,3 +244,7 @@ dsh-custom-css/
 ## 许可
 
 MIT，见 [LICENSE](./LICENSE)。改动记录见 [CHANGELOG.md](./CHANGELOG.md)。
+
+- 想改代码：[CONTRIBUTING.md](./CONTRIBUTING.md)（本地 link: 安装、必须跑的测试、硬约束、发版流程）
+- 想直接看效果：[examples/showcase.css](./examples/showcase.css)
+- 安全问题：见 [SECURITY.md](./SECURITY.md) 的私密渠道

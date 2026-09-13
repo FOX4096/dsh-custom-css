@@ -1,0 +1,29 @@
+name: 功能建议
+description: 想要的能力（新的属性形态、编辑器行为、接口等）
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么
+      description: 描述场景比描述方案更重要 —— 同一个场景常常有更合适的做法
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你设想的做法（可选）
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH 版本
+      placeholder: 0.1.5-rc.1
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: 这个插件的两条硬约束（勾选表示你接受）
+      options:
+        - label: 不引入运行时依赖
+          required: false
+        - label: 浏览器半不硬编码 `@deepseek-ai/*` 平台包（否则换代就挂）
+          required: false
