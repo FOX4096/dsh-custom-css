@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">dsh-custom-css</title>
+  <desc id="desc">A rounded square filled with a deep accent gradient, holding a white curly brace and three declaration bars.</desc>
+  <defs>
+    <!-- 四个停靠点取自插件强调色动画走的那四站（绿→青→蓝→紫），
+         统一压深 22%：白色笔画压在原色上对比度只有 1.86:1，小尺寸会糊；
+         压深到 5.2~6.8:1 后 16px 也清楚，且还是同一套色相。 -->
+    <linearGradient id="accent" x1="96" y1="72" x2="432" y2="448" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#257b56"/>
+      <stop offset="0.35" stop-color="#257083"/>
+      <stop offset="0.68" stop-color="#3156af"/>
+      <stop offset="1" stop-color="#6048bb"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角方块：512 的 22.6% 圆角，接近 DSH 面板的圆角比例 -->
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#accent)"/>
+  <!-- 外描边，避免浅色背景上边界糊掉；深色背景上则是一圈极淡的提亮 -->
+  <rect x="1.5" y="1.5" width="509" height="509" rx="115" fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="3"/>
+
+  <!-- 花括号 + 三条声明行 = 「块里的样式」 -->
+  <path d="M 206 138 C 179 138 167 153 167 180 L 167 214 C 167 240 160 251 133 256 C 160 261 167 272 167 298 L 167 332 C 167 359 179 374 206 374"
+        fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#ffffff">
+    <rect x="254" y="186" width="141" height="32" rx="16"/>
+    <rect x="254" y="240" width="108" height="32" rx="16" fill-opacity="0.9"/>
+    <rect x="254" y="294" width="76" height="32" rx="16" fill-opacity="0.78"/>
+  </g>
+</svg>

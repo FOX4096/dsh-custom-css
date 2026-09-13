@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.svg" width="96" height="96" alt="dsh-custom-css 图标：圆角方块上是渐变底色与一对花括号 + 三条声明行">
+</p>
+
 # dsh-custom-css
 
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
@@ -136,6 +140,9 @@ dsh-custom-css/
 ├── tests/
 │   ├── loader-smoke.cjs    # 假 host 里真跑 client.js（含校验、补全、规则面板）
 │   └── host-api-smoke.mjs  # 假 webServer 驱动 host 路由（含穿越拒绝、fail-closed）
+├── assets/
+│   ├── icon.svg            # 图标（矢量，README 顶部用的就是它）
+│   └── icon-512.png        # 同一图标 512px，带透明通道，可用于仓库头像 / 社交预览
 ├── LICENSE
 ├── CHANGELOG.md
 └── README.md
