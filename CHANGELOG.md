@@ -2,6 +2,13 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.1.1 — 发布通道与文档
+
+- README：新增 npm 徽章（version / unpacked size）；安装章节改为「**npm 优先**」，GitHub 装法与 `link:` 开发安装顺延为方式二、方式三；顶部元信息补 npm 包链接。
+- README：注释里记下下载量徽章暂缺的原因（npm downloads API 对刚发布的包要等约一天才有数据），届时补 `img.shields.io/npm/dm/dsh-custom-css`。
+- `publish.yml`：打开 `push: tags: ['v*']` 触发（OIDC 受信发布 + provenance 签名），并把唯一前置写进注释 —— 先在 npmjs.com 给这个包配置 Trusted Publisher。
+- **无运行时改动**：`lib/client.js` 与 `lib/index.js` 与 0.1.0 逐字节相同，本版只为刷新 npm 页面上的 README 并走通自动发版流水线。
+
 ## 0.1.0 — 首个公开版本
 
 设置行 / 编辑器

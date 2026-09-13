@@ -24,7 +24,7 @@
 
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
 
-- npm：[`dsh-custom-css`](https://www.npmjs.com/package/dsh-custom-css)（当前 `0.1.0`，2026-09-13 首发）
+- npm：[`dsh-custom-css`](https://www.npmjs.com/package/dsh-custom-css)（2026-09-13 首发，当前版本见上方徽章）
 - 许可：MIT
 - 形态：DSH profile 插件（host 半 + 浏览器半），无构建步骤，`lib/*.js` 即产物
 - 测试：`node tests/loader-smoke.cjs` / `node tests/host-api-smoke.mjs`
