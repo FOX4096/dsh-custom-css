@@ -36,3 +36,10 @@ jobs:
 
       - name: 浏览器半冒烟测试（含校验器回归）
         run: node tests/loader-smoke.cjs
+
+      # 换代门禁：断言我们依赖的平台契约（槽位 settings.general.item + dsh.client.inject
+      # 的两个 id）在目标 DSH 版本里仍然存在。需要网络访问 npm registry（要拉各版本的包），
+      # 所以在矩阵里只跑一档；DSH 换代改名时它会先红，而不是等用户看到模块表报错。
+      - name: 跨版本兼容断言
+        if: matrix.node == '22'
+        run: npm run compat

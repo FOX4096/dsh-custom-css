@@ -1,0 +1,26 @@
+{
+  "comment": "跨版本兼容契约：插件真正依赖的平台接口。tests/compat-matrix.mjs 逐个版本断言这些接口还在（npm run compat），CI 里单跑一档。",
+  "slot": "settings.general.item",
+  "slotPackage": "@deepseek-ai/dsh-client-ui-settings-general",
+  "injectFrom": "package.json#dsh.client.inject",
+  "runtimeVerified": [
+    "0.1.5-rc.1",
+    "0.1.2-rc.1"
+  ],
+  "knownGood": [
+    "0.1.2-rc.1",
+    "0.1.5-rc.1"
+  ],
+  "probe": [
+    "0.0.1-rc.5",
+    "0.1.0-rc.7",
+    "0.1.1-rc.2"
+  ],
+  "notes": [
+    "runtimeVerified = 真机起过对应版本的 DSH 实例并跑通 host 半接口；knownGood/probe = 只做接口契约断言（解包该版本的 settings 包核对槽位与 id）。",
+    "0.1.2-rc.1 的真机验证方式：独立 DSH_HOME + profile，GET /dsh-custom-css/list、POST /write、GET /read 全部 200 且文件确实落盘。",
+    "本插件浏览器半在运行时一个 @deepseek-ai/* 模块都不 require（只通过 dsh.client.inject 声明可用 id，并从 Context 取 slots 服务），因此不受「bundle 里硬编码了平台已删包」那类漂移影响。",
+    "已知失效模式：DSH 换代若把 settings.general.item 改名，行内控件会静默不出现（没有报错）—— compat-matrix 就是为此设的门禁。",
+    "0.0.1-rc.x 一代一周下载量约 94 次（≈0.02%），只做接口断言，不做专门的兼容分支。"
+  ]
+}

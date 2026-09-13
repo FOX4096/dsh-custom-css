@@ -16,7 +16,7 @@
   <a href="https://github.com/FOX4096/dsh-custom-css/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FOX4096/dsh-custom-css?color=3156af"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.5-rc.1+（已在 0.1.5-rc.1 上验证）" src="https://img.shields.io/badge/DSH-0.1.5--rc.1%2B_%28verified_0.1.5--rc.1%29-4d6bfe"></a><br /><br />
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.2 与 0.1.5 已真机验证，接口契约断言覆盖到 0.0.1-rc.5" src="https://img.shields.io/badge/DSH-0.1.2_%7E_0.1.5_%28runtime_verified%29-4d6bfe"></a><br /><br />
   <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-3156af"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-6048bb"><br /><br />
   <b>文件下拉 · 打开文件 · 导入 · 导出 · 重置</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
   编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验。
@@ -25,6 +25,7 @@
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
 
 - npm：[`dsh-custom-css`](https://www.npmjs.com/package/dsh-custom-css)（2026-09-13 首发，当前版本见上方徽章）
+- 兼容：DSH `0.1.2-rc.1` ~ `0.1.5-rc.1` 已真机验证，接口契约断言覆盖到 `0.0.1-rc.5`；`npm run compat` 可复跑（见「兼容性」）
 - 许可：MIT
 - 形态：DSH profile 插件（host 半 + 浏览器半），无构建步骤，`lib/*.js` 即产物
 - 测试：`node tests/loader-smoke.cjs` / `node tests/host-api-smoke.mjs`
@@ -108,7 +109,7 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点，并且**必须
 
 ### 方式一：从 npm 安装（推荐）
 
-**前置**：DSH `0.1.5-rc.1+`（本版本已在 **0.1.5-rc.1** 上真机验证），Node.js ≥ 20、pnpm ≥ 10。
+**前置**：DSH `0.1.2-rc.1` ~ `0.1.5-rc.1`（**已真机验证**；接口契约断言覆盖到 `0.0.1-rc.5`，见「兼容性」），Node.js ≥ 20、pnpm ≥ 10。
 
 ```bash
 # 1) 把插件装进 profile（dsh plugin 会把参数转发给 profile 目录里的 pnpm）
@@ -146,6 +147,29 @@ profile bundle "…" declares no dsh.bundle in its package.json
 
 `pnpm install` 会重建 `node_modules`，可能抹掉该 junction；重建一次即可。
 
+## 兼容性
+
+插件与 DSH 的耦合面是刻意做窄的，所以它跨版本比多数插件活得久：**浏览器半在运行时一个 `@deepseek-ai/*` 模块都不 require**（只通过 `dsh.client.inject` 声明可用 id、并从 Context 取 `slots` 服务），host 半只挂 HTTP 路由。真正依赖的平台契约只有四条，全部记在 [`compat.json`](./compat.json)，由 `npm run compat` 逐个版本断言：
+
+| 契约点 | 内容 |
+| --- | --- |
+| 槽位 | `settings.general.item`（`@deepseek-ai/dsh-client-ui-settings-general` 里 `GeneralSection` 渲染的那个 seat） |
+| 声明的模块 id | `@deepseek-ai/dsh-client-ui-settings`、`@deepseek-ai/dsh-client-ui-settings-general` |
+| 需要的服务 | 仅 `slots` |
+| 运行时 require | 零 |
+
+### 验证矩阵
+
+| DSH 版本 | 验证方式 | 结论 |
+| --- | --- | --- |
+| `0.1.5-rc.1` | 真机运行（本仓库开发环境） | 通过 |
+| `0.1.2-rc.1` | 真机运行：独立 `DSH_HOME` 起实例，`/dsh-custom-css/list`、`/write`、`/read` 全部 200 且文件确实落盘 | 通过 |
+| `0.1.1-rc.2` / `0.1.0-rc.7` / `0.0.1-rc.5` | 接口契约断言（`npm run compat` 解包该版本的 settings 包，核对槽位与 id） | 通过 |
+
+`npm run compat` 需要网络（要拉各版本的包），所以本地 `npm test` 保持离线可跑；CI 里单跑一档。
+
+**两种失效模式的判别**：槽位若被 DSH 改名，行内控件会**静默不出现**（没有报错）—— 这正是 `npm run compat` 要提前挡住的事；而 bundle 里若硬 require 了平台包（如 `@deepseek-ai/dsh-client-runtime/client`），加载时会抛 `client-modules: require("…") missed the module table`（见下文「已知坑」）。
+
 ## 已知坑（都是实测踩出来的）
 
 | 坑 | 现象 | 结论 |
@@ -156,6 +180,7 @@ profile bundle "…" declares no dsh.bundle in its package.json
 | 描述符不是属性 | `@property` 块被校验器报成「syntax 的值无效」等 3 处 | 校验按块类型分流（见上文「格式校验」）；`CSS.supports` 判不了 descriptor |
 | host 半不热更新 | 改 `lib/index.js` 后刷新页面毫无变化 | host 半必须**重启 dsh**；只有浏览器半（`lib/client.js`）走 `dsh-client-hmr` 热更新 |
 | 自定义属性动画 | `--my-color` 在关键帧之间硬跳，不插值 | 这是规范行为：先用 `@property --my-color { syntax: '<color>'; inherits: true; initial-value: … }` 声明类型，浏览器才肯对它做插值 |
+| 跨代插件 | 插件加载失败：`client-modules: require("…") missed the module table` | 那是给**旧一代 DSH** 编译的 bundle：它把平台包硬写进了产物（如 `@deepseek-ai/dsh-client-runtime/client`、`dsh-client-ui-primitives`），而当前代已删掉这些包。只能等插件作者更新；本插件运行时 require 数为 0，不受这类漂移影响 |
 
 ## 仓库结构
 

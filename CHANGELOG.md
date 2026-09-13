@@ -2,6 +2,13 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.1.2 — 兼容性证据与换代门禁
+
+- 新增 [`tests/compat-matrix.mjs`](./tests/compat-matrix.mjs) 与 [`compat.json`](./compat.json)：逐个 DSH 版本断言插件依赖的平台契约（槽位 `settings.general.item` 与 `dsh.client.inject` 的两个 id）。`npm run compat` 本地与 CI 均可复跑；CI 新增该步骤（单档）——**DSH 换代改名时会先在这里红**，而不是等用户看到模块表报错。
+- 真机验证扩到 `0.1.2-rc.1`：独立 `DSH_HOME` 起实例，`/dsh-custom-css/list`、`POST /write`、`GET /read` 全部 200，文件确实落盘；`0.0.1-rc.5` / `0.1.0-rc.7` / `0.1.1-rc.2` 通过接口契约断言。README 新增「兼容性」一节（含验证矩阵与两种失效模式的判别）。
+- README「已知坑」补一条：跨代插件的 `missed the module table` 报错成因与判别方法。
+- **无运行时改动**：`lib/client.js` 与 `lib/index.js` 与 0.1.1 逐字节相同，本版只增加兼容性证据、门禁与文档。
+
 ## 0.1.1 — 发布通道与文档
 
 - README：新增 npm 徽章（version / unpacked size）；安装章节改为「**npm 优先**」，GitHub 装法与 `link:` 开发安装顺延为方式二、方式三；顶部元信息补 npm 包链接。

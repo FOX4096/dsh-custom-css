@@ -1,6 +1,6 @@
 {
   "name": "dsh-custom-css",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH Web GUI 扩展：在 设置 → 通用 的「外观」下方提供一行自定义 CSS 编辑器。",
   "license": "MIT",
   "author": "FOX4096",
@@ -35,6 +35,7 @@
     "tests/**",
     "assets/icon.svg",
     "cordis.patch.yml",
+    "compat.json",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -48,7 +49,8 @@
     "appearance"
   ],
   "scripts": {
-    "test": "node tests/loader-smoke.cjs && node tests/host-api-smoke.mjs"
+    "test": "node tests/loader-smoke.cjs && node tests/host-api-smoke.mjs",
+    "compat": "node tests/compat-matrix.mjs"
   },
   "dsh": {
     "bundle": {
