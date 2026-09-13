@@ -3,20 +3,17 @@ name: Publish
 # 走 npm 的「受信发布者（Trusted Publishing）」：GitHub Actions 用 OIDC 直接向
 # registry 证明身份，不再需要 NPM_TOKEN 之类的长期写权限凭据，也不会弹 2FA。
 #
-# 0.1.0 是 2026-09-13 用本机 `npm publish` + 浏览器 OTP 首发的 —— 受信发布者只能给
-# **已存在**的包配置，所以第一次发布绕不开传统方式。包已经在 registry 上了，tag 触发
-# 随之打开：
+# 0.1.1（2026-09-13）已经走通这条路：推 v* tag → 本文件 → registry 上出现带
+# provenance 证明的版本（在 attestation 里能读到 workflow ref、commit 与 run id）。
+# 0.1.0 是本机 `npm publish` + 浏览器 OTP 发的 —— 受信发布者只能给**已存在**的包
+# 配置，所以第一次发布绕不开传统方式。
 #
+# 用法：
 #   git tag v0.2.0 && git push origin v0.2.0
-#
-# ⚠ 唯一前置：先在 npmjs.com 给这个包配好受信发布者 ——
-#   包页面 → Settings → Trusted Publisher → GitHub Actions：
-#     Organization or user = FOX4096
-#     Repository            = dsh-custom-css
-#     Workflow filename     = publish.yml
-#     Environment           =（留空）
-#   没配好就推 tag，发布步骤会以 401/404 失败。
-# Actions 页面手动 Run workflow 走同一条 OIDC 路径，前置条件相同。
+# 或在 Actions 页面手动 Run workflow（同一条 OIDC 路径）。
+# 前置：npmjs.com 上该包 Settings → Trusted Publisher 已填
+#   Organization or user = FOX4096 / Repository = dsh-custom-css /
+#   Workflow filename = publish.yml / Environment 留空
 on:
   workflow_dispatch:
   push:
@@ -26,7 +23,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # 发布成功后要用同一个 tag 建 Release
       id-token: write # OIDC 凭据：受信发布必需，替代 NPM_TOKEN
     steps:
       - uses: actions/checkout@v4
@@ -48,3 +45,15 @@ jobs:
 
       - name: 发布（带 provenance 签名）
         run: npm publish --provenance --access public
+
+      # 只有 tag 触发才建 Release；幂等 —— 已存在就跳过，不覆盖人工补充的说明
+      - name: 建 GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME 已存在，跳过"
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          fi
