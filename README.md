@@ -8,7 +8,7 @@
   <img src="https://cdn.jsdelivr.net/gh/FOX4096/dsh-custom-css@main/assets/icon.svg" width="88" height="88" alt="dsh-custom-css 图标：深色渐变圆角方块 + 白色花括号与三条声明行"><br /><br />
   <b style="font-size: 1.15em;">设置行里的 CSS 编辑器：写完即生效，样式表就是磁盘上的 .css 文件</b><br /><br />
   <a href="https://github.com/FOX4096/dsh-custom-css/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/FOX4096/dsh-custom-css/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/FOX4096/dsh-custom-css/tags"><img alt="version" src="https://img.shields.io/github/v/tag/FOX4096/dsh-custom-css?label=version&amp;color=3156af"></a>
+  <a href="https://github.com/FOX4096/dsh-custom-css/releases"><img alt="release" src="https://img.shields.io/github/v/release/FOX4096/dsh-custom-css?label=release&amp;color=3156af"></a>
   <a href="https://github.com/FOX4096/dsh-custom-css/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FOX4096/dsh-custom-css?color=3156af"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
