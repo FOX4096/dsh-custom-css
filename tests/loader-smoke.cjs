@@ -385,8 +385,8 @@ async function main() {
   assert.strictEqual(propertyDropdowns.length, 2, 'only declared enum properties get a dropdown');
   assert.ok(renderedClasses.includes('dshCc_propText'), 'a non-enum declaration gets a value field');
 
-  // The add-property control moved above the grid: as a trailing row it fell
-  // outside the panel's scroll window and read like part of the template list.
+  // The add-property control sits below the declarations grid: after reading the
+  // summary of what the rule declares, that is where the next action belongs.
   const treeOrder = [];
   const walkOrder = (node) => {
     if (node === null || typeof node !== 'object') return;
@@ -397,8 +397,8 @@ async function main() {
   walkOrder(panelView);
   assert.ok(
     treeOrder.indexOf('ADD-PROPERTY') !== -1
-      && treeOrder.indexOf('ADD-PROPERTY') < treeOrder.indexOf('dshCc_propGrid'),
-    'the add-property control sits above the declarations',
+      && treeOrder.indexOf('ADD-PROPERTY') > treeOrder.indexOf('dshCc_propGrid'),
+    'the add-property control sits below the declarations',
   );
 
   const addMenu = dropdowns.find(item => item.props.ariaLabel === '添加属性');
