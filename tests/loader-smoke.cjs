@@ -222,6 +222,8 @@ async function main() {
     '.dshCc_prop{align-items:center;display:flex;gap:8px;min-width:0}',
     'overflow-x:hidden',
     '.dshCc_select{box-sizing:border-box;',
+    '.dshCc_addPropWrap{width:100%;max-width:none}',
+    '.dshCc_select{justify-content:space-between}',
     // The shipped settings-row spec: 36px tall, 18px pill, 14px text.
     '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
     'border-radius:18px;background:var(--dsw-alias-bg-module-platform);',
