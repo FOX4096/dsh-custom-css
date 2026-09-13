@@ -224,6 +224,7 @@ async function main() {
     '.dshCc_select{box-sizing:border-box;',
     '.dshCc_addPropWrap{width:100%;max-width:none}',
     '.dshCc_panel>*{flex:none}',
+    '.dshCc_partName{flex:none;padding:1px 7px;border-radius:6px;background:var(--dsw-alias-markdown-tag);',
     '.dshCc_select{justify-content:space-between}',
     // The shipped settings-row spec: 36px tall, 18px pill, 14px text.
     '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
