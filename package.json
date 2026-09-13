@@ -1,10 +1,16 @@
 {
   "name": "dsh-custom-css",
   "version": "0.1.0",
-  "private": true,
   "description": "DSH Web GUI 扩展：在 设置 → 通用 的「外观」下方提供一行自定义 CSS 编辑器。",
   "license": "MIT",
   "author": "FOX4096",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/FOX4096/dsh-custom-css.git"
@@ -26,6 +32,8 @@
   },
   "files": [
     "lib/**/*.js",
+    "tests/**",
+    "assets/icon.svg",
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md",
@@ -39,6 +47,9 @@
     "theme",
     "appearance"
   ],
+  "scripts": {
+    "test": "node tests/loader-smoke.cjs && node tests/host-api-smoke.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
