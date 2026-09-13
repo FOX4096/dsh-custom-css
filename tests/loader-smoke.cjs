@@ -218,6 +218,22 @@ async function main() {
     assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
   }
 
+  // Width contract of the editor container. The shell is a single-column grid and
+  // every row states width:100% plus box-sizing:border-box; without the latter a
+  // row with padding measures wider than the shell and pushes its children out of
+  // the container (measured: body 616px inside a 600px shell).
+  const boundsGuards = [
+    '.dshCc_shell{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr)',
+    '.dshCc_fileBar{box-sizing:border-box;',
+    '.dshCc_main{box-sizing:border-box;',
+    '.dshCc_foot{box-sizing:border-box;',
+    '.dshCc_panel{box-sizing:border-box;',
+    '.dshCc_propGrid{box-sizing:border-box;',
+  ];
+  for (const guard of boundsGuards) {
+    assert.ok(rowSheets[0].textContent.includes(guard), 'explicit box: ' + guard);
+  }
+
   // The row must actually render. The settings shell turns a thrown render into
   // an invisible `data-slot-error` placeholder, so a broken accessor shows up as
   // "the row is missing" — render it here, with the accessors handed over as
