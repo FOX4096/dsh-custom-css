@@ -3,10 +3,10 @@ name: Publish
 # 走 npm 的「受信发布者（Trusted Publishing）」：GitHub Actions 用 OIDC 直接向
 # registry 证明身份，不再需要 NPM_TOKEN 之类的长期写权限凭据，也不会弹 2FA。
 #
-# 0.1.1（2026-09-13）已经走通这条路：推 v* tag → 本文件 → registry 上出现带
-# provenance 证明的版本（在 attestation 里能读到 workflow ref、commit 与 run id）。
-# 0.1.0 是本机 `npm publish` + 浏览器 OTP 发的 —— 受信发布者只能给**已存在**的包
-# 配置，所以第一次发布绕不开传统方式。
+# 0.1.1 起这条路已经走通：推 v* tag → 本文件 → registry 上出现带 provenance 证明的
+# 版本（在 attestation 里能读到 workflow ref、commit 与 run id）。0.1.0 是本机
+# `npm publish` + 浏览器 OTP 发的 —— 受信发布者只能给**已存在**的包配置，所以第一次
+# 发布绕不开传统方式。
 #
 # 用法：
 #   git tag v0.2.0 && git push origin v0.2.0
@@ -23,7 +23,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 发布成功后要用同一个 tag 建 Release
+      contents: write # 发布成功后要用同一个 tag 建 Release 并上传附件
       id-token: write # OIDC 凭据：受信发布必需，替代 NPM_TOKEN
     steps:
       - uses: actions/checkout@v4
@@ -46,14 +46,42 @@ jobs:
       - name: 发布（带 provenance 签名）
         run: npm publish --provenance --access public
 
-      # 只有 tag 触发才建 Release；幂等 —— 已存在就跳过，不覆盖人工补充的说明
-      - name: 建 GitHub Release
+      # 只有 tag 触发才建 Release。发布说明取 CHANGELOG 里对应版本的那一段 ——
+      # 默认的 --generate-notes 只会给一行 "Full Changelog"，等于没有说明。
+      # 幂等：Release 已存在就只打印提示，交给人工维护。
+      - name: 建 GitHub Release（发布说明取自 CHANGELOG）
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            index($0, "## " v " ") == 1 { capture = 1; print; next }
+            capture && index($0, "## ") == 1 { exit }
+            capture { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ -s release-notes.md ]; then
+            echo "发布说明取自 CHANGELOG：$(wc -l < release-notes.md) 行"
+          else
+            echo "CHANGELOG 里没有 $VERSION 的段落"
+          fi
+
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME 已存在，跳过"
+            echo "Release $GITHUB_REF_NAME 已存在，跳过创建"
+          elif [ -s release-notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
           fi
+
+      # 把刚发布到 npm 的那个 tarball 附到 Release 上：registry 与 Release 页
+      # 指向同一个产物（字节一致），下载与校验都不用再去 registry 找。
+      - name: 附上 npm tarball
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          npm pack
+          gh release upload "$GITHUB_REF_NAME" dsh-custom-css-*.tgz --clobber
