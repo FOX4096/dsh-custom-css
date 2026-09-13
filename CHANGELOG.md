@@ -2,6 +2,14 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.1.3 — 样式表开关与文件条
+
+- 编辑器上方新增**文件条**：左侧「CSS 图标 + 文件名 + `CSS` 徽章」，右侧**开关胶囊**与状态点 —— 表头形态参考了 AnacondaKC 那版编辑器的做法，但控件规格与配色仍走本插件的行内控件家族与 DSH 设计令牌。
+- 开关语义是**临时停用当前样式表**：样式不再注入页面，而文件内容、当前选择、校验状态全都不动。状态写进 `active.json` 的 `disabled` 列表，所以多个浏览器与重启后表现一致。
+- host 半新增 `POST /toggle {name, enabled}`，`GET /list` 增加 `disabled` 字段（旧的 `{"active": …}` 文件仍可读，缺失即视为全部启用）。旧 host 半（尚未重启 dsh）会让开关回退到本浏览器 `localStorage`，开关因此不会失效。
+- 冒烟测试补齐：浏览器半覆盖「渲染开关 → 关闭后样式标签被移除 → 恢复后样式回到页面 → host 无该路由时开关仍然可用并落到 localStorage」；host 半覆盖 `/toggle` 的持久化、遍历名拒绝、缺失文件 404、非布尔值拒绝。
+- **`lib/` 本版有实质改动**（0.1.1 / 0.1.2 是纯文档与门禁版）。
+
 ## 0.1.2 — 兼容性证据与换代门禁
 
 - 新增 [`tests/compat-matrix.mjs`](./tests/compat-matrix.mjs) 与 [`compat.json`](./compat.json)：逐个 DSH 版本断言插件依赖的平台契约（槽位 `settings.general.item` 与 `dsh.client.inject` 的两个 id）。`npm run compat` 本地与 CI 均可复跑；CI 新增该步骤（单档）——**DSH 换代改名时会先在这里红**，而不是等用户看到模块表报错。

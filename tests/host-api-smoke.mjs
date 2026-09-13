@@ -117,6 +117,31 @@ const activeRaw = await readFile(path.join(stylesDir, 'active.json'), 'utf8');
 assert.strictEqual(JSON.parse(activeRaw).active, 'theme.css', 'the active sheet is recorded');
 assert.ok(listed.payload.files.every(file => file.name.endsWith('.css')), 'active.json is never listed as a sheet');
 
+// --- the per-sheet switch ---------------------------------------------------
+const off = await call('POST', '/dsh-custom-css/toggle', { name: 'theme.css', enabled: false });
+assert.strictEqual(off.status, 200, 'switching a sheet off is accepted');
+assert.deepStrictEqual(off.payload.disabled, ['theme.css'], 'the switch records the sheet as off');
+
+const listedOff = await call('GET', '/dsh-custom-css/list');
+assert.deepStrictEqual(listedOff.payload.disabled, ['theme.css'], 'the listing carries the switch state');
+assert.deepStrictEqual(listedOff.payload.files.map(file => file.name), ['theme.css'], 'a switched-off sheet is still listed');
+
+const keptRaw = JSON.parse(await readFile(path.join(stylesDir, 'active.json'), 'utf8'));
+assert.strictEqual(keptRaw.active, 'theme.css', 'the switch never disturbs the active sheet');
+assert.deepStrictEqual(keptRaw.disabled, ['theme.css'], 'the switch is persisted beside it');
+
+const on = await call('POST', '/dsh-custom-css/toggle', { name: 'theme.css', enabled: true });
+assert.deepStrictEqual(on.payload.disabled, [], 'switching back on clears the record');
+
+const refusedToggle = await call('POST', '/dsh-custom-css/toggle', { name: '../evil.css', enabled: false });
+assert.strictEqual(refusedToggle.status, 400, 'the switch refuses a traversal name');
+
+const absentToggle = await call('POST', '/dsh-custom-css/toggle', { name: 'ghost.css', enabled: false });
+assert.strictEqual(absentToggle.status, 404, 'switching a sheet that does not exist is a 404');
+
+const badEnabled = await call('POST', '/dsh-custom-css/toggle', { name: 'theme.css', enabled: 'no' });
+assert.strictEqual(badEnabled.status, 400, 'a non-boolean switch value is refused');
+
 // --- conflict and validation ------------------------------------------------
 const conflict = await call('POST', '/dsh-custom-css/create', { name: 'theme.css' });
 assert.strictEqual(conflict.status, 409, 'creating an existing sheet is a conflict');
@@ -183,4 +208,4 @@ await secondRoute.handler(req, { writeHead(status) { captured.status = status; }
 assert.strictEqual(captured.status, 503, 'without the fence the route fails closed');
 
 await rm(home, { recursive: true, force: true });
-console.log('host-api-smoke: OK — file API, validation, traversal refusal, and fail-closed fence verified');
+console.log('host-api-smoke: OK — file API, per-sheet switch, validation, traversal refusal, and fail-closed fence verified');

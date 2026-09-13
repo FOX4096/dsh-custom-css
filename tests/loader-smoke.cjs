@@ -156,6 +156,7 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
     mod,
     loaded,
     styleTags,
+    storage,
     calls,
     waits,
     registrations,
@@ -561,7 +562,112 @@ async function main() {
   });
   assert.strictEqual(offerOf(), undefined, 'deleting does not raise the completion list');
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns verified');
+  // --- the sheet switch -----------------------------------------------------
+  // The file bar carries a pill switch: turning a sheet off must drop its styles
+  // from the page while leaving its text on the Host, and the flip must be
+  // written back. The double echoes the switch route so that write path runs.
+  const toggles = [];
+  const switched = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({
+          ok: true,
+          dir: '/tmp/custom-css',
+          files: [{ name: 'custom.css', bytes: 20, mtime: 1 }],
+          active: 'custom.css',
+          disabled: [],
+        });
+      }
+      if (url.includes('/read')) {
+        return jsonResponse({ ok: true, name: 'custom.css', css: HOST_SHEET });
+      }
+      if (url.endsWith('/toggle')) {
+        const body = JSON.parse(init.body);
+        toggles.push(body);
+        return jsonResponse({ ok: true, name: body.name, enabled: body.enabled, disabled: body.enabled ? [] : [body.name] });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  assert.ok(switched.userStyle(), 'the sheet is applied while the switch is on');
+
+  const findSwitch = (node) => {
+    if (node === null || typeof node !== 'object') return null;
+    if (node.type === 'button' && node.props?.role === 'switch') return node;
+    for (const child of node.children ?? []) {
+      const found = findSwitch(child);
+      if (found !== null) return found;
+    }
+    return null;
+  };
+
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const barView = switched.registrations[0].component();
+  const switchButton = findSwitch(barView);
+  assert.ok(switchButton !== null, 'the file bar renders a switch');
+  assert.ok(renderedClasses.includes('dshCc_fileBar'), 'the file bar renders above the editor');
+  assert.ok(renderedText.includes('custom.css'), 'the file bar names the sheet');
+  assert.ok(renderedText.includes('CSS'), 'the file bar badges the language');
+  assert.strictEqual(switchButton.props['aria-checked'], true, 'the switch starts on');
+  assert.ok(String(switchButton.props.className).includes('dshCc_switchOn'), 'the on state is styled');
+
+  switchButton.props.onClick();
+  await settle();
+  assert.strictEqual(toggles.length, 1, 'the switch writes to the Host');
+  assert.deepStrictEqual(toggles[0], { name: 'custom.css', enabled: false }, 'the Host learns the sheet is off');
+  assert.strictEqual(switched.userStyle(), undefined, 'a switched-off sheet contributes no styles');
+
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const offView = switched.registrations[0].component();
+  const offSwitch = findSwitch(offView);
+  assert.strictEqual(offSwitch.props['aria-checked'], false, 'the switch reports the off state');
+  assert.ok(!String(offSwitch.props.className).includes('dshCc_switchOn'), 'the off state drops the on styling');
+  assert.ok(renderedText.includes('已关闭'), 'the switch labels the off state');
+  assert.strictEqual(switched.userStyle(), undefined, 'the style tag stays out while off');
+
+  offSwitch.props.onClick();
+  await settle();
+  assert.deepStrictEqual(toggles[1], { name: 'custom.css', enabled: true }, 'switching back on writes again');
+  assert.ok(switched.userStyle(), 'switching back on re-applies the sheet');
+  assert.strictEqual(switched.userStyle().textContent, HOST_SHEET, 'the sheet text was never touched');
+
+  // A Host half that predates the switch route must not break the row: the
+  // toggle falls back to this browser instead of raising an error.
+  const legacyToggles = [];
+  const legacy = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({
+          ok: true,
+          dir: '/tmp/custom-css',
+          files: [{ name: 'custom.css', bytes: 20, mtime: 1 }],
+          active: 'custom.css',
+        });
+      }
+      if (url.includes('/read')) {
+        return jsonResponse({ ok: true, name: 'custom.css', css: HOST_SHEET });
+      }
+      if (url.endsWith('/toggle')) {
+        legacyToggles.push(JSON.parse(init.body));
+        return jsonResponse({ ok: false, error: 'not-found' }, 404);
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  const legacyView = legacy.registrations[0].component();
+  findSwitch(legacyView).props.onClick();
+  await settle();
+  assert.strictEqual(legacyToggles.length, 1, 'the switch still tries the Host');
+  assert.strictEqual(legacy.userStyle(), undefined, 'a route-less Host still honours the switch');
+  const legacySnapshot = JSON.parse(legacy.storage.get('dsh-custom-css:disabled') ?? 'null');
+  assert.deepStrictEqual(legacySnapshot, ['custom.css'], 'the fallback records the switch for this browser');
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch verified');
 }
 
 main().catch((error) => {
