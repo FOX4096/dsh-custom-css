@@ -336,6 +336,22 @@ async function main() {
   // body row rather than a separate side column.
   assert.ok(renderedClasses.includes('dshCc_propGrid'), 'declarations lay out as a grid');
   assert.ok(renderedClasses.includes('dshCc_tplGrid'), 'templates lay out as a grid');
+
+  // The selector field and its × are one control: the button sits inside the
+  // field's own box, so the field spans the panel like every other control.
+  assert.ok(renderedClasses.includes('dshCc_panelField'), 'the selector renders as a single field');
+  const fieldNode = (function find(node) {
+    if (node === null || typeof node !== 'object') return null;
+    if (String(node.props?.className ?? '') === 'dshCc_panelField') return node;
+    for (const child of node.children ?? []) {
+      const hit = find(child);
+      if (hit !== null) return hit;
+    }
+    return null;
+  })(withPanel);
+  const fieldChildren = (fieldNode.children ?? []).map(child => String(child?.props?.className ?? ''));
+  assert.ok(fieldChildren.includes('dshCc_panelName'), 'the selector input is inside the field');
+  assert.ok(fieldChildren.includes('dshCc_panelClose'), 'the close control is inside the field too');
   const bodyNode = (function find(node) {
     if (node === null || typeof node !== 'object') return null;
     if (String(node.props?.className ?? '') === 'dshCc_main') return node;
