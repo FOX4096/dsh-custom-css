@@ -205,15 +205,27 @@ async function main() {
   assert.strictEqual(rowSheets.length, 1, 'the row stylesheet is injected exactly once');
   assert.ok(rowSheets[0].textContent.includes('--dsw-alias-label-primary'), 'row styles consume DSH tokens');
 
+  // A stylesheet with an unbalanced brace is dropped from that point on by the
+  // browser while still looking fine as text — an orphaned declaration block from
+  // a deleted selector did exactly that once. Count the braces too.
+  const sheetText = rowSheets[0].textContent;
+  const opens = (sheetText.match(/\{/g) ?? []).length;
+  const closes = (sheetText.match(/\}/g) ?? []).length;
+  assert.strictEqual(opens, closes, 'the injected stylesheet has balanced braces');
+
   // Overflow guards. Grid and flex items default to min-width:auto, and a
   // <select> reports its widest option as max-content, so one long option label
   // used to push the panel's cells out of the container. These rules are the fix
   // and are asserted here so a restyle cannot quietly drop them.
   for (const guard of [
     '.dshCc_propGrid>*{min-width:0}',
-    '.dshCc_prop{align-items:center;display:flex;gap:6px;min-width:0}',
+    '.dshCc_prop{align-items:center;display:flex;gap:8px;min-width:0}',
     'overflow-x:hidden',
     '.dshCc_select{box-sizing:border-box;',
+    // The shipped settings-row spec: 36px tall, 18px pill, 14px text.
+    '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
+    'border-radius:18px;background:var(--dsw-alias-bg-module-platform);',
+    '.dshCc_propText{flex:1;min-width:0;max-width:100%;box-sizing:border-box;height:36px;padding:0 14px;',
   ]) {
     assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
   }
@@ -840,9 +852,14 @@ async function main() {
   assert.strictEqual(flexBasis.props.value, '100%', 'the field values come from the declaration');
   assert.strictEqual(
     flexBasis.props.placeholder,
-    '基准尺寸 · auto / 0 / 240px',
-    'each field carries its own hint',
+    'auto / 0 / 240px',
+    'the placeholder is the value hint',
   );
+  assert.ok(
+    renderedText.includes('放大') && renderedText.includes('基准尺寸'),
+    'each field carries its own name as a label',
+  );
+  assert.ok(renderedClasses.includes('dshCc_partCell'), 'part fields are wrapped in label cells');
 
   const marginInputs = partInputs.filter(input => String(input.props['aria-label'] ?? '').startsWith('外边距 · '));
   assert.strictEqual(marginInputs.length, 4, 'a four-sided shorthand expands to four fields');
