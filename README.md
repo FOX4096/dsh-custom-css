@@ -1,5 +1,8 @@
+<!-- 这里走 jsDelivr 镜像而不是仓库内相对路径：本机网络把 raw.githubusercontent.com
+     解析到非公网地址，GitHub 对仓库内图片用的正是那个域名，相对路径的图在本地打不开。
+     图标本体仍在 assets/ 里，两处内容一致。 -->
 <p align="center">
-  <img src="assets/icon.svg" width="96" height="96" alt="dsh-custom-css 图标：圆角方块上是渐变底色与一对花括号 + 三条声明行">
+  <img src="https://cdn.jsdelivr.net/gh/FOX4096/dsh-custom-css@main/assets/icon.svg" width="96" height="96" alt="dsh-custom-css 图标：圆角方块上是渐变底色与一对花括号 + 三条声明行">
 </p>
 
 # dsh-custom-css
