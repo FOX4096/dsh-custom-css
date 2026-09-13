@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 本插件没有构建步骤、也没有运行时依赖：lib/*.js 就是产物，
+# 所以 CI 只做「语法自检 + 两套冒烟测试」，几秒跑完。
+jobs:
+  test:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # plugin 支持 Node ≥ 20（DSH 自身的要求）
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 语法自检
+        run: |
+          node --check lib/client.js
+          node --check lib/index.js
+          node --check tests/loader-smoke.cjs
+          node --check tests/host-api-smoke.mjs
+
+      - name: host 侧文件接口冒烟测试
+        run: node tests/host-api-smoke.mjs
+
+      - name: 浏览器半冒烟测试（含校验器回归）
+        run: node tests/loader-smoke.cjs

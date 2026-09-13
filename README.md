@@ -1,11 +1,22 @@
-<!-- 这里走 jsDelivr 镜像而不是仓库内相对路径：本机网络把 raw.githubusercontent.com
-     解析到非公网地址，GitHub 对仓库内图片用的正是那个域名，相对路径的图在本地打不开。
-     图标本体仍在 assets/ 里，两处内容一致。 -->
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/FOX4096/dsh-custom-css@main/assets/icon.svg" width="96" height="96" alt="dsh-custom-css 图标：圆角方块上是渐变底色与一对花括号 + 三条声明行">
-</p>
-
 # dsh-custom-css
+
+<!-- Hero：徽章与特性卡片的色号取自图标渐变的四个停靠点（绿 #257b56 / 青 #257083 / 蓝 #3156af / 紫 #6048bb）。
+     图标走 jsDelivr 镜像而不是仓库内相对路径 —— 本机网络把 raw.githubusercontent.com
+     解析到非公网地址，而 GitHub 渲染仓库内图片用的正是该域名，相对路径的图在本地打不开；
+     图标本体仍在 assets/ 下，两处内容一致。 -->
+<div align="center">
+  <img src="https://cdn.jsdelivr.net/gh/FOX4096/dsh-custom-css@main/assets/icon.svg" width="88" height="88" alt="dsh-custom-css 图标：深色渐变圆角方块 + 白色花括号与三条声明行"><br /><br />
+  <b style="font-size: 1.15em;">设置行里的 CSS 编辑器：写完即生效，样式表就是磁盘上的 .css 文件</b><br /><br />
+  <a href="https://github.com/FOX4096/dsh-custom-css/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/FOX4096/dsh-custom-css/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/FOX4096/dsh-custom-css/tags"><img alt="version" src="https://img.shields.io/github/v/tag/FOX4096/dsh-custom-css?label=version&amp;color=3156af"></a>
+  <a href="https://github.com/FOX4096/dsh-custom-css/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FOX4096/dsh-custom-css?color=3156af"></a>
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.5-rc.1+（已在 0.1.5-rc.1 上验证）" src="https://img.shields.io/badge/DSH-0.1.5--rc.1%2B_%28verified_0.1.5--rc.1%29-4d6bfe"></a><br /><br />
+  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-3156af"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-6048bb"><br /><br />
+  <b>文件下拉 · 打开文件 · 导入 · 导出 · 重置</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
+  编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验。
+</div>
 
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
 
@@ -92,9 +103,11 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点，并且**必须
 
 ### 方式一：从 GitHub 安装（推荐）
 
+**前置**：DSH `0.1.5-rc.1+`（本版本已在 **0.1.5-rc.1** 上真机验证），Node.js ≥ 20、pnpm ≥ 10。
+
 ```bash
 # 1) 把插件装进 profile（转发给 profile 目录里的 pnpm）
-dsh plugin --profile web add github:<owner>/dsh-custom-css
+dsh plugin --profile web add github:FOX4096/dsh-custom-css
 
 # 2) 让它真的被加载：把包名加进 profiles/web/package.json 的 dsh.profile.bundles
 #    "dsh": { "profile": { "bundles": [ ..., "dsh-custom-css" ] } }
@@ -143,6 +156,8 @@ dsh-custom-css/
 ├── tests/
 │   ├── loader-smoke.cjs    # 假 host 里真跑 client.js（含校验、补全、规则面板）
 │   └── host-api-smoke.mjs  # 假 webServer 驱动 host 路由（含穿越拒绝、fail-closed）
+├── .github/
+│   └── workflows/ci.yml    # CI：Node 20/22 × 语法自检 + 两套冒烟测试（无依赖，几秒跑完）
 ├── assets/
 │   ├── icon.svg            # 图标（矢量，README 顶部用的就是它）
 │   └── icon-512.png        # 同一图标 512px，带透明通道，可用于仓库头像 / 社交预览
@@ -165,6 +180,7 @@ dsh-custom-css/
 - `node --check lib/client.js`：语法自检（浏览器半是 `.js` 但按模块工厂包了一层，**不要**当 ESM 引入）。
 - `node tests/loader-smoke.cjs`：用假 host 真实执行 `lib/client.js`，校验模块形状、槽注册参数、host 支撑的启动应用、离线降级、首次运行从 `localStorage` 播种默认文件，以及**组件真能渲染**。其中包含校验器的两类回归：合法的 `@property` 块必须**零报错**，非法描述符（`syntax: <color>`、`inherits: maybe`）必须**报出来**。补全、规则面板、属性下拉也各有断言。
 - `node tests/host-api-smoke.mjs`：用假 `webServer` 驱动 host 路由，校验文件 API、目录簿记、重名冲突、**路径穿越与非法文件名拒绝**、`/open` 的启动器注入、以及无围栏时的 fail-closed。
+- **CI**（[`.github/workflows/ci.yml`](./.github/workflows/ci.yml)）：Node 20 / 22 两档，跑上面四条 `node --check` 加两套冒烟测试。插件没有构建步骤也没有运行时依赖，所以 CI 里不装任何东西，几秒结束 —— 顶部那枚 CI 徽章就是它。
 
 ## 许可
 
