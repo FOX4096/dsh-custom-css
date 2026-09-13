@@ -375,6 +375,50 @@ async function main() {
     'unset properties live behind the add-property menu',
   );
 
+  // The add-property menu carries a grouped dictionary: enum properties get a
+  // Chinese-valued dropdown, length/colour/shadow properties get a free field.
+  const addMenu = selects.find(select => select.props['aria-label'] === '添加属性');
+  assert.ok(addMenu !== undefined, 'the add-property menu renders');
+  const menuGroups = (addMenu.children ?? []).filter(child => child?.type === 'optgroup');
+  assert.ok(menuGroups.length >= 6, 'the add-property menu is grouped, got ' + menuGroups.length);
+  const menuProps = menuGroups.flatMap(group => (group.children ?? []).map(option => option.props.value));
+  assert.ok(
+    !menuProps.includes('gap'),
+    'a property the rule already declares (gap) is not offered again',
+  );
+  assert.ok(menuProps.includes('margin-top'), 'the dictionary offers margin-top');
+  assert.ok(menuProps.includes('grid-template-columns'), 'the dictionary offers grid properties');
+  assert.ok(menuProps.length >= 90, 'the dictionary is broad, got ' + menuProps.length);
+  assert.ok(!menuProps.includes('display'), 'nor is display, also already declared');
+
+  // Adding a free property writes its seed, and the panel then renders it as a
+  // labelled text field whose placeholder is the dictionary hint.
+  addMenu.props.onChange({ target: { value: 'margin-top' } });
+  assert.ok(
+    host.userStyle().textContent.includes('margin-top: 0'),
+    'a free property is added with its seed value',
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const withFree = renderRow();
+  const freeInputs = [];
+  const collectInputs = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_propText')) {
+      freeInputs.push(node);
+    }
+    for (const child of node.children ?? []) collectInputs(child);
+  };
+  collectInputs(withFree);
+  const marginInput = freeInputs.find(input => input.props['aria-label'] === '上外边距');
+  assert.ok(marginInput !== undefined, 'a free property carries its Chinese name');
+  assert.strictEqual(
+    marginInput.props.placeholder,
+    '0 / 8px / auto',
+    'the dictionary hint becomes the placeholder',
+  );
+
   const displaySelect = propertySelects.find(select => select.props['aria-label'] === '显示');
   assert.ok(displaySelect !== undefined, 'the display dropdown renders');
   displaySelect.props.onChange({ target: { value: 'flex' } });

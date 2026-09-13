@@ -17,7 +17,7 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
   <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.2 与 0.1.5 已真机验证，接口契约断言覆盖到 0.0.1-rc.5" src="https://img.shields.io/badge/DSH-0.1.2_%7E_0.1.5_%28runtime_verified%29-4d6bfe"></a><br /><br />
-  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-3156af"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-6048bb"><br /><br />
+  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-3156af"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-6048bb"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257b56"><br /><br />
   <b>文件下拉 · 打开文件 · 导入 · 导出 · 重置</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
   编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验。
 </div>
@@ -47,7 +47,8 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
   - 中间是**这条规则已有属性的摘要**（不是一张空白表单）：
     - 解析规则块里真实存在的声明并逐条列出。枚举型属性显示**中文名 + 中文值下拉**（`flex-direction: row` → 「主轴方向：水平排列」）；非枚举型（`gap`、`margin-top`、`min-width`…）显示属性名 + **值输入框**，可以直接改。
     - 下拉里可选「（删除此项）」移除该声明；手工写的、不在选项里的值会被保留为当前选项，不会被静默改掉。
-    - **未设置的属性不占行** —— 它们收在最下面的「**＋ 添加属性…**」菜单里（只列当前还没设的），选中即以该属性的第一个选项写入。
+    - **未设置的属性不占行** —— 它们收在最下面的「**＋ 添加属性…**」菜单里（只列当前还没设的），菜单按用途分成 **布局 / 弹性与对齐 / 网格 / 尺寸 / 间距 / 文本 / 背景 / 描边与圆角 / 效果与动效 / 交互** 十组（整组都被设完时该组自动隐藏）。
+    - **属性字典 112 条，两种形态**：枚举型（`display`、`position`、`justify-content`…）给**中文值下拉**，写入的是 CSS 值本身；长度 / 颜色 / 阴影 / 函数型（`gap`、`margin-top`、`font-size`、`box-shadow`、`grid-template-columns`…）给**中文标签 + 自由输入框**，选中即以一个可用的种子值写入（如 `gap: 8px`），输入框的占位文本就是该属性的取值提示（如 `0 / 8px / auto`）。字典里没有的属性也不会丢：仍然按原属性名给一个自由输入框。
     - 规则里一条声明都没有时，面板显示「这条规则还没有声明」。
   - 面板**排在代码下方**（占满容器宽度），声明与模板都按**自适应网格**铺开：声明 `repeat(auto-fill, minmax(240px, 1fr))`、模板 `minmax(104px, 1fr)`；一条规则声明很多时面板自身限高 `260px` 内滚动，不会把整个设置行撑长。
   - 最下面是**声明模板**：容器 / 横向排列 / 居中 / 网格 / 文本 / 背景 / 描边 / 阴影 / 尺寸 / 间距 / 截断 / 滚动 / 吸顶 / 隐藏 —— 点一下按 2 空格缩进追加到块内（已有内容保留）。
