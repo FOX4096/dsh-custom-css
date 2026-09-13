@@ -33,4 +33,8 @@ host 侧
 
 文档
 
-- README 补齐：从 GitHub 安装（`dsh plugin --profile web add` + `dsh.profile.bundles` 两步）、本机 `link:` 安装、仓库结构、以及一节**已知坑**（注入顺序与 `!important`、类名哈希、`:has()` 不可嵌套、描述符不是属性、host 半需重启、自定义属性动画需 `@property`）。
+- README 补齐：从 npm / GitHub 安装（`dsh plugin --profile web add` + `dsh.profile.bundles` 两步）、本机 `link:` 安装、仓库结构、以及一节**已知坑**（注入顺序与 `!important`、类名哈希、`:has()` 不可嵌套、描述符不是属性、host 半需重启、自定义属性动画需 `@property`）。
+
+发布
+
+- `0.1.0` 于 2026-09-13 发布到 npm（`npm i dsh-custom-css` / `registry.npmjs.org`，10 个文件，带 registry 签名）。首次发布走本机 `npm publish` + 浏览器 OTP；此后由 `.github/workflows/publish.yml` 以受信发布（OIDC + provenance）完成，不需要长期令牌，也不会再弹动态码。

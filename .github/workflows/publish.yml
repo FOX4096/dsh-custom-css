@@ -3,18 +3,24 @@ name: Publish
 # 走 npm 的「受信发布者（Trusted Publishing）」：GitHub Actions 用 OIDC 直接向
 # registry 证明身份，不再需要 NPM_TOKEN 之类的长期写权限凭据，也不会弹 2FA。
 #
-# 为什么默认只留手动触发：受信发布者要在 npmjs.com 上给**已存在的包**配置
-# （Settings → Trusted Publisher，填本仓库 + 本文件名），所以第一次发布仍然得用
-# 传统方式（本机 `npm publish` + 一次 OTP）。配好之后把下面的 tag 触发打开即可：
+# 0.1.0 是 2026-09-13 用本机 `npm publish` + 浏览器 OTP 首发的 —— 受信发布者只能给
+# **已存在**的包配置，所以第一次发布绕不开传统方式。包已经在 registry 上了，tag 触发
+# 随之打开：
 #
-#   push:
-#     tags: ['v*']
+#   git tag v0.2.0 && git push origin v0.2.0
 #
-# 触发方式保持不变时，也可以在 GitHub 的 Actions 页面手动 Run workflow。
+# ⚠ 唯一前置：先在 npmjs.com 给这个包配好受信发布者 ——
+#   包页面 → Settings → Trusted Publisher → GitHub Actions：
+#     Organization or user = FOX4096
+#     Repository            = dsh-custom-css
+#     Workflow filename     = publish.yml
+#     Environment           =（留空）
+#   没配好就推 tag，发布步骤会以 401/404 失败。
+# Actions 页面手动 Run workflow 走同一条 OIDC 路径，前置条件相同。
 on:
   workflow_dispatch:
-  # push:
-  #   tags: ['v*']
+  push:
+    tags: ['v*']
 
 jobs:
   publish:

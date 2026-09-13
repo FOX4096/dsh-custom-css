@@ -3,12 +3,16 @@
 <!-- Hero：徽章与特性卡片的色号取自图标渐变的四个停靠点（绿 #257b56 / 青 #257083 / 蓝 #3156af / 紫 #6048bb）。
      图标走 jsDelivr 镜像而不是仓库内相对路径 —— 本机网络把 raw.githubusercontent.com
      解析到非公网地址，而 GitHub 渲染仓库内图片用的正是该域名，相对路径的图在本地打不开；
-     图标本体仍在 assets/ 下，两处内容一致。 -->
+     图标本体仍在 assets/ 下，两处内容一致。
+     下载量徽章暂缺：npm 的 downloads API 对刚发布的包要等约一天才有数据
+     （实测此刻返回 404），届时可补 https://img.shields.io/npm/dm/dsh-custom-css 。 -->
 <div align="center">
   <img src="https://cdn.jsdelivr.net/gh/FOX4096/dsh-custom-css@main/assets/icon.svg" width="88" height="88" alt="dsh-custom-css 图标：深色渐变圆角方块 + 白色花括号与三条声明行"><br /><br />
   <b style="font-size: 1.15em;">设置行里的 CSS 编辑器：写完即生效，样式表就是磁盘上的 .css 文件</b><br /><br />
   <a href="https://github.com/FOX4096/dsh-custom-css/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/FOX4096/dsh-custom-css/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://github.com/FOX4096/dsh-custom-css/releases"><img alt="release" src="https://img.shields.io/github/v/release/FOX4096/dsh-custom-css?label=release&amp;color=3156af"></a>
+  <a href="https://www.npmjs.com/package/dsh-custom-css"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-custom-css?color=3156af"></a>
+  <a href="https://www.npmjs.com/package/dsh-custom-css"><img alt="npm unpacked size" src="https://img.shields.io/npm/unpacked-size/dsh-custom-css?color=6048bb"></a>
   <a href="https://github.com/FOX4096/dsh-custom-css/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FOX4096/dsh-custom-css?color=3156af"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
@@ -20,6 +24,7 @@
 
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
 
+- npm：[`dsh-custom-css`](https://www.npmjs.com/package/dsh-custom-css)（当前 `0.1.0`，2026-09-13 首发）
 - 许可：MIT
 - 形态：DSH profile 插件（host 半 + 浏览器半），无构建步骤，`lib/*.js` 即产物
 - 测试：`node tests/loader-smoke.cjs` / `node tests/host-api-smoke.mjs`
@@ -101,19 +106,27 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点，并且**必须
 
 ## 安装
 
-### 方式一：从 GitHub 安装（推荐）
+### 方式一：从 npm 安装（推荐）
 
 **前置**：DSH `0.1.5-rc.1+`（本版本已在 **0.1.5-rc.1** 上真机验证），Node.js ≥ 20、pnpm ≥ 10。
 
 ```bash
-# 1) 把插件装进 profile（转发给 profile 目录里的 pnpm）
-dsh plugin --profile web add github:FOX4096/dsh-custom-css
+# 1) 把插件装进 profile（dsh plugin 会把参数转发给 profile 目录里的 pnpm）
+dsh plugin --profile web add dsh-custom-css
 
 # 2) 让它真的被加载：把包名加进 profiles/web/package.json 的 dsh.profile.bundles
 #    "dsh": { "profile": { "bundles": [ ..., "dsh-custom-css" ] } }
 
 # 3) 重启 GUI（重开会话不够，进程内模块缓存是旧的）
 ```
+
+### 方式二：从 GitHub 安装（跟 main 分支）
+
+```bash
+dsh plugin --profile web add github:FOX4096/dsh-custom-css
+```
+
+方式一里第 2、3 步照旧（`bundles` 里写同一个包名、重启 GUI）。
 
 **第 1 步和第 2 步缺一不可**：只装依赖不列进 `bundles`，包根本不会被 loader 载入；只写 `bundles` 没装依赖，启动时直接失败。反过来，列进 `bundles` 的包**必须自带 `dsh.bundle.patch`** —— `dsh-app-boot` 会为每个包读 `package.json` 的 `dsh.bundle.patch`，缺失即启动失败：
 
@@ -123,7 +136,7 @@ profile bundle "…" declares no dsh.bundle in its package.json
 
 本仓库的 `cordis.patch.yml` 用 `- insert:` 声明自己的 loader 条目；改写它（或 `dsh.bundle` 字段）会直接让 DSH 起不来。改完用 `dsh web --dump-default-config` 复查：该命令只解析不启动服务器，输出里应出现 `# == dsh-custom-css` 段。
 
-### 方式二：本机开发安装（`link:`，改完即见）
+### 方式三：本机开发安装（`link:`，改完即见）
 
 1. `package.json` 的 `dependencies`：
    `"dsh-custom-css": "link:<本仓库绝对路径>"`
