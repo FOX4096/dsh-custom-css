@@ -783,7 +783,85 @@ async function main() {
   const legacySnapshot = JSON.parse(legacy.storage.get('dsh-custom-css:disabled') ?? 'null');
   assert.deepStrictEqual(legacySnapshot, ['custom.css'], 'the fallback records the switch for this browser');
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch verified');
+  // --- shorthand parts ------------------------------------------------------
+  // A space-separated shorthand gets one field per component, each carrying its
+  // own hint; the value written back is recombined, and collapsed back to the
+  // shortest equivalent form so editing one part keeps the sheet tidy.
+  const partsSheet = '.parts{flex: 1 0 100%;gap: 8px;margin: 8px 12px;border-radius: 8px / 12px}';
+  textarea.props.onChange({
+    target: { value: partsSheet, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const partsView = renderRow();
+  findNode(partsView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const partsPanel = renderRow();
+  assert.ok(renderedClasses.includes('dshCc_partRow'), 'a shorthand renders a row of fields');
+
+  const partInputs = [];
+  const collectPartInputs = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_propText')) {
+      partInputs.push(node);
+    }
+    for (const child of node.children ?? []) collectPartInputs(child);
+  };
+  collectPartInputs(partsPanel);
+
+  const flexBasis = partInputs.find(input => input.props['aria-label'] === '弹性简写 · 基准尺寸');
+  assert.ok(flexBasis !== undefined, 'flex exposes one field per component');
+  assert.strictEqual(flexBasis.props.value, '100%', 'the field values come from the declaration');
+  assert.strictEqual(
+    flexBasis.props.placeholder,
+    '基准尺寸 · auto / 0 / 240px',
+    'each field carries its own hint',
+  );
+
+  const marginInputs = partInputs.filter(input => String(input.props['aria-label'] ?? '').startsWith('外边距 · '));
+  assert.strictEqual(marginInputs.length, 4, 'a four-sided shorthand expands to four fields');
+  assert.deepStrictEqual(
+    marginInputs.map(input => input.props.value),
+    ['8px', '12px', '8px', '12px'],
+    'margin: 8px 12px expands the way CSS defines it',
+  );
+
+  const gapInputs = partInputs.filter(input => String(input.props['aria-label'] ?? '').startsWith('间距 · '));
+  assert.strictEqual(gapInputs.length, 2, 'gap exposes row and column');
+  assert.deepStrictEqual(gapInputs.map(input => input.props.value), ['8px', '8px'], 'gap: 8px fills both');
+
+  const radiusInputs = partInputs.filter(input => String(input.props['aria-label'] ?? '').startsWith('圆角 · '));
+  assert.strictEqual(radiusInputs.length, 0, 'the slash form of border-radius keeps the free field');
+
+  flexBasis.props.onChange({ target: { value: 'auto' } });
+  assert.ok(
+    host.userStyle().textContent.includes('flex: 1 0 auto'),
+    'editing one part recombines the declaration',
+  );
+
+  gapInputs[1].props.onChange({ target: { value: '12px' } });
+  assert.ok(
+    host.userStyle().textContent.includes('gap: 8px 12px'),
+    'a differing part is written as two tokens',
+  );
+
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const partsAgain = renderRow();
+  collectPartInputs(partsAgain);
+  const gapAgain = partInputs.filter(input => String(input.props['aria-label'] ?? '').startsWith('间距 · ')).slice(-2);
+  gapAgain[1].props.onChange({ target: { value: '8px' } });
+  assert.ok(
+    host.userStyle().textContent.includes('gap: 8px;'),
+    'matching parts collapse back to the shortest form',
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts verified');
 }
 
 main().catch((error) => {
