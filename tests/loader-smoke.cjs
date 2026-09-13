@@ -213,7 +213,7 @@ async function main() {
     '.dshCc_propGrid>*{min-width:0}',
     '.dshCc_prop{align-items:center;display:flex;gap:6px;min-width:0}',
     'overflow-x:hidden',
-    '.dshCc_propValue{flex:1;min-width:0;max-width:100%;',
+    '.dshCc_select{box-sizing:border-box;',
   ]) {
     assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
   }
@@ -358,30 +358,41 @@ async function main() {
   assert.ok(renderedText.includes('显示'), 'the panel lists Chinese property names');
   assert.ok(renderedText.includes('主轴方向'), 'property values carry Chinese labels');
 
-  const selects = [];
-  const collectSelects = (node) => {
+  // Panel dropdowns are own-element menus — a native <select> popup cannot be
+  // styled — so the harness reads each Dropdown element by its props instead.
+  const dropdowns = [];
+  const collectDropdowns = (node) => {
     if (node === null || typeof node !== 'object') return;
-    if (node.type === 'select') selects.push(node);
-    for (const child of node.children ?? []) collectSelects(child);
+    if (typeof node.type === 'function' && Array.isArray(node.props?.items)) dropdowns.push(node);
+    for (const child of node.children ?? []) collectDropdowns(child);
   };
-  collectSelects(panelView);
-  // Only declared properties get a row: the container template declared exactly
-  // `display` and `flex-direction`, and `gap` shows up as a value field instead.
-  const propertySelects = selects.filter(select => select.props['aria-label'] !== '添加属性');
-  assert.strictEqual(propertySelects.length, 2, 'only declared enum properties get a dropdown');
+  collectDropdowns(panelView);
+  const propertyDropdowns = dropdowns.filter(item => item.props.ariaLabel !== '添加属性');
+  assert.strictEqual(propertyDropdowns.length, 2, 'only declared enum properties get a dropdown');
   assert.ok(renderedClasses.includes('dshCc_propText'), 'a non-enum declaration gets a value field');
+
+  // The add-property control moved above the grid: as a trailing row it fell
+  // outside the panel's scroll window and read like part of the template list.
+  const treeOrder = [];
+  const walkOrder = (node) => {
+    if (node === null || typeof node !== 'object') return;
+    if (typeof node.props?.className === 'string') treeOrder.push(node.props.className);
+    if (typeof node.type === 'function' && node.props?.ariaLabel === '添加属性') treeOrder.push('ADD-PROPERTY');
+    for (const child of node.children ?? []) walkOrder(child);
+  };
+  walkOrder(panelView);
   assert.ok(
-    renderedClasses.includes('dshCc_addProp'),
-    'unset properties live behind the add-property menu',
+    treeOrder.indexOf('ADD-PROPERTY') !== -1
+      && treeOrder.indexOf('ADD-PROPERTY') < treeOrder.indexOf('dshCc_propGrid'),
+    'the add-property control sits above the declarations',
   );
 
-  // The add-property menu carries a grouped dictionary: enum properties get a
-  // Chinese-valued dropdown, length/colour/shadow properties get a free field.
-  const addMenu = selects.find(select => select.props['aria-label'] === '添加属性');
+  const addMenu = dropdowns.find(item => item.props.ariaLabel === '添加属性');
   assert.ok(addMenu !== undefined, 'the add-property menu renders');
-  const menuGroups = (addMenu.children ?? []).filter(child => child?.type === 'optgroup');
+  const menuItems = addMenu.props.items;
+  const menuGroups = [...new Set(menuItems.map(item => item.group).filter(Boolean))];
   assert.ok(menuGroups.length >= 6, 'the add-property menu is grouped, got ' + menuGroups.length);
-  const menuProps = menuGroups.flatMap(group => (group.children ?? []).map(option => option.props.value));
+  const menuProps = menuItems.map(item => item.value);
   assert.ok(
     !menuProps.includes('gap'),
     'a property the rule already declares (gap) is not offered again',
@@ -393,7 +404,7 @@ async function main() {
 
   // Adding a free property writes its seed, and the panel then renders it as a
   // labelled text field whose placeholder is the dictionary hint.
-  addMenu.props.onChange({ target: { value: 'margin-top' } });
+  addMenu.props.onPick('margin-top');
   assert.ok(
     host.userStyle().textContent.includes('margin-top: 0'),
     'a free property is added with its seed value',
@@ -419,11 +430,21 @@ async function main() {
     'the dictionary hint becomes the placeholder',
   );
 
-  const displaySelect = propertySelects.find(select => select.props['aria-label'] === '显示');
-  assert.ok(displaySelect !== undefined, 'the display dropdown renders');
-  displaySelect.props.onChange({ target: { value: 'flex' } });
+  const displayDropdown = propertyDropdowns.find(item => item.props.ariaLabel === '显示');
+  assert.ok(displayDropdown !== undefined, 'the display dropdown renders');
+  assert.strictEqual(displayDropdown.props.display, '弹性布局', 'the trigger shows the Chinese label');
+  const displayItems = displayDropdown.props.items;
   assert.ok(
-    host.userStyle().textContent.includes('display: flex'),
+    displayItems.some(item => item.value === 'flex' && item.label === '弹性布局' && item.selected === true),
+    'the current value is marked in the menu',
+  );
+  assert.ok(
+    displayItems.some(item => item.value === '' && item.label === '（删除此项）'),
+    'the menu can remove a property',
+  );
+  displayDropdown.props.onPick('grid');
+  assert.ok(
+    host.userStyle().textContent.includes('display: grid'),
     'a dropdown choice is written into the open rule',
   );
 
@@ -431,9 +452,10 @@ async function main() {
   // declarations are newline-separated, which an earlier build failed to match.
   hookIndex = 0;
   const panelAgain = renderRow();
-  collectSelects(panelAgain);
-  const displayAgain = selects.filter(select => select.props['aria-label'] === '显示').pop();
-  displayAgain.props.onChange({ target: { value: 'grid' } });
+  dropdowns.length = 0;
+  collectDropdowns(panelAgain);
+  const displayAgain = dropdowns.find(item => item.props.ariaLabel === '显示');
+  displayAgain.props.onPick('grid');
   const written = host.userStyle().textContent;
   assert.strictEqual(
     (written.match(/display\s*:/g) ?? []).length,
