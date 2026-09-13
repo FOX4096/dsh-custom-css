@@ -205,6 +205,19 @@ async function main() {
   assert.strictEqual(rowSheets.length, 1, 'the row stylesheet is injected exactly once');
   assert.ok(rowSheets[0].textContent.includes('--dsw-alias-label-primary'), 'row styles consume DSH tokens');
 
+  // Overflow guards. Grid and flex items default to min-width:auto, and a
+  // <select> reports its widest option as max-content, so one long option label
+  // used to push the panel's cells out of the container. These rules are the fix
+  // and are asserted here so a restyle cannot quietly drop them.
+  for (const guard of [
+    '.dshCc_propGrid>*{min-width:0}',
+    '.dshCc_prop{align-items:center;display:flex;gap:6px;min-width:0}',
+    'overflow-x:hidden',
+    '.dshCc_propValue{flex:1;min-width:0;max-width:100%;',
+  ]) {
+    assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
+  }
+
   // The row must actually render. The settings shell turns a thrown render into
   // an invisible `data-slot-error` placeholder, so a broken accessor shows up as
   // "the row is missing" — render it here, with the accessors handed over as
