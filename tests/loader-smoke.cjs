@@ -288,6 +288,24 @@ async function main() {
   assert.ok(renderedClasses.includes('dshCc_panel'), 'clicking a selector opens the rule panel');
   assert.ok(renderedText.includes('容器'), 'the panel offers the container template');
 
+  // The panel moved under the code and lays its rows out as a grid: both grids
+  // must render, and the panel must be a sibling of the code field inside the
+  // body row rather than a separate side column.
+  assert.ok(renderedClasses.includes('dshCc_propGrid'), 'declarations lay out as a grid');
+  assert.ok(renderedClasses.includes('dshCc_tplGrid'), 'templates lay out as a grid');
+  const bodyNode = (function find(node) {
+    if (node === null || typeof node !== 'object') return null;
+    if (String(node.props?.className ?? '') === 'dshCc_main') return node;
+    for (const child of node.children ?? []) {
+      const hit = find(child);
+      if (hit !== null) return hit;
+    }
+    return null;
+  })(withPanel);
+  const bodyChildren = (bodyNode.children ?? []).map(child => String(child?.props?.className ?? ''));
+  assert.ok(bodyChildren.includes('dshCc_editorWrap'), 'the code field is a child of the body row');
+  assert.ok(bodyChildren.includes('dshCc_panel'), 'the panel is a sibling of the code field, below it');
+
   const panelButtons = [];
   const collect = (node) => {
     if (node === null || typeof node !== 'object') return;

@@ -49,6 +49,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
     - 下拉里可选「（删除此项）」移除该声明；手工写的、不在选项里的值会被保留为当前选项，不会被静默改掉。
     - **未设置的属性不占行** —— 它们收在最下面的「**＋ 添加属性…**」菜单里（只列当前还没设的），选中即以该属性的第一个选项写入。
     - 规则里一条声明都没有时，面板显示「这条规则还没有声明」。
+  - 面板**排在代码下方**（占满容器宽度），声明与模板都按**自适应网格**铺开：声明 `repeat(auto-fill, minmax(240px, 1fr))`、模板 `minmax(104px, 1fr)`；一条规则声明很多时面板自身限高 `260px` 内滚动，不会把整个设置行撑长。
   - 最下面是**声明模板**：容器 / 横向排列 / 居中 / 网格 / 文本 / 背景 / 描边 / 阴影 / 尺寸 / 间距 / 截断 / 滚动 / 吸顶 / 隐藏 —— 点一下按 2 空格缩进追加到块内（已有内容保留）。
   - **改属性是替换，不是叠加**：同一个属性反复改只会有一条，绝不堆成 `display: flex; display: grid;`。写入走的是"逐条声明"的扫描而不是正则替换 —— 声明之间是换行分隔、最后一条常常没有分号，任何假设 `;` 分隔的做法都会失手并追加重复。
   - 块在写入前会**规范化**：若某条声明缺了结尾的 `;`（老版本模板插入留下的、或手写的），自动补上再做编辑 —— 所以那种被粘连的老文件也能被逐次修正，不需要手工清理。
@@ -105,7 +106,7 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点，并且**必须
 | 按钮语义色 | 中性按钮文字 `--dsw-alias-label-secondary`，hover 底色 `--dsw-alias-interactive-bg-hover`；**重置**用 `--dsw-alias-state-error-primary`（浅色 `#ec1313` / 深色 `#f25a5a`）+ hover 底色 `--dsw-alias-interactive-bg-hover-danger` | 破坏性操作与普通操作用色区分 |
 | 下拉与菜单 | 触发按钮：`--dsw-alias-bg-module-platform`、`36px` 高、圆角 `18px`、内边距 `0 14px`、`14px/22px`；菜单：`--dsw-specific-menu` 底 + `--dsw-elevation-prominent` 阴影、圆角 `20px`、`4px` 内边距；菜单项：圆角 `10px`、`min-height 40px`、hover `--dsw-alias-interactive-bg-hover` | 逐值照抄 DSH 设置行 selector（`oY77xG_selector` / `T1PP_q_selector` / `lats3W_selector` 三者字节级相同）与共享下拉 `_root_1nxmc_1` |
 | 编辑器 | 行号 gutter 与文本区共用一个等宽行高（`--dshCc-line: 19px`）；获得焦点时边框让位给 `--dsw-alias-brand-primary` 聚焦环；补全列表用共享菜单的紧凑规格（圆角 `7px`、项 `min-height 26px`、`12px/18px`） | DevTools 风格的代码编辑外观 + 共享菜单层级 |
-| 编辑器容器 | 圆角 `12px` + `--dsw-alias-border-l2` 描边、`--dsw-alias-bg-layer-1` 底：**表头（文件名 + `CSS` 徽章 + 开关）／正文（代码 ｜ 属性面板）／状态行** 三段同框；表头与状态行用 `--dsw-alias-bg-module-platform` 与 `0.5px` 分隔线区分 | 设置面板里成块控件的统一做法 |
+| 编辑器容器 | 圆角 `12px` + `--dsw-alias-border-l2` 描边、`--dsw-alias-bg-layer-1` 底：**表头（文件名 + `CSS` 徽章 + 开关）／正文（代码在上、属性面板在下，均占满宽度）／状态行** 三段同框；表头与状态行用 `--dsw-alias-bg-module-platform` 与 `0.5px` 分隔线区分 | 设置面板里成块控件的统一做法 |
 
 ## 安装
 
