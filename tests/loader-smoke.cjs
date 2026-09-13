@@ -613,6 +613,31 @@ async function main() {
   assert.strictEqual(switchButton.props['aria-checked'], true, 'the switch starts on');
   assert.ok(String(switchButton.props.className).includes('dshCc_switchOn'), 'the on state is styled');
 
+  // The requested layout: one container holding header / body / footer, rather
+  // than three separate boxes that only look adjacent.
+  const shellClasses = (function walk(node, out = []) {
+    if (node === null || typeof node !== 'object') return out;
+    if (typeof node.props?.className === 'string') out.push(node.props.className);
+    for (const child of node.children ?? []) walk(child, out);
+    return out;
+  })(barView);
+  for (const part of ['dshCc_shell', 'dshCc_fileBar', 'dshCc_main', 'dshCc_foot']) {
+    assert.ok(shellClasses.includes(part), 'the editor container renders ' + part);
+  }
+  const shellNode = (function find(node) {
+    if (node === null || typeof node !== 'object') return null;
+    if (String(node.props?.className ?? '').includes('dshCc_shell')) return node;
+    for (const child of node.children ?? []) {
+      const hit = find(child);
+      if (hit !== null) return hit;
+    }
+    return null;
+  })(barView);
+  const directChildren = (shellNode.children ?? []).map(child => String(child?.props?.className ?? ''));
+  for (const part of ['dshCc_fileBar', 'dshCc_main', 'dshCc_foot']) {
+    assert.ok(directChildren.includes(part), 'the container holds ' + part + ' as a direct child');
+  }
+
   switchButton.props.onClick();
   await settle();
   assert.strictEqual(toggles.length, 1, 'the switch writes to the Host');
