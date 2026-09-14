@@ -1976,12 +1976,12 @@ async function main() {
     'the settings surface is never touched: its close button and everything else keep working',
   );
   assert.ok(
-    !picker.listeners.some(entry => entry.type === 'click'),
-    'no click is intercepted — the page stays usable while picking',
+    picker.listeners.some(entry => entry.type === 'click'),
+    'a click confirms the highlighted element — the gesture people expect',
   );
   assert.ok(
     picker.listeners.some(entry => entry.type === 'pointermove') && picker.listeners.some(entry => entry.type === 'keydown'),
-    'the session listens for hovering and keys only',
+    'and hovering and the keys drive the level',
   );
 
   picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
@@ -1998,9 +1998,32 @@ async function main() {
     'the token the element resolves to is offered as a chip',
   );
 
-  // The page's own clicks do nothing to the session: that is the whole point.
-  picker.dispatch('click', { target: dialog, clientX: 1, clientY: 1, preventDefault() {}, stopPropagation() {} });
-  assert.ok(panel() !== undefined, 'clicking the page does not end or disturb the pick');
+  // A click commits the highlighted element: the gesture people reach for first.
+  picker.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+  assert.ok(
+    picker.userStyle().textContent.includes('background-color: var(--dsw-alias-bg-layer-1)'),
+    'clicking the highlighted element writes the rule — got: ' + JSON.stringify(picker.userStyle().textContent),
+  );
+  assert.ok(panel() === undefined, 'and closes the session');
+
+  await arm();
+  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
+
+  // 暂停拾取 hands the page its clicks back — that is how a user reaches another
+  // page mid-session without losing the pick.
+  const pause = panelButton('暂停拾取');
+  assert.ok(pause !== undefined, 'the panel offers a pause');
+  pause.click();
+  assert.ok(
+    !picker.listeners.some(entry => entry.type === 'click'),
+    'pausing stops intercepting clicks',
+  );
+  assert.ok(panel() !== undefined, 'while the panel and the highlight stay');
+  panelButton('继续拾取').click();
+  assert.ok(
+    picker.listeners.some(entry => entry.type === 'click'),
+    'and resuming takes them back',
+  );
 
   // Level walking, by key and by slider.
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
