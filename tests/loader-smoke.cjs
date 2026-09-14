@@ -1460,6 +1460,25 @@ async function main() {
     'nothing is completed inside an unterminated string — the caret is in a value, not at a boundary',
   );
 
+  // The same check has to be right about a *closing* quote that is itself escaped:
+  // the naive "the last character is the quote, so it closed" rule says this string
+  // is finished, and the caret then gets a value list from inside a string.
+  typeInto('.a { color: red; display: "ab\\"');
+  assert.strictEqual(
+    stateOf(),
+    null,
+    'a string ending in an escaped quote is still open',
+  );
+
+  // And the other direction: a string that really is closed must not suppress the
+  // completion that follows it, or the fix would be a one-way door.
+  typeInto('.a { color: red; display: "x" fl');
+  assert.deepStrictEqual(
+    [...(stateOf()?.items ?? [])],
+    ['flex'],
+    'a closed string does not stop the completion after it',
+  );
+
   // --- the last three string-blind spots -----------------------------------
   // 1. A comment between the property name and its colon is legal CSS — comments
   //    are whitespace between tokens — so it must not be reported as two
