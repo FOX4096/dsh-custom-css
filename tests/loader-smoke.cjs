@@ -1917,6 +1917,9 @@ async function main() {
     rect: movingRect,
   });
   dialog.children.push(rowInsideDialog, pickedTarget);
+  const outer = node('div', { className: 'dsh-app', rect: { top: 0, left: 0, width: 1280, height: 900 } });
+  dialog.parentElement = outer;
+  outer.children.push(dialog);
 
   const picker = await boot({
     fetchImpl: async (url) => {
@@ -2054,29 +2057,50 @@ async function main() {
   // Level walking, by key and by slider.
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
   assert.ok(info().includes('1200×800'), 'ArrowUp walks to the parent — got: ' + JSON.stringify(info()));
+  picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.ok(info().includes('dsh-app'), 'and again to the grandparent — got: ' + JSON.stringify(info()));
+
+  // The reported bug: after going all the way up, coming back down must retrace the
+  // route, not walk into the current node's first child (a different branch).
   picker.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
-  assert.strictEqual(boxOf().dataset.label, '560×400', 'ArrowDown walks into the first child');
+  assert.ok(
+    info().includes('1200×800'),
+    'ArrowDown retraces to the parent it came from — got: ' + JSON.stringify(info()),
+  );
+  picker.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.ok(
+    info().includes('dsh-music-qq-head'),
+    'and back to the element that was clicked — got: ' + JSON.stringify(info()),
+  );
+  picker.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.ok(
+    info().includes('dsh-music-qq-head'),
+    'one step further down does not wander off: the anchor is the bottom',
+  );
+
+  // A sibling is a different branch, so it re-anchors.
+  picker.dispatch('keydown', { key: 'ArrowLeft', preventDefault() {} });
+  assert.ok(info().includes('dsh-music-list'), 'ArrowLeft moves to the sibling — got: ' + JSON.stringify(info()));
   picker.dispatch('keydown', { key: 'ArrowRight', preventDefault() {} });
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'ArrowRight walks to the next sibling');
+  assert.ok(info().includes('dsh-music-qq-head'), 'ArrowRight moves back');
   const slider = ((panel()?.children ?? [])[3]?.children ?? []).find(child => child.className === 'dshCc_pickSlider');
   assert.ok(slider !== undefined, 'the panel carries a depth slider');
-  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
   slider.value = '1';
   slider.fire('input');
   assert.ok(info().includes('1200×800'), 'the slider walks the same chain as the keys');
   assert.strictEqual(slider.value, '1', 'the slider keeps the position the user dragged it to');
+  slider.value = '2';
+  slider.fire('input');
+  assert.ok(info().includes('dsh-app'), 'and it reaches the grandparent');
   slider.value = '0';
   slider.fire('input');
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'and back down returns to the element itself');
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'while its zero is always the element that was clicked');
+  assert.strictEqual(slider.value, '0', 'and it shows that');
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
   assert.strictEqual(slider.value, '1', 'the keys move the slider too — one level per press');
   picker.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
-  assert.strictEqual(slider.value, '0', 'and back');
-  // ArrowDown means "first child", not "the element before": re-select the target the
-  // rest of this test is about.
-  picker.dom.hit = pickedTarget;
-  picker.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
-  assert.ok(info().includes('dsh-music-qq-head'), 'the target is selected again');
+  assert.strictEqual(slider.value, '0', 'and back',
+  );
 
   // Enter commits the chosen candidate, with the token rather than the literal.
   picker.dispatch('keydown', { key: 'Enter', preventDefault() {} });
