@@ -153,13 +153,26 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       dataset: {},
       style: {},
       id: '',
-      textContent: '',
+      // Like the DOM: assignment replaces the children, reading aggregates them.
+      get textContent() {
+        if (node.text !== undefined) return node.text;
+        return (node.children ?? []).map(child => child.textContent ?? '').join('');
+      },
+      set textContent(value) {
+        node.text = String(value);
+        node.children = [];
+      },
       attributes: { ...(options.attributes ?? {}) },
       children: [],
       parentElement: null,
       appendChild(child) {
         child.parentElement = node;
         node.children.push(child);
+        return child;
+      },
+      removeChild(child) {
+        const index = node.children.indexOf(child);
+        if (index >= 0) node.children.splice(index, 1);
         return child;
       },
       remove() {
@@ -327,6 +340,7 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     listeners,
     dispatch,
     document,
+    dom,
     effects,
     timers,
     runTimers,
@@ -1859,11 +1873,10 @@ async function main() {
   );
 
   // --- element picker -------------------------------------------------------
-  // The feature only earns its keep if the selector survives a DSH upgrade, so this
-  // drives the real flow — arm the button, hover a fake tree, click a node — and
-  // asserts the candidates offered and the rule that lands in the sheet. The fake
-  // tree uses the shapes the app actually has: a CSS-module class with a rotating
-  // hash, a hand-written plugin class, an aria label, and a modal ancestor.
+  // Two architectural promises are what these tests are really about: the session
+  // lives outside the settings row (so picking keeps working after the settings page
+  // closes, which is the only way to reach the rest of the interface), and it does
+  // not take the page hostage (no dimming, no intercepted clicks).
   const node = (tag, options = {}) => {
     const element = {
       tagName: tag.toUpperCase(),
@@ -1884,9 +1897,16 @@ async function main() {
     };
     return element;
   };
-
-  const dialog = node('div', { attributes: { 'aria-modal': 'true' }, rect: { top: 0, left: 0, width: 1200, height: 800 } });
-  const rowInsideDialog = node('div', { parent: dialog, rect: { top: 10, left: 10, width: 560, height: 400 } });
+  const dialog = node('div', {
+    className: 'dsh-settings-surface',
+    attributes: { 'aria-modal': 'true' },
+    rect: { top: 0, left: 0, width: 1200, height: 800 },
+  });
+  const rowInsideDialog = node('div', {
+    className: 'dsh-music-list',
+    parent: dialog,
+    rect: { top: 10, left: 10, width: 560, height: 400 },
+  });
   const pickedTarget = node('div', {
     className: '_card_1fywu_26 dsh-music-qq-head',
     attributes: { 'aria-label': 'QQ 音乐' },
@@ -1895,8 +1915,6 @@ async function main() {
   });
   dialog.children.push(rowInsideDialog, pickedTarget);
 
-  // The aria label repeats in this interface, so the selector that cannot collide
-  // must win: this is the ranking decision, not just a preference.
   const picker = await boot({
     fetchImpl: async (url) => {
       if (url.endsWith('/list')) {
@@ -1908,6 +1926,8 @@ async function main() {
     },
     dom: {
       hit: pickedTarget,
+      // The aria label repeats in this interface, so the selector that cannot collide
+      // has to win the default; that is a ranking decision, not a preference.
       matches: selector => (selector.includes('aria-label') ? 3 : 1),
       styleSheets: [(() => {
         const style = ['--dsw-alias-bg-layer-1'];
@@ -1917,77 +1937,132 @@ async function main() {
       computed: { getPropertyValue: name => (name === 'background-color' ? '#101010' : '') },
     },
   });
-  hookIndex = 0;
-  renderedText.length = 0;
-  const pickerView = picker.registrations[0].component();
-  await picker.runEffects();
-  assert.ok(buttonWith(pickerView, '拾取元素') !== undefined, 'the row offers an element picker');
+  const panel = () => picker.document.body.children.find(child => child.className === 'dshCc_pickPanel');
+  const boxOf = () => picker.document.body.children.find(child => child.className === 'dshCc_pickBox');
+  const info = () => (panel()?.children ?? [])[0]?.children?.[0]?.textContent ?? '';
+  const candidateTexts = () => ((panel()?.children ?? [])[1]?.children ?? []).map(child => child.textContent);
+  const tokenTexts = () => ((panel()?.children ?? [])[2]?.children ?? []).map(child => child.textContent);
+  const panelButton = (label) => {
+    let found;
+    (function walk(current) {
+      if (found !== undefined || current === null || typeof current !== 'object') return;
+      if (String(current.tagName ?? '').toLowerCase() === 'button' && current.textContent === label) {
+        found = current;
+        return;
+      }
+      for (const child of current.children ?? []) walk(child);
+    })(panel());
+    return found;
+  };
+  const arm = async () => {
+    hookIndex = 0;
+    renderedText.length = 0;
+    const view = picker.registrations[0].component();
+    await picker.runEffects();
+    buttonWith(view, '拾取元素').props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    const armed = picker.registrations[0].component();
+    await picker.runEffects();
+    return armed;
+  };
 
-  buttonWith(pickerView, '拾取元素').props.onClick();
-  pickerView.props.ref.current = rowInsideDialog;
-  hookIndex = 0;
-  renderedText.length = 0;
-  renderedClasses.length = 0;
-  const armedView = picker.registrations[0].component();
-  await picker.runEffects();
-  assert.ok(
-    picker.listeners.some(entry => entry.type === 'click'),
-    'arming the picker listens for the click that resolves the element',
-  );
+  const armedView = await arm();
+  assert.ok(buttonWith(armedView, '取消拾取') !== undefined, 'the row shows the picker is armed');
+  assert.ok(panel() !== undefined, 'and a floating panel appears');
   assert.strictEqual(
-    dialog.attributes['data-dshCc-picking'],
-    'true',
-    'the settings surface steps aside so the page behind it can be clicked',
-  );
-
-  const box = picker.document.body.children.find(child => child.className === 'dshCc_pickBox');
-  assert.ok(box !== undefined, 'the highlight box is outside the dimmed surface');
-  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
-  assert.strictEqual(box.dataset.label, '320×180', 'the box carries the size');
-  assert.strictEqual(box.style.top, '40px', 'and the box follows it');
-
-  picker.dispatch('click', {
-    clientX: 30,
-    clientY: 50,
-    preventDefault() {},
-    stopPropagation() {},
-  });
-  hookIndex = 0;
-  renderedText.length = 0;
-  const pickedView = picker.registrations[0].component();
-  await picker.runEffects();
-  assert.ok(
-    renderedText.some(text => text.includes('已选中 div')),
-    'the picked element is reported — got: ' + JSON.stringify(renderedText.slice(0, 8)),
+    Object.keys(dialog.attributes).includes('data-dshCc-picking'),
+    false,
+    'the settings surface is never touched: its close button and everything else keep working',
   );
   assert.ok(
     !picker.listeners.some(entry => entry.type === 'click'),
-    'resolving the element detaches the session listeners',
+    'no click is intercepted — the page stays usable while picking',
   );
-  assert.strictEqual(dialog.attributes['data-dshCc-picking'], undefined, 'and puts the surface back');
+  assert.ok(
+    picker.listeners.some(entry => entry.type === 'pointermove') && picker.listeners.some(entry => entry.type === 'keydown'),
+    'the session listens for hovering and keys only',
+  );
 
-  const candidates = renderedText.filter(text => typeof text === 'string' && text.includes('dsh-music-qq-head') || text.includes('aria-label') || text.includes('class*='));
+  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'hovering highlights the element under the pointer');
+  assert.ok(info().includes('dsh-music-qq-head'), 'the panel names what is highlighted — got: ' + JSON.stringify(info()));
   assert.deepStrictEqual(
-    renderedText.filter(text => text.startsWith('div.dsh-music') || text.startsWith('div[aria-label') || text.startsWith('div[class*=')),
-    ['div.dsh-music-qq-head', 'div[aria-label="QQ 音乐"]', 'div[class*="_card_"]'],
-    'candidates are ranked by what survives an upgrade, and a colliding aria label is demoted — got: '
-      + JSON.stringify(candidates),
+    candidateTexts(),
+    ['div.dsh-music-qq-head语义类名仅此一个', 'div[aria-label="QQ 音乐"]无障碍名3 个命中', 'div[class*="_card_"]哈希容错仅此一个'],
+    'candidates are ranked by what survives an upgrade, and a colliding aria label is demoted',
   );
-  assert.ok(
-    renderedText.some(text => text.includes('3 个命中')),
-    'the colliding candidate says how many elements it would hit',
-  );
-  assert.ok(
-    renderedText.some(text => text.includes('background-color: var(--dsw-alias-bg-layer-1)')),
-    'the token the element actually resolves to is offered as a chip',
+  assert.deepStrictEqual(
+    tokenTexts(),
+    ['background-color: var(--dsw-alias-bg-layer-1)'],
+    'the token the element resolves to is offered as a chip',
   );
 
-  buttonWith(pickedView, '插入规则').props.onClick();
+  // The page's own clicks do nothing to the session: that is the whole point.
+  picker.dispatch('click', { target: dialog, clientX: 1, clientY: 1, preventDefault() {}, stopPropagation() {} });
+  assert.ok(panel() !== undefined, 'clicking the page does not end or disturb the pick');
+
+  // Level walking, by key and by slider.
+  picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.ok(info().includes('1200×800'), 'ArrowUp walks to the parent — got: ' + JSON.stringify(info()));
+  picker.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.strictEqual(boxOf().dataset.label, '560×400', 'ArrowDown walks into the first child');
+  picker.dispatch('keydown', { key: 'ArrowRight', preventDefault() {} });
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'ArrowRight walks to the next sibling');
+  const slider = ((panel()?.children ?? [])[3]?.children ?? []).find(child => child.className === 'dshCc_pickSlider');
+  assert.ok(slider !== undefined, 'the panel carries a depth slider');
+  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  slider.value = '1';
+  slider.fire('input');
+  assert.ok(info().includes('1200×800'), 'the slider walks the same chain as the keys');
+  slider.value = '0';
+  slider.fire('input');
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'and back down returns to the element itself');
+
+  // Enter commits the chosen candidate, with the token rather than the literal.
+  picker.dispatch('keydown', { key: 'Enter', preventDefault() {} });
   assert.strictEqual(
     picker.userStyle().textContent,
     '.x{color:red}\n\ndiv.dsh-music-qq-head {\n  background-color: var(--dsw-alias-bg-layer-1);\n}',
-    'inserting writes the rule with the token, not the resolved literal',
+    'the rule is written with the token, not the resolved literal',
   );
+  assert.ok(panel() === undefined, 'and the panel is gone once it commits');
+
+  // The session must outlive the row: closing the settings page is how a user reaches
+  // the rest of the interface to pick there.
+  await arm();
+  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  await picker.unmount();
+  assert.ok(panel() !== undefined, 'closing the settings row does not kill the pick session');
+  picker.dom.hit = rowInsideDialog;
+  picker.dispatch('pointermove', { clientX: 5, clientY: 5 });
+  assert.ok(
+    info().includes('dsh-music-list'),
+    'and it still tracks the pointer after the row is gone — got: ' + JSON.stringify(info()),
+  );
+  picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.ok(info().includes('1200×800'), 'the level keys still work');
+  picker.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  assert.ok(
+    picker.userStyle().textContent.includes('div.dsh-settings-surface'),
+    'a pick made after the row unmounted still lands in the sheet — got: ' + JSON.stringify(picker.userStyle().textContent),
+  );
+  assert.ok(panel() === undefined, 'and the panel cleans itself up');
+
+  // Escape and 取消 both end it.
+  await arm();
+  picker.dispatch('keydown', { key: 'Escape', preventDefault() {} });
+  assert.ok(panel() === undefined, 'Escape takes the panel down');
+  assert.ok(!picker.listeners.some(entry => entry.type === 'keydown'), 'and detaches the session');
+  hookIndex = 0;
+  renderedText.length = 0;
+  picker.registrations[0].component();
+  await picker.runEffects();
+
+  await arm();
+  panelButton('取消').click();
+  assert.ok(panel() === undefined, '取消 on the panel takes it down too');
+  assert.ok(boxOf() === undefined, 'along with the highlight box');
 
   // An element whose selector is already in the sheet must open that rule instead of
   // appending a second one — the fastest way to make a sheet unmaintainable.
@@ -2009,156 +2084,13 @@ async function main() {
   hookIndex = 0;
   existing.registrations[0].component();
   await existing.runEffects();
-  existing.dispatch('click', { clientX: 1, clientY: 1, preventDefault() {}, stopPropagation() {} });
-  hookIndex = 0;
-  renderedClasses.length = 0;
-  const existingPicked = existing.registrations[0].component();
-  await existing.runEffects();
-  buttonWith(existingPicked, '插入规则').props.onClick();
+  existing.dispatch('pointermove', { clientX: 1, clientY: 1 });
+  existing.dispatch('keydown', { key: 'Enter', preventDefault() {} });
   assert.strictEqual(
     existing.userStyle().textContent,
     'div[aria-label="QQ 音乐"] { color: red }',
     'an existing rule is opened, not duplicated',
   );
-
-  // Escape leaves no trace: no listeners, no dimmed surface, no box.
-  hookIndex = 0;
-  const escapeView = existing.registrations[0].component();
-  await existing.runEffects();
-  buttonWith(escapeView, '拾取元素').props.onClick();
-  hookIndex = 0;
-  existing.registrations[0].component();
-  await existing.runEffects();
-  existing.dispatch('keydown', { key: 'Escape', preventDefault() {} });
-  hookIndex = 0;
-  existing.registrations[0].component();
-  await existing.runEffects();
-  assert.ok(
-    !existing.listeners.some(entry => entry.type === 'keydown' || entry.type === 'click'),
-    'Escape detaches the session',
-  );
-  assert.ok(
-    !existing.document.body.children.some(child => child.className === 'dshCc_pickBox' || child.className === 'dshCc_pickBar'),
-    'and removes the overlay it added to the document',
-  );
-
-  // --- the picker must be escapable, and walkable ---------------------------
-  // Arming dims the settings surface and makes it click-through, which is right for
-  // picking and lethal for everything else: without a clickable toolbar the only way
-  // out was a key the user was never told about, and the interface looked dead.
-  const walk = await boot({
-    fetchImpl: async (url) => {
-      if (url.endsWith('/list')) {
-        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
-      }
-      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
-      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
-      throw new Error('unexpected request: ' + url);
-    },
-    dom: {
-      hit: pickedTarget,
-      matches: () => 1,
-      computed: { getPropertyValue: () => '' },
-    },
-  });
-  const barOf = () => walk.document.body.children.find(child => child.className === 'dshCc_pickBar');
-  const buttonsOf = () => (barOf()?.children ?? []).filter(child => child.className === 'dshCc_pickBarBtn');
-  const buttonNamed = (label) => buttonsOf().find(child => child.textContent === label);
-  const readout = () => (barOf()?.children ?? [])[0]?.textContent ?? '';
-  const boxOf = () => walk.document.body.children.find(child => child.className === 'dshCc_pickBox');
-  const armWalk = async () => {
-    hookIndex = 0;
-    const view = walk.registrations[0].component();
-    await walk.runEffects();
-    buttonWith(view, '拾取元素').props.onClick();
-    hookIndex = 0;
-    walk.registrations[0].component();
-    await walk.runEffects();
-  };
-
-  await armWalk();
-  assert.deepStrictEqual(
-    buttonsOf().map(child => child.textContent),
-    ['上一级', '下一级', '上一个', '下一个', '取消'],
-    'the toolbar offers the level moves and a way out',
-  );
-  walk.dispatch('pointermove', { clientX: 30, clientY: 50 });
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'hovering selects the element under the pointer');
-
-  // ↑ walks to the parent (AdGuard's model: the pointer chooses roughly, the keys
-  // refine), and the readout says where the highlight now sits.
-  const beforeUp = readout();
-  walk.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
-  assert.notStrictEqual(readout(), beforeUp, 'ArrowUp walks one level up — got: ' + JSON.stringify(readout()));
-  assert.strictEqual(boxOf().style.width, '1200px', 'the box follows the new level (the dialog is 1200 wide)');
-
-  // Down into the surface, then sideways between its children and back: the four
-  // directions have to mean four different elements, or the keys are decoration.
-  walk.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
-  assert.ok(readout().includes('div'), 'ArrowDown walks into the first child — got: ' + JSON.stringify(readout()));
-  assert.strictEqual(boxOf().dataset.label, '560×400', 'and the box reports that child (our own row)');
-  walk.dispatch('keydown', { key: 'ArrowRight', preventDefault() {} });
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'ArrowRight walks to the next sibling');
-  walk.dispatch('keydown', { key: 'ArrowLeft', preventDefault() {} });
-  assert.strictEqual(boxOf().dataset.label, '560×400', 'ArrowLeft walks back to the previous one');
-
-  // The slider walks the ancestor chain from whatever the pointer chose — the same
-  // move as the keys, for people who would rather drag.
-  const slider = (barOf()?.children ?? []).find(child => child.className === 'dshCc_pickSlider');
-  assert.ok(slider !== undefined, 'the toolbar carries a depth slider');
-  walk.dispatch('pointermove', { clientX: 30, clientY: 50 });
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'the pointer re-anchors the chain');
-  slider.value = '1';
-  slider.fire('input');
-  assert.strictEqual(boxOf().style.width, '1200px', 'one step up the chain selects the parent');
-  slider.value = '0';
-  slider.fire('input');
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'and back down returns to the element itself');
-  walk.dispatch('pointermove', { clientX: 30, clientY: 50 });
-  assert.strictEqual(slider.value, '0', 'moving the pointer resets the slider with its anchor');
-
-  // The keys are explained on hover rather than permanently occupying the bar.
-  const helpTrigger = (barOf()?.children ?? []).find(child => child.className === 'dshCc_pickHelpTrigger');
-  const help = (barOf()?.children ?? []).find(child => child.className === 'dshCc_pickHelp');
-  assert.ok(helpTrigger !== undefined && help !== undefined, 'the bar offers the key list on hover');
-  assert.strictEqual(help.attributes['data-open'], undefined, 'it starts hidden');
-  helpTrigger.fire('mouseenter');
-  assert.strictEqual(help.attributes['data-open'], 'true', 'hovering opens it');
-  assert.deepStrictEqual(
-    (help.children ?? []).map(child => child.textContent.slice(0, 1)),
-    ['↑', '↓', 'E', 'E'],
-    'and it lists 上一层级 / 下一层级 / 同级 / 确认 / 取消 — got: ' + JSON.stringify((help.children ?? []).map(child => child.textContent)),
-  );
-
-  // A click on the toolbar is the toolbar's business: it must not resolve a pick.
-  walk.dispatch('click', { target: barOf(), clientX: 1, clientY: 1, preventDefault() {}, stopPropagation() {} });
-  assert.ok(
-    walk.listeners.some(entry => entry.type === 'click'),
-    'clicking the toolbar does not resolve the pick',
-  );
-
-  // ↓ goes back down, Enter confirms whatever is selected.
-  walk.dispatch('keydown', { key: 's', preventDefault() {} });
-  walk.dispatch('keydown', { key: 'Enter', preventDefault() {} });
-  hookIndex = 0;
-  renderedText.length = 0;
-  walk.registrations[0].component();
-  await walk.runEffects();
-  assert.ok(
-    renderedText.some(text => text.includes('已选中 div')),
-    'Enter confirms the selected element — got: ' + JSON.stringify(renderedText.slice(0, 6)),
-  );
-
-  // 取消 on the toolbar leaves the same clean state as Escape.
-  await armWalk();
-  walk.dispatch('pointermove', { clientX: 30, clientY: 50 });
-  buttonNamed('取消').click();
-  hookIndex = 0;
-  walk.registrations[0].component();
-  await walk.runEffects();
-  assert.ok(!walk.listeners.some(entry => entry.type === 'click'), '取消 ends the session');
-  assert.ok(barOf() === undefined, 'and removes its own toolbar');
-  assert.strictEqual(dialog.attributes['data-dshCc-picking'], undefined, 'and puts the surface back');
 
   console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
 }
