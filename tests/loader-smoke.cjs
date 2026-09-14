@@ -103,6 +103,182 @@ const fakeReact = {
 };
 
 /**
+ * Decode the CSS escapes `cssString` writes into an attribute value.
+ * @param raw - the literal's inner text.
+ * @returns the decoded value.
+ */
+function decodeCssString(raw) {
+  return raw.replace(/\\(?:([0-9a-fA-F]{1,6}) ?|(.))/g, (whole, hex, character) => (
+    hex === undefined ? character : String.fromCodePoint(parseInt(hex, 16))
+  ));
+}
+
+/** One compound selector: tag, `.class`, `#id`, `[attr]`, `[attr op "value"]`, `:nth-child()`. */
+const COMPOUND_PART = /([a-zA-Z*][\w-]*)|\.([\w-]+)|#([\w-]+)|:nth-child\((\d+)\)|\[([^\]=*^$~|]+)(?:([*^$~|]?=)"((?:[^"\\]|\\.)*)")?\]/g;
+
+/**
+ * Split a selector into comma-separated parts, each a list of `{ combinator, compound }`
+ * steps in document order.
+ *
+ * Brackets and quotes are respected, so the space or comma inside `[aria-label="a, b"]` is
+ * not mistaken for a combinator — the same reason the plugin's own scanners treat strings
+ * as opaque.
+ * @param selector - the selector text.
+ * @returns one step list per comma-separated part.
+ */
+function parseSelector(selector) {
+  const parts = [[]];
+  let compound = '';
+  let combinator = ' ';
+  let depth = 0;
+  let quoted = false;
+  const flush = () => {
+    if (compound === '') return;
+    parts[parts.length - 1].push({ combinator, compound });
+    compound = '';
+    combinator = ' ';
+  };
+  for (const character of String(selector)) {
+    if (quoted) {
+      compound += character;
+      if (character === '"') quoted = false;
+      continue;
+    }
+    if (character === '"') {
+      quoted = true;
+      compound += character;
+      continue;
+    }
+    if (character === '[') depth += 1;
+    if (character === ']') depth -= 1;
+    if (depth === 0 && character === ',') {
+      flush();
+      parts.push([]);
+      continue;
+    }
+    if (depth === 0 && character === '>') {
+      flush();
+      combinator = '>';
+      continue;
+    }
+    if (depth === 0 && /\s/.test(character)) {
+      flush();
+      continue;
+    }
+    compound += character;
+  }
+  flush();
+  return parts.filter(part => part.length > 0);
+}
+
+/**
+ * Whether one node matches every part of one compound.
+ *
+ * A string literal that carries a raw newline is refused outright, the way a browser's
+ * tokenizer ends the string there and the whole selector fails to parse.
+ * @param node - a real Element or one of the doubles.
+ * @param compound - the compound selector text.
+ * @returns true when every part matches.
+ */
+function matchesCompound(node, compound) {
+  if (node === null || node === undefined) return false;
+  if (/"[^"]*\n/.test(compound)) throw new Error('invalid selector: unescaped newline in a string');
+  const tag = String(node.tagName ?? '').toLowerCase();
+  const classes = String(node.className ?? '').split(/\s+/).filter(Boolean);
+  const readAttribute = (name) => {
+    // `class` is the one attribute the doubles keep beside their attribute map.
+    if (name === 'class') return String(node.className ?? '');
+    if (typeof node.getAttribute === 'function') return node.getAttribute(name);
+    return node.attributes?.[name] ?? null;
+  };
+  let seen = false;
+  COMPOUND_PART.lastIndex = 0;
+  let part;
+  while ((part = COMPOUND_PART.exec(compound)) !== null) {
+    seen = true;
+    const [, name, className, id, nth, attribute, operator, rawValue] = part;
+    if (name !== undefined && name !== '*' && tag !== name.toLowerCase()) return false;
+    if (className !== undefined && !classes.includes(className)) return false;
+    if (id !== undefined && String(readAttribute('id') ?? '') !== id) return false;
+    if (nth !== undefined) {
+      const siblings = node.parentElement?.children ?? [];
+      if (siblings.indexOf(node) !== Number(nth) - 1) return false;
+    }
+    if (attribute !== undefined) {
+      const value = readAttribute(attribute);
+      if (value === null || value === undefined) return false;
+      if (operator !== undefined && rawValue !== undefined) {
+        const wanted = decodeCssString(rawValue);
+        const actual = String(value);
+        if (operator === '=' && actual !== wanted) return false;
+        if (operator === '*=' && !actual.includes(wanted)) return false;
+        if (operator === '^=' && !actual.startsWith(wanted)) return false;
+        if (operator === '$=' && !actual.endsWith(wanted)) return false;
+      }
+    }
+  }
+  return seen;
+}
+
+/**
+ * Whether a node matches a selector: comma lists, descendant and child combinators.
+ * @param node - a real Element or one of the doubles.
+ * @param selector - the selector text.
+ * @returns true when the selector matches.
+ */
+function matchesSelector(node, selector) {
+  return parseSelector(selector).some((steps) => {
+    if (steps.length === 0) return false;
+    let current = node;
+    if (!matchesCompound(current, steps[steps.length - 1].compound)) return false;
+    for (let index = steps.length - 2; index >= 0; index -= 1) {
+      const relation = steps[index + 1].combinator;
+      const wanted = steps[index].compound;
+      const parent = current.parentElement ?? null;
+      if (relation === '>') {
+        if (!matchesCompound(parent, wanted)) return false;
+        current = parent;
+        continue;
+      }
+      let found = null;
+      let walk = parent;
+      while (walk !== null && walk !== undefined) {
+        if (matchesCompound(walk, wanted)) {
+          found = walk;
+          break;
+        }
+        walk = walk.parentElement ?? null;
+      }
+      if (found === null) return false;
+      current = found;
+    }
+    return true;
+  });
+}
+
+/**
+ * The node under a point: the last one in document order whose box contains it, which is
+ * how a browser resolves overlapping boxes (later siblings paint on top) and how a child
+ * beats the parent that also contains the point.
+ * @param nodes - the pool, in document order.
+ * @param x - viewport x.
+ * @param y - viewport y.
+ * @returns the node, or null when the point hits nothing.
+ */
+function hitTest(nodes, x, y) {
+  let found = null;
+  for (const node of nodes ?? []) {
+    if (typeof node.getBoundingClientRect !== 'function') continue;
+    const box = node.getBoundingClientRect();
+    if (!(box.width > 0) || !(box.height > 0)) continue;
+    const left = box.left ?? 0;
+    const top = box.top ?? 0;
+    if (x >= left && x <= left + box.width && y >= top && y <= top + box.height) found = node;
+  }
+  return found;
+}
+
+/**
  * Build one JSON response double.
  * @param payload - decoded payload.
  * @param status - HTTP status.
@@ -225,10 +401,19 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       const match = /^style\[data-plugin-css="(.*)"\]$/.exec(selector);
       return match === null ? null : (styleTags.find(element => element.dataset.pluginCss === match[1]) ?? null);
     },
-    querySelectorAll: selector => (dom.elements !== undefined ? [...dom.elements] : new Array(dom.matches === undefined ? 0 : dom.matches(selector)).fill(null)),
+    querySelectorAll: selector => {
+      // `dom.probe` is the deliberate simulation seam: a test that needs the engine to
+      // REFUSE a selector (or answer with a count the pool cannot express) says so here.
+      // Everything else is answered from the pool by actually matching the selector, so
+      // "how many elements does this match" is a real question in this bed.
+      if (typeof dom.probe === 'function') return new Array(dom.probe(selector)).fill(null);
+      return (dom.nodes ?? []).filter(node => matchesSelector(node, selector));
+    },
     createElement: makeElement,
     getElementById: id => styleTags.find(element => element.id === id) ?? null,
-    elementFromPoint: () => dom.hit ?? null,
+    // Real hit testing over the pool, so "the pointer is over this element" is decided by
+    // the coordinates the test dispatches rather than by a constant.
+    elementFromPoint: (x, y) => hitTest(dom.nodes, x, y),
     addEventListener(type, handler, capture) {
       listeners.push({ type, handler, capture: capture === true });
     },
@@ -1916,10 +2101,21 @@ async function main() {
     parent: dialog,
     rect: movingRect,
   });
-  dialog.children.push(rowInsideDialog, pickedTarget);
+  // A second element really carrying the same label: this interface does repeat labels, and
+  // the ranking has to cope with that on the evidence rather than on a stub's say-so. Its box
+  // sits away from every point the tests click, so it never wins a hit by accident.
+  const twinLabel = node('div', {
+    className: 'dsh-music-qq-row',
+    attributes: { 'aria-label': 'QQ 音乐' },
+    parent: dialog,
+    rect: { top: 640, left: 700, width: 200, height: 60 },
+  });
+  dialog.children.push(rowInsideDialog, pickedTarget, twinLabel);
   const outer = node('div', { className: 'dsh-app', rect: { top: 0, left: 0, width: 1280, height: 900 } });
   dialog.parentElement = outer;
   outer.children.push(dialog);
+  /** The whole page in document order: what the stubs hit-test and match against. */
+  const pickPool = [outer, dialog, rowInsideDialog, pickedTarget, twinLabel];
 
   const picker = await boot({
     fetchImpl: async (url) => {
@@ -1931,10 +2127,7 @@ async function main() {
       throw new Error('unexpected request: ' + url);
     },
     dom: {
-      hit: pickedTarget,
-      // The aria label repeats in this interface, so the selector that cannot collide
-      // has to win the default; that is a ranking decision, not a preference.
-      matches: selector => (selector.includes('aria-label') ? 3 : 1),
+      nodes: pickPool,
       styleSheets: [(() => {
         const style = ['--dsw-alias-bg-layer-1'];
         style.getPropertyValue = name => (name === '--dsw-alias-bg-layer-1' ? '#101010' : '');
@@ -2018,7 +2211,7 @@ async function main() {
   );
   assert.deepStrictEqual(
     candidateTexts(),
-    ['div.dsh-music-qq-head语义类名仅此一个', 'div[aria-label="QQ 音乐"]无障碍名3 个命中', 'div[class*="_card_"]哈希容错仅此一个'],
+    ['div.dsh-music-qq-head语义类名仅此一个', 'div[aria-label="QQ 音乐"]无障碍名2 个命中', 'div[class*="_card_"]哈希容错仅此一个'],
     'with the candidates ranked by what survives an upgrade',
   );
   assert.deepStrictEqual(
@@ -2043,15 +2236,14 @@ async function main() {
   movingRect.top = 40;
   picker.dispatch('scroll', {});
 
-  // Clicking elsewhere moves the selection; the session is still open.
-  picker.dom.hit = rowInsideDialog;
-  picker.dispatch('click', { target: rowInsideDialog, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() {} });
+  // Clicking elsewhere moves the selection; the session is still open. The point is inside
+  // the row's own box but outside the card's, which is what makes it "elsewhere".
+  picker.dispatch('click', { target: rowInsideDialog, clientX: 500, clientY: 300, preventDefault() {}, stopPropagation() {} });
   assert.ok(
     info().includes('dsh-music-list'),
     'a second click moves the selection — got: ' + JSON.stringify(info()),
   );
   assert.ok(panel() !== undefined, 'without leaving the picker');
-  picker.dom.hit = pickedTarget;
   picker.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
 
   // Level walking, by key and by slider.
@@ -2117,8 +2309,7 @@ async function main() {
   picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
   await picker.unmount();
   assert.ok(panel() !== undefined, 'closing the settings row does not kill the pick session');
-  picker.dom.hit = rowInsideDialog;
-  picker.dispatch('click', { target: rowInsideDialog, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() {} });
+  picker.dispatch('click', { target: rowInsideDialog, clientX: 500, clientY: 300, preventDefault() {}, stopPropagation() {} });
   assert.ok(
     info().includes('dsh-music-list'),
     'and a click still selects after the row is gone — got: ' + JSON.stringify(info()),
@@ -2143,13 +2334,13 @@ async function main() {
       if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
       throw new Error('unexpected request: ' + url);
     },
-    dom: { hit: pickedTarget, matches: () => 1, computed: { getPropertyValue: () => '' } },
+    dom: { nodes: pickPool, computed: { getPropertyValue: () => '' } },
   });
   // The settings entry the plugin is allowed to click, and a record of the click.
   let settingsClicked = false;
   const settingsEntry = node('button', { attributes: { 'aria-label': '设置' } });
   settingsEntry.click = () => { settingsClicked = true; };
-  careful.dom.elements = [settingsEntry];
+  careful.dom.nodes = [settingsEntry, ...pickPool];
 
   hookIndex = 0;
   const carefulView = careful.registrations[0].component();
@@ -2213,17 +2404,24 @@ async function main() {
 
   // An element whose selector is already in the sheet must open that rule instead of
   // appending a second one — the fastest way to make a sheet unmaintainable.
+  const existingWrites = [];
   const existing = await boot({
-    fetchImpl: async (url) => {
+    fetchImpl: async (url, init) => {
       if (url.endsWith('/list')) {
         return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
       }
-      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: 'div[aria-label="QQ 音乐"] { color: red }' });
-      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      // The selector the picker actually picks: the label repeats in this tree, so the
+      // unique class is the candidate that wins the default.
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: 'div.dsh-music-qq-head { color: red }' });
+      if (url.endsWith('/write')) {
+        existingWrites.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
       throw new Error('unexpected request: ' + url);
     },
-    dom: { hit: pickedTarget, matches: () => 1 },
+    dom: { nodes: pickPool },
   });
+  const existingPanel = () => existing.document.body.children.some(child => child.className === 'dshCc_pickPanel');
   hookIndex = 0;
   const existingView = existing.registrations[0].component();
   await existing.runEffects();
@@ -2231,13 +2429,23 @@ async function main() {
   hookIndex = 0;
   existing.registrations[0].component();
   await existing.runEffects();
-  existing.dispatch('pointermove', { clientX: 1, clientY: 1 });
+  // A hover is not a selection: Enter confirms what a click LOCKED, so hovering and pressing
+  // Enter must do nothing at all. This is the boundary that let the case below pass without
+  // ever committing anything, back when the stub ignored the coordinates it was handed.
+  existing.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  existing.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  assert.strictEqual(existingWrites.length, 0, 'hovering the element and pressing Enter commits nothing');
+  assert.ok(existingPanel(), 'and the session stays open');
+  // A click, and then Enter does commit.
+  existing.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
   existing.dispatch('keydown', { key: 'Enter', preventDefault() {} });
   assert.strictEqual(
     existing.userStyle().textContent,
-    'div[aria-label="QQ 音乐"] { color: red }',
+    'div.dsh-music-qq-head { color: red }',
     'an existing rule is opened, not duplicated',
   );
+  assert.strictEqual(existingWrites.length, 0, 'and nothing was written: the rule was already there');
+  assert.ok(!existingPanel(), 'and the pick really committed: the panel is gone');
 
   // --- a pick that opens an EXISTING rule must open it now, not later ------
   // The handoff is consumed through the store, and this is the case where the store
@@ -2245,7 +2453,7 @@ async function main() {
   // and a consumer keyed on it never re-runs. The panel stayed shut — and the handoff
   // stayed pending, so the NEXT unrelated edit opened that stale rule and yanked the
   // caret into it long after the gesture that asked for it.
-  const EXISTING_SHEET = 'div[aria-label="QQ 音乐"] { color: red }';
+  const EXISTING_SHEET = 'div.dsh-music-qq-head { color: red }';
   /** A row whose sheet already carries the rule this element maps to. */
   const bootExistingRule = async (writes) => boot({
     fetchImpl: async (url, init) => {
@@ -2259,7 +2467,7 @@ async function main() {
       }
       throw new Error('unexpected request: ' + url);
     },
-    dom: { hit: pickedTarget, matches: () => 1 },
+    dom: { nodes: pickPool },
   });
   /**
    * Render the row, arm the picker, select the element under the pointer and commit the
@@ -2355,13 +2563,9 @@ async function main() {
       }
       throw new Error('unexpected request: ' + url);
     },
-    dom: {
-      hit: newlineNode,
-      matches: (selector) => {
-        if (String(selector).includes('\n')) throw new Error('invalid selector');
-        return 1;
-      },
-    },
+    // The pool does the hit testing; the matcher itself refuses a raw newline inside a
+    // string, exactly like a browser's tokenizer, so this case needs no simulated probe.
+    dom: { nodes: [newlineNode] },
   });
   await pickWith(newline, newlineNode);
   assert.strictEqual(newlineWrites.length, 1, 'the pick is written');
@@ -2393,10 +2597,11 @@ async function main() {
       throw new Error('unexpected request: ' + url);
     },
     dom: {
-      hit: pickedTarget,
-      // The best-evidence candidate is the one that cannot be probed here; everything else
-      // answers normally, so a unique alternative exists and must win instead.
-      matches: (selector) => {
+      nodes: pickPool,
+      // The best-evidence candidate is the one that cannot be probed here, which the pool
+      // cannot express — this is the deliberate simulation seam: an engine that refuses to
+      // answer. Everything else answers "unique", so a unique alternative exists and must win.
+      probe: (selector) => {
         if (String(selector).includes('aria-label')) throw new Error('cannot probe');
         return 1;
       },
@@ -2437,7 +2642,7 @@ async function main() {
       }
       throw new Error('unexpected request: ' + url);
     },
-    dom: { hit: pickedTarget, matches: () => 1 },
+    dom: { nodes: pickPool },
   });
   hookIndex = 0;
   renderedText.length = 0;
@@ -2479,7 +2684,7 @@ async function main() {
   );
   assert.strictEqual(
     handoffWrites[0].css,
-    '.x{color:blue}\n\ndiv[aria-label="QQ 音乐"] {\n  \n}',
+    '.x{color:blue}\n\ndiv.dsh-music-qq-head {\n  \n}',
     'the sheet holds the pick, not the text that was still inside the debounce',
   );
   await settle();
@@ -2513,7 +2718,7 @@ async function main() {
       }
       throw new Error('unexpected request: ' + url);
     },
-    dom: { hit: pickedTarget, matches: () => 1 },
+    dom: { nodes: pickPool },
   });
   /** The footer as the current state renders it. */
   const footerOf = (harness) => {
@@ -2554,7 +2759,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, honest DOM stubs, unmount flush verified');
 }
 
 main().catch((error) => {

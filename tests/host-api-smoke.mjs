@@ -322,15 +322,20 @@ for (const name of offered) {
 }
 
 // --- a symlink inside the directory must not reach outside it ---------------
+// The case can only run where the process may create a symbolic link. On Windows that needs
+// Developer Mode or an elevated shell; a plain `fs.symlink` there fails with EPERM, which is
+// a property of the machine and not of the plugin. Anywhere else a failure is real and must
+// be loud. Either way the outcome is reported: a skipped boundary may not be printed as a
+// verified one — that is how the newest defence line goes unrun while the suite still says OK.
 const outside = path.join(home, 'outside.yaml');
 await writeFile(outside, 'secret: true', 'utf8');
 let linked = true;
 try {
   await symlink(outside, path.join(stylesDir, 'link.css'));
 }
-catch {
+catch (error) {
+  if (process.platform !== 'win32' || error?.code !== 'EPERM') throw error;
   linked = false;
-  console.warn = realWarn;
 }
 if (linked) {
   const linkRead = await call('GET', '/dsh-custom-css/read?name=link.css');
@@ -339,11 +344,17 @@ if (linked) {
   assert.strictEqual(linkWrite.status, 400, 'writing through a symlink is refused');
   assert.strictEqual(await readFile(outside, 'utf8'), 'secret: true', 'the link target is untouched');
 }
+else {
+  console.log('host-api-smoke: SKIPPED — symlink refusal: this machine cannot create a symbolic link without elevated rights (fs.symlink: EPERM). That boundary is UNVERIFIED here.');
+}
 
 // --- the listing cap cannot hide the active sheet ---------------------------
 await writeFile(path.join(stylesDir, 'active.json'), '{"active": "theme.css"}', 'utf8');
+const cappedNames = [];
 for (let index = 0; index < 200; index += 1) {
-  await writeFile(path.join(stylesDir, 'aaa' + String(index).padStart(3, '0') + '.css'), '.x{}', 'utf8');
+  const name = 'aaa' + String(index).padStart(3, '0') + '.css';
+  cappedNames.push(name);
+  await writeFile(path.join(stylesDir, name), '.x{}', 'utf8');
 }
 const capped = await call('GET', '/dsh-custom-css/list');
 assert.strictEqual(capped.payload.files.length, 201, 'the listing is capped, plus the pinned active sheet');
@@ -351,11 +362,21 @@ assert.ok(
   capped.payload.files.some(file => file.name === 'theme.css'),
   'the active sheet is listed even when the cap would have dropped it',
 );
+// The expectation is written out here rather than derived from the reply. Comparing the
+// reply against its own sorted copy does catch a mis-sorted listing (verified by handing
+// the sheets back in reverse), but it cannot say WHICH sheets came back or where the pinned
+// one landed — and `aaa…` sorts below every other sheet, so the cap keeps exactly these 200
+// and the pinned active sheet joins them at the end.
 assert.deepStrictEqual(
   capped.payload.files.map(file => file.name),
-  [...capped.payload.files.map(file => file.name)].sort((left, right) => left.localeCompare(right)),
-  'the pinned sheet keeps the listing name-sorted',
+  [...cappedNames, 'theme.css'].sort((left, right) => left.localeCompare(right)),
+  'the listing holds the first 200 names by name-order, with the pinned active sheet among them',
 );
 
 await rm(home, { recursive: true, force: true });
-console.log('host-api-smoke: OK — file API, per-sheet switch, /active, validation, reserved names, body cap, symlink refusal, bookkeeping recovery, listing cap, and fail-closed fence verified');
+const verified = [
+  'file API', 'per-sheet switch', '/active', 'validation', 'reserved names', 'body cap',
+  ...(linked ? ['symlink refusal'] : []),
+  'bookkeeping recovery', 'listing cap', 'and fail-closed fence',
+];
+console.log('host-api-smoke: OK — ' + verified.join(', ') + ' verified');
