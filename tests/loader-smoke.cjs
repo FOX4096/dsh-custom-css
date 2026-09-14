@@ -840,7 +840,26 @@ async function main() {
     if (typeof node.type === 'function' && Array.isArray(node.props?.items)) dropdowns.push(node);
     for (const child of node.children ?? []) collectDropdowns(child);
   };
-  collectDropdowns(panelView);
+  /**
+   * The open rule's panel, from the whole row render.
+   *
+   * `renderRow()` returns the file bar, the editor and the panel together, and the row has
+   * dropdowns of its own up there (the outline), so "which properties got a dropdown" has to
+   * be asked of the panel rather than of the view.
+   */
+  const panelRoot = (view) => {
+    let found = null;
+    (function walk(current) {
+      if (found !== null || current === null || typeof current !== 'object') return;
+      if (String(current.props?.className ?? '') === 'dshCc_panel') {
+        found = current;
+        return;
+      }
+      for (const child of current.children ?? []) walk(child);
+    })(view);
+    return found;
+  };
+  collectDropdowns(panelRoot(panelView));
   const propertyDropdowns = dropdowns.filter(item => item.props.ariaLabel !== '添加属性');
   assert.strictEqual(propertyDropdowns.length, 2, 'only declared enum properties get a dropdown');
   assert.ok(renderedClasses.includes('dshCc_propText'), 'a non-enum declaration gets a value field');
@@ -2337,6 +2356,92 @@ async function main() {
     'and neither is one with a fallback, nor one whose rule matches nothing — status: ' + JSON.stringify(status),
   );
 
+  // --- the outline: what the sheet contains, and what actually matches -------
+  // On a long sheet two questions come up constantly: where is that rule, and is it doing
+  // anything. The outline answers both, and the count is the half that is invisible today —
+  // a selector that hits nothing styles nothing, and says so nowhere.
+  const outlineSheet = ['.a { color: red; }', '.b { color: blue; }', '.gone { color: green; }'].join('\n');
+  const outlineBoot = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 60, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: outlineSheet });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { nodes: [varNode('a'), varNode('a'), varNode('b')] },
+  });
+  hookIndex = 0;
+  const outlineView = outlineBoot.registrations[0].component();
+  await outlineBoot.runEffects();
+  /** The outline dropdown element (the harness does not render function components). */
+  const findOutline = (view) => {
+    let found = null;
+    (function walk(current) {
+      if (found !== null || current === null || typeof current !== 'object') return;
+      if (typeof current.type === 'function' && current.props?.wrapperClassName === 'dshCc_outline') found = current;
+      for (const child of current.children ?? []) walk(child);
+    })(view);
+    return found;
+  };
+  const outline = findOutline(outlineView);
+  assert.ok(outline !== null, 'the file bar carries an outline dropdown');
+  assert.strictEqual(outline.props.display, '大纲', 'labelled as the sheet outline');
+  await outlineBoot.runTimers();
+  hookIndex = 0;
+  const outlineReady = outlineBoot.registrations[0].component();
+  const outlineDropdown = findOutline(outlineReady);
+  const labels = outlineDropdown.props.items.map(item => item.label);
+  // `[...labels]` is not decoration: the array was built inside the plugin's VM realm, and
+  // `deepStrictEqual` compares prototypes — a sandbox Array never equals a test-realm one
+  // even when every element does. Spreading rebuilds it here.
+  assert.deepStrictEqual(
+    [...labels],
+    ['.a · 命中 2', '.b · 命中 1', '.gone · 无命中'],
+    'every rule is listed with what the document says about it — got: ' + JSON.stringify(labels),
+  );
+  // Jumping opens that rule's panel and parks the caret on its selector.
+  const carets = [];
+  const outlineEditor = findNode(outlineReady, 'textarea');
+  outlineEditor.props.ref.current = {
+    selectionStart: 0,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange(start) { carets.push(start); },
+  };
+  outlineDropdown.props.onPick('2');
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const jumped = outlineBoot.registrations[0].component();
+  await outlineBoot.runEffects();
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  outlineBoot.registrations[0].component();
+  assert.ok(
+    renderedClasses.some(entry => entry.includes('dshCc_panelName')),
+    'picking an outline entry opens that rule — classes: ' + JSON.stringify(renderedClasses),
+  );
+  const nameField = (() => {
+    let found = null;
+    (function walk(current) {
+      if (found !== null || current === null || typeof current !== 'object') return;
+      if (String(current.props?.className ?? '').includes('dshCc_panelName')) found = current;
+      for (const child of current.children ?? []) walk(child);
+    })(jumped);
+    return found;
+  })();
+  assert.strictEqual(
+    nameField?.props?.value, '.gone',
+    'and it is the rule that was picked, not the first one',
+  );
+  assert.deepStrictEqual(
+    carets, [outlineSheet.indexOf('.gone')],
+    'with the caret on its selector so the line comes into view',
+  );
+
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
   // lives outside the settings row (so picking keeps working after the settings page
@@ -3176,7 +3281,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, variable check, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
 }
 
 main().catch((error) => {
