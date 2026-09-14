@@ -17,7 +17,20 @@ const vm = require('node:vm');
 const assert = require('node:assert');
 
 const pluginRoot = path.join(__dirname, '..');
-const code = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8');
+const source = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8');
+/**
+ * The module text this suite runs.
+ *
+ * One internal is exposed by name: the dropdown placement math. It is pure, it decides
+ * something a user sees directly (a menu opened from the right end of a row must not leave
+ * the window), and nothing else about the text changes — the export is additive and the
+ * plugin never looks at it. Everything else is asserted through the components, as usual.
+ */
+const EXPORTS_ANCHOR = `		exports.apply = apply;
+		exports.inject = inject;`;
+assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
+const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
+		exports.__probe = { placeMenu };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -2441,6 +2454,37 @@ async function main() {
     carets, [outlineSheet.indexOf('.gone')],
     'with the caret on its selector so the line comes into view',
   );
+
+  // --- a menu opened from the right end of a row stays inside the window ----
+  // The outline sits at the right end of the file bar, and a menu laid out as
+  // `left: trigger.left` ran off the screen with a long selector inside it (measured: 250px).
+  // The placement is pure, so it is asserted directly rather than through a screenshot.
+  const placeMenu = host.mod.__probe.placeMenu;
+  assert.strictEqual(typeof placeMenu, 'function', 'the placement math is reachable in this suite');
+  const triggerAt = (left, width = 50) => ({ left, right: left + width, top: 300, bottom: 328, width });
+  const window900 = { width: 900, height: 600 };
+
+  const rightEnd = placeMenu(triggerAt(830), window900, 320);
+  assert.strictEqual(rightEnd.right, '20px', 'a menu that would cross the right edge hangs off it — style: ' + JSON.stringify(rightEnd));
+  assert.strictEqual(rightEnd.width, '320px', 'and it gets the width it asked for');
+  assert.ok(rightEnd.left === undefined, 'the left anchor is dropped, not emitted alongside');
+
+  const roomy = placeMenu(triggerAt(40), window900, 320);
+  assert.strictEqual(roomy.left, '40px', 'a menu with room keeps the familiar left anchor');
+  assert.ok(roomy.right === undefined, 'and nothing else');
+
+  const narrow = placeMenu(triggerAt(40), { width: 300, height: 600 }, 320);
+  assert.strictEqual(narrow.width, '284px', 'a narrow window clamps the width instead of overflowing it');
+  assert.strictEqual(narrow.right, '210px', 'and the clamped menu hangs off the right edge (300 - the trigger right edge 90)');
+
+  const contentDriven = placeMenu(triggerAt(40, 120), window900, undefined);
+  assert.strictEqual(contentDriven.minWidth, '120px', 'a content-driven menu still starts at its trigger width');
+  assert.strictEqual(contentDriven.maxWidth, '884px', 'but may not grow past the window');
+  assert.strictEqual(contentDriven.width, undefined, 'and is not given a width it did not ask for');
+
+  const nearBottom = placeMenu({ left: 40, right: 90, top: 560, bottom: 588, width: 50 }, window900, 320);
+  assert.ok(nearBottom.bottom !== undefined && nearBottom.top === undefined, 'a menu near the bottom flips up');
+  assert.strictEqual(placeMenu(undefined, window900, 320), undefined, 'no layout, no menu placement');
 
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
