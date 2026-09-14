@@ -1,6 +1,6 @@
 {
   "name": "dsh-custom-css",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "DSH Web GUI 扩展：在 设置 → 通用 的「外观」下方提供一行自定义 CSS 编辑器。",
   "license": "MIT",
   "author": "FOX4096",

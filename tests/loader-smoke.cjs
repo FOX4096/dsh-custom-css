@@ -435,7 +435,11 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       __ModuleLoader__: { load(module) { loaded = module; } },
       innerWidth: dom.innerWidth ?? 1200,
       innerHeight: dom.innerHeight ?? 800,
-      getComputedStyle: () => dom.computed ?? { getPropertyValue: () => '' },
+      // Per-element when the case supplies a function (the var() check asks about specific
+      // elements), one shared double otherwise.
+      getComputedStyle: element => (typeof dom.computed === 'function'
+        ? dom.computed(element)
+        : (dom.computed ?? { getPropertyValue: () => '' })),
     },
     document,
     localStorage: {
@@ -492,6 +496,15 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     }
     await settle();
   };
+  /**
+   * The pending timers armed with one delay.
+   *
+   * "How many writes are queued" is a question about the write debounce, not about every
+   * timer in the page — the editor arms others too (the `var()` check waits for a pause).
+   * @param ms - the delay to look for.
+   * @returns the pending entries carrying that delay.
+   */
+  const debounces = (ms) => timers.filter(entry => !entry.cancelled && entry.ms === ms);
   /** Run the effects React would have run after a commit. */
   const runEffects = async () => {
     for (const slot of effects) {
@@ -536,6 +549,7 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     timers,
     runTimers,
     runEffects,
+    debounces,
     unmount,
     waits,
     registrations,
@@ -544,6 +558,9 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
 }
 
 async function main() {
+  /** The editor's write debounce, in ms (`WRITE_DELAY_MS` in lib/client.js). */
+  const WRITE_TICK = 400;
+
   // --- 1. host-backed path --------------------------------------------------
   const host = await boot({
     fetchImpl: async (url) => {
@@ -1903,7 +1920,7 @@ async function main() {
     target: { value: '.slow{color:blue}', selectionStart: 0 },
     nativeEvent: { inputType: 'insertText' },
   });
-  assert.strictEqual(slow.timers.filter(entry => !entry.cancelled).length, 1, 'typing schedules one write');
+  assert.strictEqual(slow.debounces(WRITE_TICK).length, 1, 'typing schedules one write');
   await slow.runTimers();
   assert.ok(releaseWrite !== null, 'the write is in flight');
   slowArea.props.onChange({
@@ -2145,6 +2162,179 @@ async function main() {
   assert.deepStrictEqual(
     orphanRules, [],
     'the stylesheet has no rule for a class nothing applies — got: ' + JSON.stringify(orphanRules),
+  );
+
+  // --- the editor's own undo history ---------------------------------------
+  // A controlled textarea has no usable undo stack: React writes `value` on every keystroke,
+  // and that assignment clears whatever the engine had recorded — Ctrl+Z would do nothing.
+  // So the plugin keeps its own. These assertions are about what a user actually types:
+  // a burst of keystrokes is ONE step, Tab indents, Ctrl+S lands the debounce, and walking
+  // past the end of the history does nothing rather than something surprising.
+  const undoWrites = [];
+  const undoable = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 13, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) {
+        undoWrites.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  const undoView = undoable.registrations[0].component();
+  await undoable.runEffects();
+  const undoArea = findNode(undoView, 'textarea');
+  const undoCarets = [];
+  undoArea.props.ref.current = {
+    selectionStart: 0,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange(start) { undoCarets.push(start); },
+  };
+  const undoSheet = () => undoable.userStyle().textContent;
+  const typeInto2 = (value, caret = value.length, inputType = 'insertText') => {
+    undoArea.props.onChange({ target: { value, selectionStart: caret }, nativeEvent: { inputType } });
+    hookIndex = 0;
+    undoView2 = undoable.registrations[0].component();
+    return undoView2;
+  };
+  let undoView2 = undoView;
+  const press = (key, modifiers = {}) => {
+    const event = { key, preventDefault() {}, ...modifiers };
+    // A fresh pass first: the handler closes over the hooks of the render it came from, and
+    // reading props off a render with a moved hook index hands back a different closure.
+    hookIndex = 0;
+    const view = undoable.registrations[0].component();
+    findNode(view, 'textarea').props.onKeyDown(event);
+    hookIndex = 0;
+    undoable.registrations[0].component();
+    return event;
+  };
+
+  typeInto2('.x{color:blue}');
+  typeInto2('.x{color:blu}', 14);
+  typeInto2('.x{color:bl}', 13);
+  assert.strictEqual(undoSheet(), '.x{color:bl}', 'three keystrokes in one burst');
+  press('z', { ctrlKey: true });
+  await undoable.runEffects();
+  assert.strictEqual(
+    undoSheet(), '.x{color:red}',
+    'one press of Ctrl+Z walks back the whole burst — got: ' + JSON.stringify(undoSheet()),
+  );
+  assert.deepStrictEqual(undoCarets, [0], 'and the caret returns to where the undo entry recorded it');
+  press('z', { ctrlKey: true });
+  assert.strictEqual(undoSheet(), '.x{color:red}', 'and pressing it again at the start does nothing');
+  press('z', { ctrlKey: true, shiftKey: true });
+  assert.strictEqual(undoSheet(), '.x{color:bl}', 'Ctrl+Shift+Z walks forward again');
+  press('y', { ctrlKey: true });
+  assert.strictEqual(undoSheet(), '.x{color:bl}', 'and Ctrl+Y at the end of the redo stack does nothing');
+
+  // Tab indents — but only with no completion list open: with one open, Tab accepts the
+  // suggestion (the long-standing behaviour). Escape closes it, which is what a user does.
+  press('Escape');
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  undoable.registrations[0].component();
+  assert.ok(
+    !renderedClasses.includes('dshCc_suggest'),
+    'Escape closes the completion list — classes: ' + JSON.stringify(renderedClasses),
+  );
+  undoArea.props.ref.current.selectionStart = 0;
+  press('Tab');
+  assert.strictEqual(undoSheet(), '  .x{color:bl}', 'Tab adds two spaces at the caret');
+  await undoable.runEffects();
+  assert.strictEqual(undoCarets.at(-1), 2, 'and puts the caret after them — carets: ' + JSON.stringify(undoCarets));
+  undoArea.props.ref.current.selectionStart = 2;
+  press('Tab', { shiftKey: true });
+  assert.strictEqual(undoSheet(), '.x{color:bl}', 'Shift+Tab takes them away again');
+
+  // Ctrl+S lands the pending write now instead of in 400 ms.
+  typeInto2('.x{color:green}');
+  const writesBefore = undoWrites.length;
+  assert.strictEqual(undoable.debounces(WRITE_TICK).length, 1, 'the write is still debounced');
+  press('s', { ctrlKey: true });
+  await settle();
+  assert.strictEqual(
+    undoWrites.length, writesBefore + 1,
+    'Ctrl+S writes immediately — writes: ' + JSON.stringify(undoWrites.map(entry => entry.css)),
+  );
+  assert.strictEqual(undoWrites[writesBefore].css, '.x{color:green}', 'with the text on screen');
+  assert.strictEqual(
+    undoable.debounces(WRITE_TICK).length, 0,
+    'and the debounce it replaced does not fire a second write',
+  );
+
+  // --- a var() that cannot resolve where its rule applies -------------------
+  // Another component's card can define a custom property that is simply absent everywhere
+  // else: the engine drops the declarations using it and says nothing. The editor asks the
+  // document instead — and stays quiet about what it cannot ask (a selector matching nothing)
+  // or about what cannot fail (`var(--x, fallback)`).
+  const varNode = (className) => {
+    const element = {
+      tagName: 'DIV',
+      className,
+      attributes: {},
+      parentElement: null,
+      getAttribute: () => null,
+      matches: selector => matchesSelector(element, selector),
+    };
+    return element;
+  };
+  const varSheet = [
+    '.a { color: var(--dsw-alias-label-primary); }',
+    '.b { box-shadow: var(--dsl-g-shadow-card); }',
+    '.c { border: 1px solid var(--not-here, red); }',
+    '.nope { color: var(--whatever); }',
+  ].join('\n');
+  const varCheck = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 40, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: varSheet });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: {
+      nodes: [varNode('a'), varNode('b'), varNode('c')],
+      // Only `.a` resolves its variable; `.c`'s use carries a fallback and `.nope` matches
+      // nothing, so neither may be reported.
+      computed: element => ({
+        getPropertyValue: name => (element.className === 'a' && name === '--dsw-alias-label-primary' ? 'red' : ''),
+      }),
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  varCheck.registrations[0].component();
+  assert.ok(
+    !renderedText.some(text => text.includes('变量')),
+    'the var() check waits for a pause instead of running on the first render',
+  );
+  await varCheck.runEffects();
+  await varCheck.runTimers();
+  hookIndex = 0;
+  renderedText.length = 0;
+  varCheck.registrations[0].component();
+  const status = renderedText.filter(text => text.includes('行')).join(' | ');
+  assert.ok(
+    status.includes('--dsl-g-shadow-card'),
+    'a var() that resolves nowhere on the elements the rule matches is reported — status: ' + JSON.stringify(status),
+  );
+  assert.ok(status.includes('第 2 行'), 'at the line the declaration is on — status: ' + JSON.stringify(status));
+  assert.ok(
+    !status.includes('--dsw-alias-label-primary'),
+    'a variable that does resolve is not reported — status: ' + JSON.stringify(status),
+  );
+  assert.ok(
+    !status.includes('--not-here') && !status.includes('--whatever'),
+    'and neither is one with a fallback, nor one whose rule matches nothing — status: ' + JSON.stringify(status),
   );
 
   // --- element picker -------------------------------------------------------
@@ -2880,7 +3070,7 @@ async function main() {
     nativeEvent: { inputType: 'insertText' },
   });
   assert.strictEqual(
-    handoff.timers.filter(entry => !entry.cancelled).length, 1,
+    handoff.debounces(WRITE_TICK).length, 1,
     'typing schedules exactly one write',
   );
   hookIndex = 0;
@@ -2902,7 +3092,7 @@ async function main() {
   handoff.dispatch('keydown', { key: 'Enter', preventDefault() {} });
 
   assert.strictEqual(
-    handoff.timers.filter(entry => !entry.cancelled).length, 0,
+    handoff.debounces(WRITE_TICK).length, 0,
     'the pending debounced write is taken over rather than left to fire',
   );
   assert.strictEqual(
@@ -2986,7 +3176,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, variable check, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
 }
 
 main().catch((error) => {

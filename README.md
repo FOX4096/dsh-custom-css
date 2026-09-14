@@ -36,7 +36,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 - 注册在 `settings.general.item` 槽，`order: 12`。DSH 自带的 `ui-theme` 在这个槽上占了 `appearance`(order 10) 和 `font-size`(order 11)，所以这一行正好落在它们下面。
 - 样式表由 **host 侧**读写，存放在 `~/.dsh/custom-css/`（`$DSH_HOME/custom-css`，`$DSH_HOME` 未设时为 `~/.dsh`）。是普通文件：可用任意编辑器改、可备份、可放进版本库。
 - 当前活动文件名与**各文件的开关**记录在同目录的 `active.json`（如 `{"active":"custom.css","disabled":["dark-tweak.css"]}`）。
-- 编辑内容**即时生效**（防抖 400ms 后写回文件并重绘页面）。
+- 编辑内容**即时生效**（防抖 400ms 后写回文件并重绘页面）。编辑器自带**撤销/重做**（每次连续输入的停顿算一步）、**Tab / Shift+Tab 缩进**、**Ctrl/Cmd+S 立即写盘**；补全列表打开时 Tab 是「采用建议」。
 - 编辑器是 DevTools Styles 标签页的样式：左侧**行号 gutter**、**语法高亮**（注释 / 选择器 / 属性 / 值 / 标点）、输入时弹出**补全列表**。
   - 高亮用 DSH 自己的 shiki 配色 token（`--shiki-token-keyword/constant/string/comment/punctuation`），所以与 Markdown 代码块同色并随浅深主题切换；渲染前逐段 HTML 转义，样式表永远不可能变成标记。
   - **补全数据来自浏览器本身**：属性名是从 `CSSStyleDeclaration.prototype` 枚举出来的（即该引擎真正认识的全部属性，含厂商前缀与新增属性），不再依赖手写列表 —— 手写列表只在没有 DOM 的调用方（如测试）里兜底。属性值的枚举集合仍由插件维护，但每个候选都先过 `CSS.supports(prop, value)`，引擎不认的直接不显示。
@@ -62,6 +62,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
   - 面板**贴着编辑器的下沿**伸缩：拖编辑器右下角的 resize 手柄，两个框一起变高，不会一大一小。
   - 选择器按钮浮在高亮层上（该层其余部分仍然点击穿透到文本框），所以点选择器不会把光标打乱。
 - **格式校验**：每次渲染都扫一遍 —— 括号与注释必须闭合、每条声明必须可解析、每个值必须被引擎接受（`CSS.supports`）。有问题时状态行变红并给出**行首问题 + 总数**（如 `第 3 行 color 的值无效：notacolor`、`第 73 行 syntax 必须是带引号的字符串，例如 '<color>' 等 3 处`），最多看 5 处；正常时状态行保持中性色。
+  - **变量体检**（停顿 600ms 后跑一次，需要读文档所以是异步的）：自定义属性是继承的，所以「这个变量有没有值」是个关于**元素**的问题 —— 编辑器把每条规则的选择器在页面里匹配一遍，再从命中的元素上读该属性，读不到就在同一份问题列表里报出来（`变量 --dsl-g-shadow-card 在这条规则命中的元素上读不到`）。别的插件在**自己卡片上**定义的令牌，在卡片外面用就是这么静默失效的。两种情况故意不报：规则没命中任何元素（没得问），以及 `var(--x, 备用值)`（有备用值就没有可丢的）。
   - **描述符块走自己的规则**：`@property --x { syntax: '<color>'; inherits: true; initial-value: … }` 里的 `syntax` / `inherits` / `initial-value` 是 **descriptor 而不是 CSS 属性**，`CSS.supports()` 一律不认 —— 早期版本就是把它们当声明判，于是一个完全合法的 `@property` 被报成 3 处错误。现在按块类型分流：`@property` 用描述符规则校（`syntax` 必须带引号、`inherits` 只能 `true`/`false`），`@font-face` / `@page` / `@counter-style` / `@viewport` / `@font-palette-values` / `@font-feature-values` 这些描述符块整块交给引擎，其余规则照旧逐条过 `CSS.supports`。
 - 注入的 `<style id="dsh-custom-css-user-style">` 追加到 `<head>` 末尾，同特异性下优先于内置样式表；需要压过内置规则时用 `!important`。
 - 启动时由 `apply()` 直接读取并应用活动样式表 —— 不依赖设置面板打开（只在面板挂载的组件里应用的话，普通对话页永远拿不到样式）。
