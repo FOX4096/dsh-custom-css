@@ -2265,7 +2265,7 @@ async function main() {
    * Render the row, arm the picker, select the element under the pointer and commit the
    * default candidate. Records every caret the row places, from before the pick onwards.
    */
-  const pickWith = async (harness) => {
+  const pickWith = async (harness, target = pickedTarget, beforeCommit) => {
     hookIndex = 0;
     const view = harness.registrations[0].component();
     await harness.runEffects();
@@ -2283,7 +2283,9 @@ async function main() {
     harness.registrations[0].component();
     await harness.runEffects();
     harness.dispatch('pointermove', { clientX: 30, clientY: 50 });
-    harness.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+    harness.dispatch('click', { target, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+    // The panel is up once the click locked the element and before Enter commits it.
+    if (beforeCommit !== undefined) beforeCommit();
     harness.dispatch('keydown', { key: 'Enter', preventDefault() {} });
     return { carets, editor };
   };
@@ -2327,6 +2329,92 @@ async function main() {
     latePick.carets, [],
     'a handoff is spent by the pick itself, so a later unrelated edit cannot yank the caret '
       + 'into the picked rule — carets: ' + JSON.stringify(latePick.carets),
+  );
+
+  // --- a value with a newline must not become a broken selector ------------
+  // `aria-label` and `data-*` values are free text, so they can contain a line break — and a
+  // raw newline ends a CSS string: the selector stops being a selector. Every probe on it
+  // throws, and a throw used to score as "one match", so the broken candidate took the
+  // uniqueness bonus, won the default and was written into the sheet, where it styled
+  // nothing at all. The engine rejects it here exactly like a browser does.
+  const newlineNode = node('div', {
+    className: 'dsh-two-line',
+    attributes: { 'aria-label': '第一行\n第二行' },
+    rect: { top: 10, left: 10, width: 200, height: 40 },
+  });
+  const newlineWrites = [];
+  const newline = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) {
+        newlineWrites.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: {
+      hit: newlineNode,
+      matches: (selector) => {
+        if (String(selector).includes('\n')) throw new Error('invalid selector');
+        return 1;
+      },
+    },
+  });
+  await pickWith(newline, newlineNode);
+  assert.strictEqual(newlineWrites.length, 1, 'the pick is written');
+  assert.ok(
+    newlineWrites[0].css.includes('第一行\\a 第二行'),
+    'a newline in the value is escaped for the selector — written: ' + JSON.stringify(newlineWrites[0].css),
+  );
+  assert.ok(
+    !newlineWrites[0].css.includes('第一行\n第二行'),
+    'and the raw newline never reaches the sheet — written: ' + JSON.stringify(newlineWrites[0].css),
+  );
+
+  // --- an unprobeable candidate must not win as if it were unique ----------
+  // "Unknown" is not "one". A candidate whose match count cannot be obtained must not take
+  // the bonus uniqueness grants: otherwise the least trustworthy candidate becomes the
+  // default precisely because nobody could check it.
+  const unknownWrites = [];
+  const unknownLabels = [];
+  const unknown = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) {
+        unknownWrites.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: {
+      hit: pickedTarget,
+      // The best-evidence candidate is the one that cannot be probed here; everything else
+      // answers normally, so a unique alternative exists and must win instead.
+      matches: (selector) => {
+        if (String(selector).includes('aria-label')) throw new Error('cannot probe');
+        return 1;
+      },
+    },
+  });
+  await pickWith(unknown, pickedTarget, () => {
+    const board = unknown.document.body.children.find(child => child.className === 'dshCc_pickPanel');
+    for (const row of (board?.children ?? [])[1]?.children ?? []) unknownLabels.push(row.textContent);
+  });
+  assert.strictEqual(unknownWrites.length, 1, 'the pick is written');
+  assert.ok(
+    unknownLabels.some(label => label.includes('命中数未知')),
+    'and the panel says the count is unknown instead of dressing up a failure as a number — '
+      + 'labels: ' + JSON.stringify(unknownLabels),
+  );
+  assert.ok(
+    unknownWrites[0].css.includes('div.dsh-music-qq-head'),
+    'a candidate nobody could probe does not win the default — written: ' + JSON.stringify(unknownWrites[0].css),
   );
 
   // --- a pick taken mid-debounce must still report "已保存" -----------------
@@ -2466,7 +2554,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, unmount flush verified');
 }
 
 main().catch((error) => {
