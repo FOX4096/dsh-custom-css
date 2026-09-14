@@ -225,7 +225,7 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       const match = /^style\[data-plugin-css="(.*)"\]$/.exec(selector);
       return match === null ? null : (styleTags.find(element => element.dataset.pluginCss === match[1]) ?? null);
     },
-    querySelectorAll: selector => new Array(dom.matches === undefined ? 0 : dom.matches(selector)).fill(null),
+    querySelectorAll: selector => (dom.elements !== undefined ? [...dom.elements] : new Array(dom.matches === undefined ? 0 : dom.matches(selector)).fill(null)),
     createElement: makeElement,
     getElementById: id => styleTags.find(element => element.id === id) ?? null,
     elementFromPoint: () => dom.hit ?? null,
@@ -2131,6 +2131,70 @@ async function main() {
     'a pick made after the row unmounted still lands in the sheet — got: ' + JSON.stringify(picker.userStyle().textContent),
   );
   assert.ok(panel() === undefined, 'and the panel cleans itself up');
+
+  // Inserting has to end where the work continues: the settings surface back on screen
+  // and the caret inside the rule that was just written.
+  const careful = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { hit: pickedTarget, matches: () => 1, computed: { getPropertyValue: () => '' } },
+  });
+  // The settings entry the plugin is allowed to click, and a record of the click.
+  let settingsClicked = false;
+  const settingsEntry = node('button', { attributes: { 'aria-label': '设置' } });
+  settingsEntry.click = () => { settingsClicked = true; };
+  careful.dom.elements = [settingsEntry];
+
+  hookIndex = 0;
+  const carefulView = careful.registrations[0].component();
+  await careful.runEffects();
+  buttonWith(carefulView, '拾取元素').props.onClick();
+  hookIndex = 0;
+  careful.registrations[0].component();
+  await careful.runEffects();
+  careful.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  careful.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+  careful.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  assert.strictEqual(settingsClicked, true, 'the settings entry is clicked for the user');
+
+  // The settings surface is now (notionally) back: mount the row and let it consume the
+  // pending rule, which also parks the caret.
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const returnedView = careful.registrations[0].component();
+  const editor = findNode(returnedView, 'textarea');
+  const caretCalls = [];
+  editor.props.ref.current = {
+    selectionStart: 0,
+    scrollTop: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange(start, end) { caretCalls.push([start, end]); },
+  };
+  await careful.runEffects();
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  careful.registrations[0].component();
+  assert.ok(
+    renderedClasses.some(entry => entry.includes('dshCc_panelName')),
+    'the rule the picker wrote is open in the panel',
+  );
+  assert.deepStrictEqual(
+    caretCalls.length, 1,
+    'and the caret was placed once — calls: ' + JSON.stringify(caretCalls),
+  );
+  const writtenSheet = careful.userStyle().textContent;
+  const expectedCaret = writtenSheet.lastIndexOf('{') + 2;
+  assert.deepStrictEqual(
+    caretCalls[0], [expectedCaret, expectedCaret],
+    'inside the new rule, ready to type — expected ' + expectedCaret + ' for ' + JSON.stringify(writtenSheet),
+  );
 
   // Escape and 取消 both end it.
   await arm();
