@@ -182,6 +182,9 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       click() {
         for (const handler of [...(node.handlers.click ?? [])]) handler({ target: node, preventDefault() {} });
       },
+      fire(type) {
+        for (const handler of [...(node.handlers[type] ?? [])]) handler({ target: node, preventDefault() {} });
+      },
       setAttribute(name, value) {
         node.attributes[name] = String(value);
       },
@@ -2098,6 +2101,34 @@ async function main() {
   assert.strictEqual(boxOf().dataset.label, '320×180', 'ArrowRight walks to the next sibling');
   walk.dispatch('keydown', { key: 'ArrowLeft', preventDefault() {} });
   assert.strictEqual(boxOf().dataset.label, '560×400', 'ArrowLeft walks back to the previous one');
+
+  // The slider walks the ancestor chain from whatever the pointer chose — the same
+  // move as the keys, for people who would rather drag.
+  const slider = (barOf()?.children ?? []).find(child => child.className === 'dshCc_pickSlider');
+  assert.ok(slider !== undefined, 'the toolbar carries a depth slider');
+  walk.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'the pointer re-anchors the chain');
+  slider.value = '1';
+  slider.fire('input');
+  assert.strictEqual(boxOf().style.width, '1200px', 'one step up the chain selects the parent');
+  slider.value = '0';
+  slider.fire('input');
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'and back down returns to the element itself');
+  walk.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  assert.strictEqual(slider.value, '0', 'moving the pointer resets the slider with its anchor');
+
+  // The keys are explained on hover rather than permanently occupying the bar.
+  const helpTrigger = (barOf()?.children ?? []).find(child => child.className === 'dshCc_pickHelpTrigger');
+  const help = (barOf()?.children ?? []).find(child => child.className === 'dshCc_pickHelp');
+  assert.ok(helpTrigger !== undefined && help !== undefined, 'the bar offers the key list on hover');
+  assert.strictEqual(help.attributes['data-open'], undefined, 'it starts hidden');
+  helpTrigger.fire('mouseenter');
+  assert.strictEqual(help.attributes['data-open'], 'true', 'hovering opens it');
+  assert.deepStrictEqual(
+    (help.children ?? []).map(child => child.textContent.slice(0, 1)),
+    ['↑', '↓', 'E', 'E'],
+    'and it lists 上一层级 / 下一层级 / 同级 / 确认 / 取消 — got: ' + JSON.stringify((help.children ?? []).map(child => child.textContent)),
+  );
 
   // A click on the toolbar is the toolbar's business: it must not resolve a pick.
   walk.dispatch('click', { target: barOf(), clientX: 1, clientY: 1, preventDefault() {}, stopPropagation() {} });
