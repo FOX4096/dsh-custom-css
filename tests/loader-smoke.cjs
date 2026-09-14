@@ -129,7 +129,7 @@ async function settle() {
  * @param options - `fetchImpl(url, init)` double and optional stored values.
  * @returns the observed host doubles and plugin state.
  */
-async function boot({ fetchImpl, stored = new Map(), supports }) {
+async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
   const styleTags = [];
   const storage = new Map(stored);
   const calls = [];
@@ -140,29 +140,82 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
   // ran a stale effect (and fetched through the previous sandbox).
   hookSlots = [];
   hookIndex = 0;
-  const makeElement = tagName => ({
-    tagName,
-    dataset: {},
-    id: '',
-    textContent: '',
-    remove() {
-      const index = styleTags.indexOf(this);
-      if (index >= 0) styleTags.splice(index, 1);
-    },
-  });
+
+  /**
+   * One node: the style-tag double and, when a test wants it, a real tree node with
+   * attributes, children, geometry and listeners. The picker walks the tree, so the
+   * fake has to be walkable.
+   */
+  const makeElement = (tagName, options = {}) => {
+    const node = {
+      tagName,
+      className: options.className ?? '',
+      dataset: {},
+      style: {},
+      id: '',
+      textContent: '',
+      attributes: { ...(options.attributes ?? {}) },
+      children: [],
+      parentElement: null,
+      appendChild(child) {
+        child.parentElement = node;
+        node.children.push(child);
+        return child;
+      },
+      remove() {
+        const owner = node.parentElement ?? null;
+        const list = owner === null ? styleTags : owner.children;
+        const index = list.indexOf(node);
+        if (index >= 0) list.splice(index, 1);
+      },
+      setAttribute(name, value) {
+        node.attributes[name] = String(value);
+      },
+      getAttribute(name) {
+        return name in node.attributes ? node.attributes[name] : null;
+      },
+      removeAttribute(name) {
+        delete node.attributes[name];
+      },
+      getBoundingClientRect: () => options.rect ?? { top: 0, left: 0, width: 0, height: 0 },
+    };
+    return node;
+  };
+
+  const listeners = [];
+  const documentElement = makeElement('html');
+  const body = makeElement('body');
+  documentElement.appendChild(body);
   const document = {
+    documentElement,
+    body,
     head: { appendChild: element => { styleTags.push(element); } },
+    styleSheets: dom.styleSheets ?? [],
     querySelector(selector) {
       const match = /^style\[data-plugin-css="(.*)"\]$/.exec(selector);
       return match === null ? null : (styleTags.find(element => element.dataset.pluginCss === match[1]) ?? null);
     },
+    querySelectorAll: selector => new Array(dom.matches === undefined ? 0 : dom.matches(selector)).fill(null),
     createElement: makeElement,
     getElementById: id => styleTags.find(element => element.id === id) ?? null,
+    elementFromPoint: () => dom.hit ?? null,
+    addEventListener(type, handler, capture) {
+      listeners.push({ type, handler, capture: capture === true });
+    },
+    removeEventListener(type, handler, capture) {
+      const index = listeners.findIndex(entry => entry.type === type && entry.handler === handler && entry.capture === (capture === true));
+      if (index >= 0) listeners.splice(index, 1);
+    },
   };
 
   let loaded;
   const sandbox = {
-    window: { __ModuleLoader__: { load(module) { loaded = module; } } },
+    window: {
+      __ModuleLoader__: { load(module) { loaded = module; } },
+      innerWidth: dom.innerWidth ?? 1200,
+      innerHeight: dom.innerHeight ?? 800,
+      getComputedStyle: () => dom.computed ?? { getPropertyValue: () => '' },
+    },
     document,
     localStorage: {
       getItem: key => (storage.has(key) ? storage.get(key) : null),
@@ -241,12 +294,22 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
     await settle();
   };
 
+  /** Dispatch to every listener of one type, as the browser would. */
+  const dispatch = (type, event) => {
+    for (const entry of [...listeners]) {
+      if (entry.type === type) entry.handler(event);
+    }
+  };
+
   return {
     mod,
     loaded,
     styleTags,
     storage,
     calls,
+    listeners,
+    dispatch,
+    document,
     effects,
     timers,
     runTimers,
@@ -1743,7 +1806,203 @@ async function main() {
     'the flushed write carries the text that was typed',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, unmount flush verified');
+  // --- element picker -------------------------------------------------------
+  // The feature only earns its keep if the selector survives a DSH upgrade, so this
+  // drives the real flow — arm the button, hover a fake tree, click a node — and
+  // asserts the candidates offered and the rule that lands in the sheet. The fake
+  // tree uses the shapes the app actually has: a CSS-module class with a rotating
+  // hash, a hand-written plugin class, an aria label, and a modal ancestor.
+  const buttonWith = (node, label) => {
+    let found = null;
+    (function walk(current) {
+      if (found !== null || current === null || typeof current !== 'object') return;
+      if (current.type === 'button' && (current.children ?? []).includes(label)) {
+        found = current;
+        return;
+      }
+      for (const child of current.children ?? []) walk(child);
+    })(node);
+    return found;
+  };
+  const node = (tag, options = {}) => {
+    const element = {
+      tagName: tag.toUpperCase(),
+      className: options.className ?? '',
+      attributes: { ...(options.attributes ?? {}) },
+      children: [],
+      parentElement: options.parent ?? null,
+      getAttribute(name) {
+        return name in element.attributes ? element.attributes[name] : null;
+      },
+      setAttribute(name, value) {
+        element.attributes[name] = String(value);
+      },
+      removeAttribute(name) {
+        delete element.attributes[name];
+      },
+      getBoundingClientRect: () => options.rect ?? { top: 0, left: 0, width: 100, height: 40 },
+    };
+    return element;
+  };
+
+  const dialog = node('div', { attributes: { 'aria-modal': 'true' }, rect: { top: 0, left: 0, width: 1200, height: 800 } });
+  const rowInsideDialog = node('div', { parent: dialog, rect: { top: 10, left: 10, width: 560, height: 400 } });
+  const pickedTarget = node('div', {
+    className: '_card_1fywu_26 dsh-music-qq-head',
+    attributes: { 'aria-label': 'QQ 音乐' },
+    parent: dialog,
+    rect: { top: 40, left: 20, width: 320, height: 180 },
+  });
+  dialog.children.push(rowInsideDialog, pickedTarget);
+
+  // The aria label repeats in this interface, so the selector that cannot collide
+  // must win: this is the ranking decision, not just a preference.
+  const picker = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: {
+      hit: pickedTarget,
+      matches: selector => (selector.includes('aria-label') ? 3 : 1),
+      styleSheets: [(() => {
+        const style = ['--dsw-alias-bg-layer-1'];
+        style.getPropertyValue = name => (name === '--dsw-alias-bg-layer-1' ? '#101010' : '');
+        return { cssRules: [{ style }] };
+      })()],
+      computed: { getPropertyValue: name => (name === 'background-color' ? '#101010' : '') },
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const pickerView = picker.registrations[0].component();
+  await picker.runEffects();
+  assert.ok(buttonWith(pickerView, '拾取元素') !== undefined, 'the row offers an element picker');
+
+  buttonWith(pickerView, '拾取元素').props.onClick();
+  pickerView.props.ref.current = rowInsideDialog;
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const armedView = picker.registrations[0].component();
+  await picker.runEffects();
+  assert.ok(
+    picker.listeners.some(entry => entry.type === 'click'),
+    'arming the picker listens for the click that resolves the element',
+  );
+  assert.strictEqual(
+    dialog.attributes['data-dshCc-picking'],
+    'true',
+    'the settings surface steps aside so the page behind it can be clicked',
+  );
+
+  const box = picker.document.body.children.find(child => child.className === 'dshCc_pickBox');
+  assert.ok(box !== undefined, 'the highlight box is outside the dimmed surface');
+  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  assert.strictEqual(box.dataset.label, 'div · 320×180', 'hovering reports the element and its size');
+  assert.strictEqual(box.style.top, '40px', 'and the box follows it');
+
+  picker.dispatch('click', {
+    clientX: 30,
+    clientY: 50,
+    preventDefault() {},
+    stopPropagation() {},
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const pickedView = picker.registrations[0].component();
+  await picker.runEffects();
+  assert.ok(
+    renderedText.some(text => text.includes('已选中 div')),
+    'the picked element is reported — got: ' + JSON.stringify(renderedText.slice(0, 8)),
+  );
+  assert.ok(
+    !picker.listeners.some(entry => entry.type === 'click'),
+    'resolving the element detaches the session listeners',
+  );
+  assert.strictEqual(dialog.attributes['data-dshCc-picking'], undefined, 'and puts the surface back');
+
+  const candidates = renderedText.filter(text => typeof text === 'string' && text.includes('dsh-music-qq-head') || text.includes('aria-label') || text.includes('class*='));
+  assert.deepStrictEqual(
+    renderedText.filter(text => text.startsWith('div.dsh-music') || text.startsWith('div[aria-label') || text.startsWith('div[class*=')),
+    ['div.dsh-music-qq-head', 'div[aria-label="QQ 音乐"]', 'div[class*="_card_"]'],
+    'candidates are ranked by what survives an upgrade, and a colliding aria label is demoted — got: '
+      + JSON.stringify(candidates),
+  );
+  assert.ok(
+    renderedText.some(text => text.includes('3 个命中')),
+    'the colliding candidate says how many elements it would hit',
+  );
+  assert.ok(
+    renderedText.some(text => text.includes('background-color: var(--dsw-alias-bg-layer-1)')),
+    'the token the element actually resolves to is offered as a chip',
+  );
+
+  buttonWith(pickedView, '插入规则').props.onClick();
+  assert.strictEqual(
+    picker.userStyle().textContent,
+    '.x{color:red}\n\ndiv.dsh-music-qq-head {\n  background-color: var(--dsw-alias-bg-layer-1);\n}',
+    'inserting writes the rule with the token, not the resolved literal',
+  );
+
+  // An element whose selector is already in the sheet must open that rule instead of
+  // appending a second one — the fastest way to make a sheet unmaintainable.
+  const existing = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: 'div[aria-label="QQ 音乐"] { color: red }' });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { hit: pickedTarget, matches: () => 1 },
+  });
+  hookIndex = 0;
+  const existingView = existing.registrations[0].component();
+  await existing.runEffects();
+  buttonWith(existingView, '拾取元素').props.onClick();
+  hookIndex = 0;
+  existing.registrations[0].component();
+  await existing.runEffects();
+  existing.dispatch('click', { clientX: 1, clientY: 1, preventDefault() {}, stopPropagation() {} });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const existingPicked = existing.registrations[0].component();
+  await existing.runEffects();
+  buttonWith(existingPicked, '插入规则').props.onClick();
+  assert.strictEqual(
+    existing.userStyle().textContent,
+    'div[aria-label="QQ 音乐"] { color: red }',
+    'an existing rule is opened, not duplicated',
+  );
+
+  // Escape leaves no trace: no listeners, no dimmed surface, no box.
+  hookIndex = 0;
+  const escapeView = existing.registrations[0].component();
+  await existing.runEffects();
+  buttonWith(escapeView, '拾取元素').props.onClick();
+  hookIndex = 0;
+  existing.registrations[0].component();
+  await existing.runEffects();
+  existing.dispatch('keydown', { key: 'Escape', preventDefault() {} });
+  hookIndex = 0;
+  existing.registrations[0].component();
+  await existing.runEffects();
+  assert.ok(
+    !existing.listeners.some(entry => entry.type === 'keydown' || entry.type === 'click'),
+    'Escape detaches the session',
+  );
+  assert.ok(
+    !existing.document.body.children.some(child => child.className === 'dshCc_pickBox' || child.className === 'dshCc_pickBar'),
+    'and removes the overlay it added to the document',
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
 }
 
 main().catch((error) => {
