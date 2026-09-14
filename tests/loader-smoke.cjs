@@ -2317,6 +2317,65 @@ async function main() {
     'and 保存中 is not left on screen — status was: ' + JSON.stringify(renderedText),
   );
 
+  // --- the write a pick takes over must not report for the sheet either -----
+  // `takeOver` cancels a *pending* debounce, but a request already on the wire cannot be
+  // cancelled: its response still arrives. Before the handoff bumped the row's epoch, that
+  // response announced "已保存" while the picker's own, newer write was the one still in
+  // flight — the same lie the typing path's epoch was introduced for, one layer out.
+  const inflight = [];
+  const taken = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) {
+        await new Promise(resolve => inflight.push(resolve));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { hit: pickedTarget, matches: () => 1 },
+  });
+  /** The footer as the current state renders it. */
+  const footerOf = (harness) => {
+    hookIndex = 0;
+    renderedText.length = 0;
+    harness.registrations[0].component();
+    return renderedText.join(' | ');
+  };
+  hookIndex = 0;
+  const takenRow = taken.registrations[0].component();
+  await taken.runEffects();
+  findNode(takenRow, 'textarea').props.onChange({
+    target: { value: '.x{color:blue}', selectionStart: 13 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  await taken.runTimers();
+  assert.strictEqual(inflight.length, 1, 'the debounced write is on the wire');
+  buttonWith(takenRow, '拾取元素').props.onClick();
+  hookIndex = 0;
+  taken.registrations[0].component();
+  await taken.runEffects();
+  taken.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  taken.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+  taken.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  assert.strictEqual(inflight.length, 2, 'and the pick writes through on top of it');
+  // The taken-over write answers first — it must not speak for the sheet.
+  inflight[0]();
+  await settle();
+  await settle();
+  assert.ok(
+    footerOf(taken).includes('保存中'),
+    'a superseded write cannot claim 已保存 while the pick is still in flight — status was: ' + footerOf(taken),
+  );
+  inflight[1]();
+  await settle();
+  assert.ok(
+    footerOf(taken).includes('已保存'),
+    'the pick reports back once its own write lands — status was: ' + footerOf(taken),
+  );
+
   console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
 }
 
