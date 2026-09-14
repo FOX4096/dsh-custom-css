@@ -2239,7 +2239,85 @@ async function main() {
     'an existing rule is opened, not duplicated',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
+  // --- a pick taken mid-debounce must still report "已保存" -----------------
+  // The picker takes this row's pending debounced write out of the way before it writes
+  // through: without that, the stale text fires after the pick and puts the old sheet
+  // back, with no error anywhere. That handoff was one-way — the take-over cancelled the
+  // very timer whose completion the footer was waiting on, and nothing ever replaced it.
+  // The result was a sheet written to disk and a footer stuck on "保存中" until the next
+  // keystroke. The contract needs both directions: take over, then report back.
+  const handoffWrites = [];
+  const handoff = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) {
+        handoffWrites.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { hit: pickedTarget, matches: () => 1 },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const handoffRow = handoff.registrations[0].component();
+  await handoff.runEffects();
+  findNode(handoffRow, 'textarea').props.onChange({
+    target: { value: '.x{color:blue}', selectionStart: 13 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  assert.strictEqual(
+    handoff.timers.filter(entry => !entry.cancelled).length, 1,
+    'typing schedules exactly one write',
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  const typedRow = handoff.registrations[0].component();
+  await handoff.runEffects();
+  assert.ok(
+    renderedText.some(text => text.includes('保存中')),
+    'and the footer says 保存中 while that write is pending — status was: ' + JSON.stringify(renderedText),
+  );
+
+  // Pick inside the 400 ms window: the write the footer is waiting on is taken over.
+  buttonWith(typedRow, '拾取元素').props.onClick();
+  hookIndex = 0;
+  handoff.registrations[0].component();
+  await handoff.runEffects();
+  handoff.dispatch('pointermove', { clientX: 30, clientY: 50 });
+  handoff.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+  handoff.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+
+  assert.strictEqual(
+    handoff.timers.filter(entry => !entry.cancelled).length, 0,
+    'the pending debounced write is taken over rather than left to fire',
+  );
+  assert.strictEqual(
+    handoffWrites.length, 1,
+    'and it never reaches the host on its own: the pick is the only write — got: ' + JSON.stringify(handoffWrites),
+  );
+  assert.strictEqual(
+    handoffWrites[0].css,
+    '.x{color:blue}\n\ndiv[aria-label="QQ 音乐"] {\n  \n}',
+    'the sheet holds the pick, not the text that was still inside the debounce',
+  );
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  handoff.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('已保存')),
+    'the take-over reports back, so the footer does not stay stuck on 保存中 — status was: ' + JSON.stringify(renderedText),
+  );
+  assert.ok(
+    !renderedText.some(text => text.includes('保存中')),
+    'and 保存中 is not left on screen — status was: ' + JSON.stringify(renderedText),
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
 }
 
 main().catch((error) => {
