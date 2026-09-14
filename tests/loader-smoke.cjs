@@ -2113,6 +2113,34 @@ async function main() {
     'and a box that carries the label still paints it',
   );
 
+  // --- every class the row's stylesheet styles is one the code applies ------
+  // Dead CSS is invisible: a rule whose class nothing sets looks exactly like a rule that
+  // works — and it is also what a renamed control leaves behind, so a typo'd class name
+  // (styled as one thing, applied as another) is invisible in the same way. Four rules and a
+  // whole function were pruned for real; this is the audit that keeps the list at zero.
+  //
+  // Two subtleties, both learned the hard way while pruning:
+  //   * the stylesheet itself names every styled class, so "applied" is searched OUTSIDE it;
+  //   * `'dshCc_tok' + kindOf()` builds a name by concatenation, so a styled class that
+  //     extends a prefix the code emits counts as applied — `dshCc_tokProp` is live syntax
+  //     colouring, and calling it dead would be a false alarm.
+  const cssStart = code.indexOf('const ROW_CSS = [');
+  const cssEnd = code.indexOf("].join('');", cssStart);
+  assert.ok(cssStart > 0 && cssEnd > cssStart, 'the row stylesheet is findable in the source');
+  const rowCssSource = code.slice(cssStart, cssEnd);
+  const emittingSource = code.slice(0, cssStart) + code.slice(cssEnd);
+  const styled = new Set([...rowCssSource.matchAll(/\.(dshCc_[A-Za-z0-9_-]+)/g)].map(match => match[1]));
+  const emitted = new Set([...emittingSource.matchAll(/(dshCc_[A-Za-z0-9_-]*)/g)].map(match => match[1]));
+  const emittedPrefixes = [...emittingSource.matchAll(/(dshCc_[A-Za-z0-9_-]*)'\s*\+/g)].map(match => match[1]);
+  assert.ok(styled.size > 50, 'the audit read a real stylesheet, not a fragment');
+  const orphanRules = [...styled]
+    .filter(name => !emitted.has(name) && !emittedPrefixes.some(prefix => name.startsWith(prefix)))
+    .sort();
+  assert.deepStrictEqual(
+    orphanRules, [],
+    'the stylesheet has no rule for a class nothing applies — got: ' + JSON.stringify(orphanRules),
+  );
+
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
   // lives outside the settings row (so picking keeps working after the settings page
@@ -2815,7 +2843,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, honest DOM stubs, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, unmount flush verified');
 }
 
 main().catch((error) => {
