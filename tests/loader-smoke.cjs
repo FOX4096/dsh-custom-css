@@ -22,6 +22,33 @@ const code = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8');
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
 let hookIndex = 0;
+
+/**
+ * Begin one hook call, and mark the start of a render pass.
+ *
+ * A pass begins when the first hook runs after a test reset `hookIndex`, so the
+ * effect slots collected by the previous pass stop being reachable. Keyed on "the
+ * first hook of any kind" rather than on one particular hook: which hook the row
+ * happens to call first is the row's business, and assuming it silently broke the
+ * moment a hook was added in front of it.
+ * @returns the index of this hook call within the pass.
+ */
+function beginHook() {
+  if (hookIndex === 0) effects.length = 0;
+  return hookIndex++;
+}
+
+/**
+ * Shallow comparison of two deps arrays, the way React compares them.
+ * @param left - the deps the effect last ran with.
+ * @param right - the deps it was just registered with.
+ * @returns true when React would consider them unchanged.
+ */
+function sameDeps(left, right) {
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  return left.every((entry, index) => Object.is(entry, right[index]));
+}
 /** Text nodes produced by the last render pass, for copy assertions. */
 const renderedText = [];
 /** Class names produced by the last render pass, for structure assertions. */
@@ -33,37 +60,36 @@ const timers = [];
 
 const fakeReact = {
   useState(initial) {
-    const index = hookIndex++;
+    const index = beginHook();
     if (hookSlots[index] === undefined) hookSlots[index] = typeof initial === 'function' ? initial() : initial;
     return [hookSlots[index], (next) => {
       hookSlots[index] = typeof next === 'function' ? next(hookSlots[index]) : next;
     }];
   },
-  useEffect(effect) {
-    const index = hookIndex++;
+  useEffect(effect, deps) {
+    const index = beginHook();
     // React enough for a smoke test: keep the latest effect of this slot so a test
     // can run it, and its cleanup so an unmount can be simulated. Without this the
     // debounce / flush / unmount paths never executed at all.
-    const slot = hookSlots[index] ?? { effect: null, cleanup: null };
-    // A freshly committed effect has not run yet: drop the previous cleanup so
-    // runEffects installs this one instead of skipping the slot.
+    const slot = hookSlots[index] ?? { effect: null, cleanup: null, deps: undefined, ranDeps: undefined, ran: false };
     slot.effect = effect;
-    slot.cleanup = null;
+    // Deps decide whether the effect runs again: an array re-runs only when an
+    // entry changed, no array runs after every commit. Re-running everything made
+    // tests pass on behaviour React would never produce.
+    slot.pending = !slot.ran || deps === undefined || !sameDeps(slot.ranDeps, deps);
+    slot.deps = deps;
     hookSlots[index] = slot;
     effects.push(slot);
   },
   useRef(value) {
-    const index = hookIndex++;
+    const index = beginHook();
     if (hookSlots[index] === undefined) hookSlots[index] = { current: value };
     return hookSlots[index];
   },
   // Handed the accessors as bare references, exactly like React does — so an
   // accessor that reads `this` throws here the way it would in the browser.
   useSyncExternalStore(subscribe, getSnapshot) {
-    hookIndex += 1;
-    // The row's first hook marks a new render pass: effects recorded by the
-    // previous commit are done, so only this pass's slots stay reachable.
-    effects.length = 0;
+    beginHook();
     subscribe(() => {});
     return getSnapshot();
   },
@@ -195,9 +221,14 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
   /** Run the effects React would have run after a commit. */
   const runEffects = async () => {
     for (const slot of effects) {
-      if (slot.effect !== null && typeof slot.effect === 'function' && slot.cleanup === null) {
-        slot.cleanup = slot.effect();
-      }
+      if (slot.effect === null || typeof slot.effect !== 'function' || slot.pending === false) continue;
+      // React runs the previous cleanup just before re-running an effect whose deps
+      // changed, and leaves it installed otherwise.
+      if (typeof slot.cleanup === 'function') slot.cleanup();
+      slot.cleanup = slot.effect();
+      slot.ran = true;
+      slot.ranDeps = slot.deps;
+      slot.pending = false;
     }
     await settle();
   };
@@ -1357,6 +1388,152 @@ async function main() {
     'a failed write never claims the sheet is saved — status was: ' + JSON.stringify(renderedText),
   );
 
+  // --- the completion path skips strings as well ---------------------------
+  // The parser, the validator, the highlighter, the reader, the writer and the
+  // splitter all learned that a string is opaque. Completion had not, and it is
+  // the one place a user meets the difference directly: `content: "}"` is how you
+  // clear a float, and the brace inside it closed the block on paper — so every
+  // completion after that rule silently stopped working.
+  const typeInto = (text) => {
+    textarea.props.onChange({
+      target: { value: text, selectionStart: text.length },
+      nativeEvent: { inputType: 'insertText' },
+    });
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    return renderRow();
+  };
+  // The suggestion list is rendered from state, so a rendered list is the honest
+  // signal; its slot is discovered from behaviour rather than hard-coded, because
+  // the row's hook order is its own business.
+  const stateOf = () => hookSlots.find(slot => slot !== null && typeof slot === 'object'
+    && Array.isArray(slot.items) && typeof slot.word === 'string') ?? null;
+  const suggestionsIn = (view) => {
+    const labels = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (String(node.props?.className ?? '') === 'dshCc_suggestItem') {
+        labels.push((node.children ?? []).find(child => typeof child === 'string'));
+      }
+      for (const child of node.children ?? []) walk(child);
+    })(view);
+    return labels;
+  };
+
+  const plainSuggest = typeInto('.a { color: red; disp');
+  const plainState = stateOf();
+  assert.deepStrictEqual(
+    [...(plainState?.items ?? [])],
+    ['display'],
+    'the baseline: a property is completed normally',
+  );
+  assert.strictEqual(plainState.kind, '属性', 'and it is offered as a property name');
+  assert.deepStrictEqual(suggestionsIn(plainSuggest), ['display'], 'and the list is on screen');
+
+  const braceSuggest = typeInto('.a { content: "}"; disp');
+  assert.deepStrictEqual(
+    [...(stateOf()?.items ?? [])],
+    ['display'],
+    'a brace inside a string does not stop the completions that follow — '
+      + 'the block is still open, got: ' + JSON.stringify(suggestionsIn(braceSuggest)),
+  );
+
+  const quotedSemicolon = typeInto('.a { color: red; display: ";" fl');
+  const quotedState = stateOf();
+  assert.strictEqual(
+    quotedState?.kind,
+    '值',
+    'a semicolon inside a string does not start a new declaration: the caret is still '
+      + 'in the display declaration, so its values are offered — got kind '
+      + JSON.stringify(quotedState?.kind) + ' with ' + JSON.stringify(quotedState?.items),
+  );
+  assert.deepStrictEqual(
+    [...quotedState.items],
+    ['flex'],
+    'and the offered value is the display keyword itself',
+  );
+
+  typeInto('.a { color: red; display: "f');
+  assert.strictEqual(
+    stateOf(),
+    null,
+    'nothing is completed inside an unterminated string — the caret is in a value, not at a boundary',
+  );
+
+  // --- the last three string-blind spots -----------------------------------
+  // 1. A comment between the property name and its colon is legal CSS — comments
+  //    are whitespace between tokens — so it must not be reported as two
+  //    unparsable declarations.
+  const inlineComment = '.a { color/* x */: red }';
+  textarea.props.onChange({
+    target: { value: inlineComment, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  renderedText.length = 0;
+  renderRow();
+  assert.ok(
+    !renderedClasses.includes('dshCc_error'),
+    'a comment between the name and the colon is accepted — status: ' + JSON.stringify(renderedText.slice(-2)),
+  );
+
+  // 2. The normaliser restores a missing `;` before a newline — inside the code, not
+  //    inside a comment that merely reads like it.
+  const codeComment = '.a { /* the fallback\n  color: red */ display: block }';
+  textarea.props.onChange({
+    target: { value: codeComment, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const codeCommentView = renderRow();
+  findNode(codeCommentView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const codeCommentPanel = renderRow();
+  dropdowns.length = 0;
+  collectDropdowns(codeCommentPanel);
+  const codeCommentDisplay = dropdowns.find(item => item.props.ariaLabel === '显示');
+  assert.ok(codeCommentDisplay !== undefined, 'the display dropdown renders beside the comment');
+  codeCommentDisplay.props.onPick('grid');
+  const afterCodeComment = host.userStyle().textContent;
+  assert.ok(
+    afterCodeComment.includes('/* the fallback\n  color: red */'),
+    'writing another declaration does not edit the comment reading — got: ' + JSON.stringify(afterCodeComment),
+  );
+  assert.ok(afterCodeComment.includes('display: grid'), 'and the write itself landed');
+
+  // 3. Deleting a declaration keeps a real comment that shared its chunk — and does
+  //    not resurrect text that only looks like one because it sits in a string.
+  const commentLookalike = '.a { content: "/* x */"; color: red }';
+  textarea.props.onChange({
+    target: { value: commentLookalike, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const lookalikeView = renderRow();
+  findNode(lookalikeView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const lookalikePanel = renderRow();
+  const lookalikeField = collectPropTexts(lookalikePanel).find(field => field.props['aria-label'] === '生成内容');
+  assert.ok(lookalikeField !== undefined, 'the content row renders');
+  lookalikeField.props.onChange({
+    target: { value: '', selectionStart: 0 },
+    nativeEvent: { inputType: 'deleteContentBackward' },
+  });
+  const afterLookalike = host.userStyle().textContent;
+  assert.ok(
+    !afterLookalike.includes('/* x */'),
+    'a string is not carried over as a comment — got: ' + JSON.stringify(afterLookalike),
+  );
+  assert.ok(
+    afterLookalike.includes('color: red'),
+    'the sibling declaration survives the delete — got: ' + JSON.stringify(afterLookalike),
+  );
+
   // --- the saved indicator must not be claimed by a stale write ------------
   let releaseWrite = null;
   const slow = await boot({
@@ -1547,7 +1724,7 @@ async function main() {
     'the flushed write carries the text that was typed',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, panel binding, click targets, completion guards, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, unmount flush verified');
 }
 
 main().catch((error) => {
