@@ -1985,45 +1985,52 @@ async function main() {
   );
 
   picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
-  assert.strictEqual(boxOf().dataset.label, '320×180', 'hovering highlights the element under the pointer');
-  assert.ok(info().includes('dsh-music-qq-head'), 'the panel names what is highlighted — got: ' + JSON.stringify(info()));
+  assert.strictEqual(boxOf().dataset.label, '320×180', 'hovering previews the element under the pointer');
+  assert.strictEqual(
+    info(),
+    '点击一个元素开始（悬停只预览，不会改变已选）',
+    'but hovering never changes what is selected — got: ' + JSON.stringify(info()),
+  );
+
+
+  // A click locks the element and inspects it — and the click itself is left to the
+  // page, which is what lets the settings surface be closed (or anything else be
+  // used) in the middle of a pick.
+  let cancelled = false;
+  picker.dispatch('click', {
+    target: pickedTarget,
+    clientX: 30,
+    clientY: 50,
+    preventDefault() { cancelled = true; },
+    stopPropagation() {},
+  });
+  assert.strictEqual(cancelled, false, 'the page keeps its click');
+  assert.ok(panel() !== undefined, 'and the pick session stays open');
+  assert.ok(
+    info().includes('dsh-music-qq-head'),
+    'the panel now names what was clicked — got: ' + JSON.stringify(info()),
+  );
   assert.deepStrictEqual(
     candidateTexts(),
     ['div.dsh-music-qq-head语义类名仅此一个', 'div[aria-label="QQ 音乐"]无障碍名3 个命中', 'div[class*="_card_"]哈希容错仅此一个'],
-    'candidates are ranked by what survives an upgrade, and a colliding aria label is demoted',
+    'with the candidates ranked by what survives an upgrade',
   );
   assert.deepStrictEqual(
     tokenTexts(),
     ['background-color: var(--dsw-alias-bg-layer-1)'],
-    'the token the element resolves to is offered as a chip',
+    'and the token the element resolves to',
   );
 
-  // A click commits the highlighted element: the gesture people reach for first.
+  // Clicking elsewhere moves the selection; the session is still open.
+  picker.dom.hit = rowInsideDialog;
+  picker.dispatch('click', { target: rowInsideDialog, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() {} });
+  assert.ok(
+    info().includes('dsh-music-list'),
+    'a second click moves the selection — got: ' + JSON.stringify(info()),
+  );
+  assert.ok(panel() !== undefined, 'without leaving the picker');
+  picker.dom.hit = pickedTarget;
   picker.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
-  assert.ok(
-    picker.userStyle().textContent.includes('background-color: var(--dsw-alias-bg-layer-1)'),
-    'clicking the highlighted element writes the rule — got: ' + JSON.stringify(picker.userStyle().textContent),
-  );
-  assert.ok(panel() === undefined, 'and closes the session');
-
-  await arm();
-  picker.dispatch('pointermove', { clientX: 30, clientY: 50 });
-
-  // 暂停拾取 hands the page its clicks back — that is how a user reaches another
-  // page mid-session without losing the pick.
-  const pause = panelButton('暂停拾取');
-  assert.ok(pause !== undefined, 'the panel offers a pause');
-  pause.click();
-  assert.ok(
-    !picker.listeners.some(entry => entry.type === 'click'),
-    'pausing stops intercepting clicks',
-  );
-  assert.ok(panel() !== undefined, 'while the panel and the highlight stay');
-  panelButton('继续拾取').click();
-  assert.ok(
-    picker.listeners.some(entry => entry.type === 'click'),
-    'and resuming takes them back',
-  );
 
   // Level walking, by key and by slider.
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
@@ -2058,10 +2065,10 @@ async function main() {
   await picker.unmount();
   assert.ok(panel() !== undefined, 'closing the settings row does not kill the pick session');
   picker.dom.hit = rowInsideDialog;
-  picker.dispatch('pointermove', { clientX: 5, clientY: 5 });
+  picker.dispatch('click', { target: rowInsideDialog, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() {} });
   assert.ok(
     info().includes('dsh-music-list'),
-    'and it still tracks the pointer after the row is gone — got: ' + JSON.stringify(info()),
+    'and a click still selects after the row is gone — got: ' + JSON.stringify(info()),
   );
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
   assert.ok(info().includes('1200×800'), 'the level keys still work');
