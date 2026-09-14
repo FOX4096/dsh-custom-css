@@ -2486,6 +2486,43 @@ async function main() {
   assert.ok(nearBottom.bottom !== undefined && nearBottom.top === undefined, 'a menu near the bottom flips up');
   assert.strictEqual(placeMenu(undefined, window900, 320), undefined, 'no layout, no menu placement');
 
+  // --- nothing may switch off the app's own scrollbars ----------------------
+  // DSH styles every scrollbar from one global stylesheet, with `::-webkit-scrollbar`. In
+  // Chromium, a *standard* scrollbar property on an element makes the engine ignore exactly
+  // that styling for that element — so one `scrollbar-width: thin` on a menu dropped it to the
+  // platform bar while the rest of the app stayed styled. This audit reads the stylesheet the
+  // plugin actually injects (not its JS source, which has comments talking about it) and allows
+  // those properties only as `none` (hiding a scrollbar on purpose) or behind the webkit
+  // feature query, which only engines without the pseudo-element ever see.
+  const injected = host.document.querySelector('style[data-plugin-css="dsh-custom-css/CustomCssRow.module.css"]');
+  assert.ok(injected !== null, 'the row injects its own stylesheet');
+  /** Drop every `@supports not selector(::-webkit-scrollbar){…}` block, braces and all. */
+  const withoutWebkitFallback = (css) => {
+    const needle = '@supports not selector(::-webkit-scrollbar)';
+    let out = css;
+    for (let at = out.indexOf(needle); at >= 0; at = out.indexOf(needle)) {
+      const open = out.indexOf('{', at);
+      let depth = 0;
+      let end = open;
+      for (; end < out.length; end += 1) {
+        if (out[end] === '{') depth += 1;
+        if (out[end] === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      out = out.slice(0, at) + out.slice(end + 1);
+    }
+    return out;
+  };
+  const stripped = withoutWebkitFallback(injected.textContent);
+  const unguarded = (stripped.match(/scrollbar-(?:width|color)\s*:\s*[^;}]*/g) ?? [])
+    .filter(declaration => !/:\s*none\s*$/.test(declaration));
+  assert.deepStrictEqual(
+    unguarded, [],
+    'the standard scrollbar properties are only set to `none`, or inside the webkit feature query — got: ' + JSON.stringify(unguarded),
+  );
+
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
   // lives outside the settings row (so picking keeps working after the settings page
