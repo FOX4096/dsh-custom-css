@@ -2057,6 +2057,62 @@ async function main() {
     'the flushed write carries the text that was typed',
   );
 
+  // --- the picker's label must not paint on a box that has none -------------
+  // A visible defect, and a CSS-only one, so it needs an audit rather than a render:
+  // `content: attr(data-label)` on a MISSING attribute is the empty string, not `none`, so the
+  // pseudo-element is still generated — and a pseudo's box-sizing is content-box (it is not
+  // inherited), so it collapses to its own padding: a 12x2 bar of brand colour at
+  // `left:0; top:-22px`, i.e. a stray line just above the box's top-left corner. Only the
+  // LOCKED box has no label (the hover box carries the size), so the line appeared exactly
+  // when a click locked a selection. Measured in headless Edge: 12x2 there, 0 after the gate.
+  const boxRules = (() => {
+    const sheet = host.document.querySelector('style[data-plugin-css="dsh-custom-css/CustomCssRow.module.css"]');
+    assert.ok(sheet !== null, 'the row injects its own stylesheet');
+    const rules = [];
+    const pattern = /([^{}]+)\{([^{}]*)\}/g;
+    let match;
+    while ((match = pattern.exec(sheet.textContent)) !== null) {
+      if (match[1].includes('dshCc_pickBox')) rules.push({ selector: match[1].trim(), body: match[2] });
+    }
+    return rules;
+  })();
+  assert.ok(boxRules.length > 0, 'the highlight box has rules to audit');
+  const boxDouble = (className, attributes) => ({
+    tagName: 'DIV',
+    className,
+    attributes,
+    parentElement: null,
+    getAttribute(name) {
+      return name in attributes ? attributes[name] : null;
+    },
+  });
+  const rulesFor = (node) => boxRules.filter(rule => rule.selector
+    .split(',')
+    .some(part => matchesSelector(node, part.replace(/::[a-z-]+(\([^)]*\))?/g, ''))));
+  const unsatisfied = [];
+  for (const variant of [
+    { what: 'the hover box before it has been given one', node: boxDouble('dshCc_pickBox', {}) },
+    { what: 'the locked box', node: boxDouble('dshCc_pickBox dshCc_pickLocked', {}) },
+  ]) {
+    for (const rule of rulesFor(variant.node)) {
+      const content = /content\s*:\s*attr\(\s*([\w-]+)\s*\)/.exec(rule.body);
+      if (content !== null && variant.node.getAttribute(content[1]) === null) {
+        unsatisfied.push(variant.what + ' ← ' + rule.selector + ' paints attr(' + content[1] + ')');
+      }
+    }
+  }
+  assert.deepStrictEqual(
+    unsatisfied, [],
+    'no rule paints a label from an attribute the box does not have — got: ' + JSON.stringify(unsatisfied),
+  );
+  // The other half of the gate: a box that DOES have a label still gets it, so "paint nothing
+  // anywhere" cannot pass this audit.
+  assert.ok(
+    rulesFor(boxDouble('dshCc_pickBox', { 'data-label': '200×60' }))
+      .some(rule => rule.body.includes('attr(data-label)')),
+    'and a box that carries the label still paints it',
+  );
+
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
   // lives outside the settings row (so picking keeps working after the settings page
@@ -2759,7 +2815,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, honest DOM stubs, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, honest DOM stubs, unmount flush verified');
 }
 
 main().catch((error) => {
