@@ -1907,11 +1907,14 @@ async function main() {
     parent: dialog,
     rect: { top: 10, left: 10, width: 560, height: 400 },
   });
+  // A mutable rect: scrolling is simulated by moving it, which is exactly what a
+  // fixed-position box has to react to.
+  const movingRect = { top: 40, left: 20, width: 320, height: 180 };
   const pickedTarget = node('div', {
     className: '_card_1fywu_26 dsh-music-qq-head',
     attributes: { 'aria-label': 'QQ 音乐' },
     parent: dialog,
-    rect: { top: 40, left: 20, width: 320, height: 180 },
+    rect: movingRect,
   });
   dialog.children.push(rowInsideDialog, pickedTarget);
 
@@ -2021,6 +2024,22 @@ async function main() {
     'and the token the element resolves to',
   );
 
+  // Scrolling must move the locked box: it is fixed, so nothing else would.
+  const lockedBox = () => picker.document.body.children.find(child => child.className === 'dshCc_pickBox dshCc_pickLocked');
+  assert.strictEqual(lockedBox().style.top, '40px', 'the locked box starts on the element');
+  movingRect.top = -120;
+  picker.dispatch('scroll', {});
+  assert.strictEqual(
+    lockedBox().style.top, '-120px',
+    'a scroll re-places it — a fixed box does not follow on its own',
+  );
+  assert.ok(
+    info().includes('dsh-music-qq-head'),
+    'and re-placing does not disturb what is selected',
+  );
+  movingRect.top = 40;
+  picker.dispatch('scroll', {});
+
   // Clicking elsewhere moves the selection; the session is still open.
   picker.dom.hit = rowInsideDialog;
   picker.dispatch('click', { target: rowInsideDialog, clientX: 5, clientY: 5, preventDefault() {}, stopPropagation() {} });
@@ -2045,9 +2064,19 @@ async function main() {
   slider.value = '1';
   slider.fire('input');
   assert.ok(info().includes('1200×800'), 'the slider walks the same chain as the keys');
+  assert.strictEqual(slider.value, '1', 'the slider keeps the position the user dragged it to');
   slider.value = '0';
   slider.fire('input');
   assert.strictEqual(boxOf().dataset.label, '320×180', 'and back down returns to the element itself');
+  picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
+  assert.strictEqual(slider.value, '1', 'the keys move the slider too — one level per press');
+  picker.dispatch('keydown', { key: 'ArrowDown', preventDefault() {} });
+  assert.strictEqual(slider.value, '0', 'and back');
+  // ArrowDown means "first child", not "the element before": re-select the target the
+  // rest of this test is about.
+  picker.dom.hit = pickedTarget;
+  picker.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+  assert.ok(info().includes('dsh-music-qq-head'), 'the target is selected again');
 
   // Enter commits the chosen candidate, with the token rather than the literal.
   picker.dispatch('keydown', { key: 'Enter', preventDefault() {} });
