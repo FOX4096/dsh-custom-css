@@ -2239,6 +2239,96 @@ async function main() {
     'an existing rule is opened, not duplicated',
   );
 
+  // --- a pick that opens an EXISTING rule must open it now, not later ------
+  // The handoff is consumed through the store, and this is the case where the store
+  // does not move: reusing a rule writes no text, so `state.css` is the identical string
+  // and a consumer keyed on it never re-runs. The panel stayed shut — and the handoff
+  // stayed pending, so the NEXT unrelated edit opened that stale rule and yanked the
+  // caret into it long after the gesture that asked for it.
+  const EXISTING_SHEET = 'div[aria-label="QQ 音乐"] { color: red }';
+  /** A row whose sheet already carries the rule this element maps to. */
+  const bootExistingRule = async (writes) => boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: EXISTING_SHEET });
+      if (url.endsWith('/write')) {
+        writes.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { hit: pickedTarget, matches: () => 1 },
+  });
+  /**
+   * Render the row, arm the picker, select the element under the pointer and commit the
+   * default candidate. Records every caret the row places, from before the pick onwards.
+   */
+  const pickWith = async (harness) => {
+    hookIndex = 0;
+    const view = harness.registrations[0].component();
+    await harness.runEffects();
+    const editor = findNode(view, 'textarea');
+    const carets = [];
+    editor.props.ref.current = {
+      selectionStart: 0,
+      scrollTop: 0,
+      clientHeight: 140,
+      focus() {},
+      setSelectionRange(start, end) { carets.push([start, end]); },
+    };
+    buttonWith(view, '拾取元素').props.onClick();
+    hookIndex = 0;
+    harness.registrations[0].component();
+    await harness.runEffects();
+    harness.dispatch('pointermove', { clientX: 30, clientY: 50 });
+    harness.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+    harness.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+    return { carets, editor };
+  };
+
+  const openedWrites = [];
+  const opened = await bootExistingRule(openedWrites);
+  const openedPick = await pickWith(opened);
+  hookIndex = 0;
+  opened.registrations[0].component();
+  // The settings row is on screen the whole time; this is the pass that has to consume it.
+  await opened.runEffects();
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  opened.registrations[0].component();
+  assert.strictEqual(openedWrites.length, 0, 'an existing rule is not written again');
+  assert.strictEqual(opened.userStyle().textContent, EXISTING_SHEET, 'and the sheet is untouched');
+  assert.ok(
+    renderedClasses.some(entry => entry.includes('dshCc_panelName')),
+    'the rule that already exists is opened while the row is on screen — classes: ' + JSON.stringify(renderedClasses),
+  );
+  assert.deepStrictEqual(
+    openedPick.carets, [],
+    'and no caret is dropped into text this gesture did not create — carets: ' + JSON.stringify(openedPick.carets),
+  );
+
+  // The delayed half: a handoff left pending is spent by the next unrelated edit.
+  const lateWrites = [];
+  const late = await bootExistingRule(lateWrites);
+  const latePick = await pickWith(late);
+  hookIndex = 0;
+  late.registrations[0].component();
+  await late.runEffects();
+  latePick.editor.props.onChange({
+    target: { value: '/* later */\n' + EXISTING_SHEET, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  late.registrations[0].component();
+  await late.runEffects();
+  assert.deepStrictEqual(
+    latePick.carets, [],
+    'a handoff is spent by the pick itself, so a later unrelated edit cannot yank the caret '
+      + 'into the picked rule — carets: ' + JSON.stringify(latePick.carets),
+  );
+
   // --- a pick taken mid-debounce must still report "已保存" -----------------
   // The picker takes this row's pending debounced write out of the way before it writes
   // through: without that, the stale text fires after the pick and puts the old sheet
@@ -2376,7 +2466,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, unmount flush verified');
 }
 
 main().catch((error) => {
