@@ -26,6 +26,10 @@ let hookIndex = 0;
 const renderedText = [];
 /** Class names produced by the last render pass, for structure assertions. */
 const renderedClasses = [];
+/** Effect slots of the boot in progress, so a test can run them. */
+const effects = [];
+/** Pending timers of the boot in progress, so a test can fire them. */
+const timers = [];
 
 const fakeReact = {
   useState(initial) {
@@ -35,8 +39,15 @@ const fakeReact = {
       hookSlots[index] = typeof next === 'function' ? next(hookSlots[index]) : next;
     }];
   },
-  useEffect() {
-    hookIndex += 1;
+  useEffect(effect) {
+    const index = hookIndex++;
+    // React enough for a smoke test: keep the latest effect of this slot so a test
+    // can run it, and its cleanup so an unmount can be simulated. Without this the
+    // debounce / flush / unmount paths never executed at all.
+    const slot = hookSlots[index] ?? { effect: null, cleanup: null };
+    slot.effect = effect;
+    hookSlots[index] = slot;
+    effects.push(slot);
   },
   useRef(value) {
     const index = hookIndex++;
@@ -90,6 +101,8 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
   const styleTags = [];
   const storage = new Map(stored);
   const calls = [];
+  effects.length = 0;
+  timers.length = 0;
   const makeElement = tagName => ({
     tagName,
     dataset: {},
@@ -122,8 +135,15 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
       calls.push({ url, init });
       return fetchImpl(url, init);
     },
-    setTimeout: () => 0,
-    clearTimeout: () => {},
+    setTimeout: (fn, ms) => {
+      const id = timers.length + 1;
+      timers.push({ id, fn, ms, cancelled: false });
+      return id;
+    },
+    clearTimeout: (id) => {
+      const entry = timers.find((item) => item.id === id);
+      if (entry !== undefined) entry.cancelled = true;
+    },
     console,
     // The engine's validity oracle; absent unless a case supplies one.
     ...(supports === undefined ? {} : { CSS: { supports } }),
@@ -152,12 +172,44 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
   });
   await settle();
 
+  /** Run every pending timer once, then let the awaits settle. */
+  const runTimers = async () => {
+    for (const entry of [...timers]) {
+      if (entry.cancelled) continue;
+      entry.cancelled = true;
+      entry.fn();
+    }
+    await settle();
+  };
+  /** Run the effects React would have run after a commit. */
+  const runEffects = async () => {
+    for (const slot of effects) {
+      if (slot.effect !== null && typeof slot.effect === 'function' && slot.cleanup === null) {
+        slot.cleanup = slot.effect();
+      }
+    }
+    await settle();
+  };
+  /** Simulate an unmount: run the cleanups in reverse order. */
+  const unmount = async () => {
+    for (const slot of [...effects].reverse()) {
+      if (typeof slot.cleanup === 'function') slot.cleanup();
+      slot.cleanup = null;
+    }
+    await settle();
+  };
+
   return {
     mod,
     loaded,
     styleTags,
     storage,
     calls,
+    effects,
+    timers,
+    runTimers,
+    runEffects,
+    unmount,
     waits,
     registrations,
     userStyle: () => styleTags.find(element => element.id === 'dsh-custom-css-user-style'),
@@ -920,7 +972,141 @@ async function main() {
     'matching parts collapse back to the shortest form',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts verified');
+  // --- writeDeclaration: normalised body vs original offsets ---------------
+  // `normaliseBlock` inserts a `;` and therefore lengthens the body. The fast path
+  // used to slice the ORIGINAL sheet with offsets measured on that normalised copy,
+  // so one missing semicolon earlier in the block shifted the cut and ate the `}`.
+  const ragged = '.ragged{ color: red\n  display: block }';
+  textarea.props.onChange({
+    target: { value: ragged, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const raggedView = renderRow();
+  findNode(raggedView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const raggedPanel = renderRow();
+  dropdowns.length = 0;
+  collectDropdowns(raggedPanel);
+  const raggedDisplay = dropdowns.find(item => item.props.ariaLabel === '显示');
+  assert.ok(raggedDisplay !== undefined, 'the display dropdown renders for the ragged rule');
+  raggedDisplay.props.onPick('flex');
+  const afterFast = host.userStyle().textContent;
+  assert.ok(afterFast.includes('display: flex'), 'the fast path wrote the new value');
+  assert.strictEqual(
+    (afterFast.match(/\}/g) ?? []).length,
+    1,
+    'the closing brace survives the fast path — got: ' + JSON.stringify(afterFast),
+  );
+  assert.ok(afterFast.includes('color: red;'), 'the missing semicolon is normalised in');
+
+  // --- a comment sharing the declaration's chunk ---------------------------
+  // Chunks are split on `;`, so `/* note */ display: block` starts with `/`: the
+  // property went unrecognised and a second copy was appended instead of replacing.
+  const commented = '.cmt{ /* note */\n  display: block }';
+  textarea.props.onChange({
+    target: { value: commented, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const commentedView = renderRow();
+  findNode(commentedView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const commentedPanel = renderRow();
+  dropdowns.length = 0;
+  collectDropdowns(commentedPanel);
+  const commentedDisplay = dropdowns.find(item => item.props.ariaLabel === '显示');
+  commentedDisplay.props.onPick('grid');
+  const afterComment = host.userStyle().textContent;
+  assert.strictEqual(
+    (afterComment.match(/display\s*:/g) ?? []).length,
+    1,
+    'a declaration under a comment is replaced, not duplicated — got: ' + JSON.stringify(afterComment),
+  );
+  assert.ok(afterComment.includes('/* note */'), 'the comment survives the rewrite');
+
+  // --- the saved indicator must not be claimed by a stale write ------------
+  let releaseWrite = null;
+  const slow = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({
+          ok: true,
+          dir: '/tmp/custom-css',
+          files: [{ name: 'custom.css', bytes: 20, mtime: 1 }],
+          active: 'custom.css',
+          disabled: [],
+        });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.slow{color:red}' });
+      if (url.endsWith('/write')) {
+        await new Promise((resolve) => { releaseWrite = resolve; });
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const slowRow = slow.registrations[0].component();
+  await slow.runEffects();
+  const slowArea = findNode(slowRow, 'textarea');
+  slowArea.props.onChange({
+    target: { value: '.slow{color:blue}', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  assert.strictEqual(slow.timers.filter(entry => !entry.cancelled).length, 1, 'typing schedules one write');
+  await slow.runTimers();
+  assert.ok(releaseWrite !== null, 'the write is in flight');
+  slowArea.props.onChange({
+    target: { value: '.slow{color:green}', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  releaseWrite();
+  await settle();
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  slow.registrations[0].component();
+  assert.ok(
+    !renderedText.includes('已保存'),
+    'a stale save does not claim the sheet is saved — status was: ' + JSON.stringify(renderedText),
+  );
+
+  // --- emptying the selector input must not strand the panel ---------------
+  textarea.props.onChange({
+    target: { value: '.keep{ display: block }', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const keepView = renderRow();
+  findNode(keepView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const keepPanel = renderRow();
+  const nameInputs = [];
+  (function collectNames(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (String(node.props?.className ?? '').includes('dshCc_panelName')) nameInputs.push(node);
+    for (const child of node.children ?? []) collectNames(child);
+  })(keepPanel);
+  assert.strictEqual(nameInputs.length, 1, 'the selector input renders');
+  nameInputs[0].props.onChange({ target: { value: '' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const afterClear = renderRow();
+  assert.ok(renderedClasses.includes('dshCc_panel'), 'the panel survives an emptied selector');
+  assert.ok(
+    host.userStyle().textContent.includes('.keep'),
+    'the sheet keeps its last valid selector',
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine verified');
 }
 
 main().catch((error) => {
