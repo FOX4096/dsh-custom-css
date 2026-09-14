@@ -9,7 +9,7 @@
  *   node tests/host-api-smoke.cjs
  */
 import { Readable } from 'node:stream';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert';
@@ -169,7 +169,7 @@ assert.strictEqual(opened.status, 200, 'opening an existing sheet succeeds');
 assert.deepStrictEqual(launched, [path.join(stylesDir, 'theme.css')], 'the launcher receives the absolute path');
 
 const openMissing = await call('POST', '/dsh-custom-css/open', { name: 'absent.css' });
-assert.strictEqual(openMissing.status, 400, 'opening a missing sheet is refused');
+assert.strictEqual(openMissing.status, 404, 'opening a missing sheet is a 404, not a malformed name');
 
 const openTraversal = await call('POST', '/dsh-custom-css/open', { name: '../../windows/system32/calc.exe' });
 assert.strictEqual(openTraversal.status, 400, 'opening outside the directory is refused');
@@ -207,5 +207,155 @@ const captured = {};
 await secondRoute.handler(req, { writeHead(status) { captured.status = status; }, end() {} });
 assert.strictEqual(captured.status, 503, 'without the fence the route fails closed');
 
+
+// --- /active, the route nothing used to call --------------------------------
+const switched = await call('POST', '/dsh-custom-css/active', { name: 'theme.css' });
+assert.strictEqual(switched.status, 200, 'switching to an existing sheet succeeds');
+assert.strictEqual(switched.payload.name, 'theme.css');
+
+await call('POST', '/dsh-custom-css/toggle', { name: 'theme.css', enabled: false });
+const activeKeepsSwitches = await call('POST', '/dsh-custom-css/active', { name: 'theme.css' });
+assert.strictEqual(activeKeepsSwitches.status, 200);
+assert.deepStrictEqual(
+  JSON.parse(await readFile(path.join(stylesDir, 'active.json'), 'utf8')).disabled,
+  ['theme.css'],
+  'switching the active sheet leaves its own on/off switch alone',
+);
+await call('POST', '/dsh-custom-css/toggle', { name: 'theme.css', enabled: true });
+
+const activeMissing = await call('POST', '/dsh-custom-css/active', { name: 'ghost.css' });
+assert.strictEqual(activeMissing.status, 404, 'switching to a missing sheet is a 404');
+assert.strictEqual(activeMissing.payload.error, 'not-found', 'and says so, rather than blaming the name');
+
+const activeBadName = await call('POST', '/dsh-custom-css/active', { name: '../evil.css' });
+assert.strictEqual(activeBadName.status, 400, 'switching to a traversal name is refused');
+assert.strictEqual(activeBadName.payload.error, 'bad-name');
+
+// --- a name is refused by every route that takes one ------------------------
+for (const route of ['/create', '/import', '/active']) {
+  const bad = await call('POST', '/dsh-custom-css' + route, { name: '../evil.css', css: '.x{}' });
+  assert.strictEqual(bad.status, 400, route + ' refuses a traversal name');
+}
+for (const name of ['nul.css', 'CON.css', 'com1.css', 'lpt9.css']) {
+  const reserved = await call('POST', '/dsh-custom-css/write', { name, css: '.x{}' });
+  assert.strictEqual(reserved.status, 400, 'a Windows device name is refused: ' + name);
+}
+
+// --- the wrong method never reaches the file API ----------------------------
+for (const [method, route] of [['GET', '/write'], ['POST', '/list'], ['DELETE', '/toggle'], ['GET', '/active'], ['PUT', '/import']]) {
+  const wrong = await call(method, '/dsh-custom-css' + route, { name: 'theme.css' });
+  assert.strictEqual(wrong.status, 404, method + ' ' + route + ' is not a route');
+}
+
+// --- the body cap is enforced, and the socket survives it -------------------
+const beforeOversize = await readFile(path.join(stylesDir, 'theme.css'), 'utf8');
+const oversize = await call('POST', '/dsh-custom-css/write', {
+  name: 'theme.css',
+  css: 'a'.repeat((1 << 20) + 1024),
+});
+assert.strictEqual(oversize.status, 400, 'an oversized body is refused with a JSON reply');
+assert.strictEqual(oversize.payload.error, 'bad-body', 'and the reply is the body error, not a transport failure');
+assert.strictEqual(
+  await readFile(path.join(stylesDir, 'theme.css'), 'utf8'),
+  beforeOversize,
+  'an oversized write leaves the sheet alone',
+);
+const recovered = await call('GET', '/dsh-custom-css/list');
+assert.strictEqual(recovered.status, 200, 'the connection still answers after a refused body');
+
+const notJson = await call('POST', '/dsh-custom-css/write', undefined);
+assert.strictEqual(notJson.status, 400, 'an empty body is a bad body');
+
+// --- the fence guards writes too, not just reads ----------------------------
+fenceVerdict = 401;
+const fencedWrite = await call('POST', '/dsh-custom-css/write', { name: 'theme.css', css: '.fenced{}' });
+assert.strictEqual(fencedWrite.status, 401, 'a fence rejection stops a write');
+assert.strictEqual(
+  await readFile(path.join(stylesDir, 'theme.css'), 'utf8'),
+  beforeOversize,
+  'a fenced write never reaches the disk',
+);
+fenceVerdict = undefined;
+
+// --- bookkeeping: malformed file, then the ghost of a deleted sheet ---------
+const warnings = [];
+const realWarn = console.warn;
+console.warn = (...args) => { warnings.push(args.join(' ')); };
+await writeFile(path.join(stylesDir, 'active.json'), '{"active": "theme.css", ', 'utf8');
+const afterGarbage = await call('GET', '/dsh-custom-css/list');
+console.warn = realWarn;
+assert.strictEqual(afterGarbage.payload.active, null, 'a malformed active.json does not invent an active sheet');
+assert.ok(
+  warnings.some(line => line.includes('active.json')),
+  'the host says the bookkeeping file was unreadable instead of silently resetting it',
+);
+const rewritten = await call('POST', '/dsh-custom-css/toggle', { name: 'theme.css', enabled: false });
+assert.strictEqual(rewritten.status, 200, 'a toggle rewrites the bookkeeping file');
+assert.deepStrictEqual(
+  JSON.parse(await readFile(path.join(stylesDir, 'active.json'), 'utf8')),
+  { disabled: ['theme.css'] },
+  'the rewritten file is valid JSON again',
+);
+
+// Toggle a sheet off, delete it, and create a file of the same name: a switch
+// left over from the deleted file would mute the new one on sight.
+await rm(path.join(stylesDir, 'theme.css'));
+const ghostList = await call('GET', '/dsh-custom-css/list');
+assert.deepStrictEqual(ghostList.payload.disabled, [], 'deleting a sheet drops its switch from the listing');
+const recreate = await call('POST', '/dsh-custom-css/create', { name: 'theme.css', css: '.fresh{}' });
+assert.strictEqual(recreate.status, 200, 'the sheet can be created again');
+const recreated = await call('GET', '/dsh-custom-css/list');
+assert.deepStrictEqual(recreated.payload.disabled, [], 'the fresh sheet starts switched on');
+assert.strictEqual(recreated.payload.active, 'theme.css');
+
+// --- a hand-dropped name the picker offers must also be usable --------------
+const longName = 'x'.repeat(66) + '.css';
+await writeFile(path.join(stylesDir, longName), '.long{}', 'utf8');
+await writeFile(path.join(stylesDir, 'nul.css'), '.nul{}', 'utf8');
+const handDropped = await call('GET', '/dsh-custom-css/list');
+const offered = handDropped.payload.files.map(file => file.name);
+assert.ok(!offered.includes(longName), 'a name past the length cap is not offered');
+assert.ok(!offered.includes('nul.css'), 'a device name is not offered');
+for (const name of offered) {
+  const usable = await call('GET', '/dsh-custom-css/read?name=' + encodeURIComponent(name));
+  assert.strictEqual(usable.status, 200, 'every listed sheet is readable: ' + name);
+}
+
+// --- a symlink inside the directory must not reach outside it ---------------
+const outside = path.join(home, 'outside.yaml');
+await writeFile(outside, 'secret: true', 'utf8');
+let linked = true;
+try {
+  await symlink(outside, path.join(stylesDir, 'link.css'));
+}
+catch {
+  linked = false;
+  console.warn = realWarn;
+}
+if (linked) {
+  const linkRead = await call('GET', '/dsh-custom-css/read?name=link.css');
+  assert.strictEqual(linkRead.status, 400, 'reading through a symlink is refused');
+  const linkWrite = await call('POST', '/dsh-custom-css/write', { name: 'link.css', css: '.pwn{}' });
+  assert.strictEqual(linkWrite.status, 400, 'writing through a symlink is refused');
+  assert.strictEqual(await readFile(outside, 'utf8'), 'secret: true', 'the link target is untouched');
+}
+
+// --- the listing cap cannot hide the active sheet ---------------------------
+await writeFile(path.join(stylesDir, 'active.json'), '{"active": "theme.css"}', 'utf8');
+for (let index = 0; index < 200; index += 1) {
+  await writeFile(path.join(stylesDir, 'aaa' + String(index).padStart(3, '0') + '.css'), '.x{}', 'utf8');
+}
+const capped = await call('GET', '/dsh-custom-css/list');
+assert.strictEqual(capped.payload.files.length, 201, 'the listing is capped, plus the pinned active sheet');
+assert.ok(
+  capped.payload.files.some(file => file.name === 'theme.css'),
+  'the active sheet is listed even when the cap would have dropped it',
+);
+assert.deepStrictEqual(
+  capped.payload.files.map(file => file.name),
+  [...capped.payload.files.map(file => file.name)].sort((left, right) => left.localeCompare(right)),
+  'the pinned sheet keeps the listing name-sorted',
+);
+
 await rm(home, { recursive: true, force: true });
-console.log('host-api-smoke: OK — file API, per-sheet switch, validation, traversal refusal, and fail-closed fence verified');
+console.log('host-api-smoke: OK — file API, per-sheet switch, /active, validation, reserved names, body cap, symlink refusal, bookkeeping recovery, listing cap, and fail-closed fence verified');

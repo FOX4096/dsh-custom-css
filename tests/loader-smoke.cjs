@@ -45,7 +45,10 @@ const fakeReact = {
     // can run it, and its cleanup so an unmount can be simulated. Without this the
     // debounce / flush / unmount paths never executed at all.
     const slot = hookSlots[index] ?? { effect: null, cleanup: null };
+    // A freshly committed effect has not run yet: drop the previous cleanup so
+    // runEffects installs this one instead of skipping the slot.
     slot.effect = effect;
+    slot.cleanup = null;
     hookSlots[index] = slot;
     effects.push(slot);
   },
@@ -58,6 +61,9 @@ const fakeReact = {
   // accessor that reads `this` throws here the way it would in the browser.
   useSyncExternalStore(subscribe, getSnapshot) {
     hookIndex += 1;
+    // The row's first hook marks a new render pass: effects recorded by the
+    // previous commit are done, so only this pass's slots stay reachable.
+    effects.length = 0;
     subscribe(() => {});
     return getSnapshot();
   },
@@ -103,6 +109,11 @@ async function boot({ fetchImpl, stored = new Map(), supports }) {
   const calls = [];
   effects.length = 0;
   timers.length = 0;
+  // A boot is a fresh component instance: reusing the previous boot's hook slots
+  // handed it that instance's refs and its leftover cleanups, so an unmount here
+  // ran a stale effect (and fetched through the previous sandbox).
+  hookSlots = [];
+  hookIndex = 0;
   const makeElement = tagName => ({
     tagName,
     dataset: {},
@@ -445,6 +456,17 @@ async function main() {
   // Panel dropdowns are own-element menus — a native <select> popup cannot be
   // styled — so the harness reads each Dropdown element by its props instead.
   const dropdowns = [];
+  /** Text fields of the open rule's panel, in render order. */
+  const collectPropTexts = (node) => {
+    const found = [];
+    (function walk(current) {
+      if (current === null || typeof current !== 'object') return;
+      if (String(current.props?.className ?? '').includes('dshCc_propText')) found.push(current);
+      for (const child of current.children ?? []) walk(child);
+    })(node);
+    return found;
+  };
+
   const collectDropdowns = (node) => {
     if (node === null || typeof node !== 'object') return;
     if (typeof node.type === 'function' && Array.isArray(node.props?.items)) dropdowns.push(node);
@@ -1029,6 +1051,312 @@ async function main() {
   );
   assert.ok(afterComment.includes('/* note */'), 'the comment survives the rewrite');
 
+  // --- a comment between the property name and its colon -------------------
+  // Legal CSS (comments count as whitespace between tokens), and the panel lists
+  // the declaration. The fast path's head pattern, though, only accepts comments
+  // *before* the name: it returned null and the unguarded `[1]` threw a TypeError
+  // straight out of the dropdown's onPick, leaving the panel dead.
+  const splitComment = '.two{ /* a */ display/* b */: block }';
+  textarea.props.onChange({
+    target: { value: splitComment, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const splitView = renderRow();
+  findNode(splitView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const splitPanel = renderRow();
+  dropdowns.length = 0;
+  collectDropdowns(splitPanel);
+  const splitDisplay = dropdowns.find(item => item.props.ariaLabel === '显示');
+  assert.ok(splitDisplay !== undefined, 'the display dropdown renders for the split declaration');
+  assert.doesNotThrow(() => { splitDisplay.props.onPick('grid'); }, 'the comment before the colon does not break the writer');
+  const afterSplit = host.userStyle().textContent;
+  assert.ok(
+    /display\s*(?:\/\*[\s\S]*?\*\/\s*)*: grid/.test(afterSplit),
+    'the pick landed in the sheet — got: ' + JSON.stringify(afterSplit),
+  );
+  assert.strictEqual(
+    (afterSplit.match(/display/g) ?? []).length,
+    1,
+    'the declaration is replaced in place, not duplicated — got: ' + JSON.stringify(afterSplit),
+  );
+  assert.ok(
+    afterSplit.includes('/* a */') && afterSplit.includes('/* b */'),
+    'both comments survive the rewrite — got: ' + JSON.stringify(afterSplit),
+  );
+
+  // --- a brace inside a string must not swallow the next rule --------------
+  // parseRules finds a rule's body end by counting braces to the matching close.
+  // That inner scan used to be string-blind: `content: "}"` ended the body at the
+  // brace inside the string, so the panel listed a truncated body and a write from
+  // it landed inside the string literal — destroying the rule that followed.
+  const braceString = '.a::after{ content: "}"; }\n.b{ color: red }';
+  textarea.props.onChange({
+    target: { value: braceString, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const braceView = renderRow();
+  findNode(braceView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const bracePanel = renderRow();
+  const braceFields = [];
+  (function collectBraceFields(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (String(node.props?.className ?? '').includes('dshCc_propText')) braceFields.push(node);
+    for (const child of node.children ?? []) collectBraceFields(child);
+  })(bracePanel);
+  assert.deepStrictEqual(
+    braceFields.map(field => field.props['aria-label']),
+    ['生成内容'],
+    'the panel lists only the first rule — a body that ran past its closing brace would show the second rule too',
+  );
+  assert.strictEqual(
+    braceFields[0].props.value,
+    '"}"',
+    'the value keeps the brace that lives inside the string',
+  );
+  braceFields[0].props.onChange({
+    target: { value: '"["', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  const afterBrace = host.userStyle().textContent;
+  assert.ok(
+    afterBrace.includes('.b{ color: red }'),
+    'the rule after the string is untouched — got: ' + JSON.stringify(afterBrace),
+  );
+  assert.strictEqual(
+    (afterBrace.match(/\{/g) ?? []).length,
+    (afterBrace.match(/\}/g) ?? []).length,
+    'the sheet stays balanced — got: ' + JSON.stringify(afterBrace),
+  );
+
+  // --- strings, url()s and nested blocks are opaque to the scanners ---------
+  // An unquoted url() may legally carry a semicolon (every base64 data URI does),
+  // and a nested rule keeps its own: splitting on either truncated the value,
+  // invented declaration rows and could drop a nested block's closing brace.
+  const opaque = '.uri { background-image: url(data:image/svg+xml;charset=utf8,%3Csvg/%3E); color: red; }'
+    + '\n.nest { color: red; &:hover { color: blue; background: green } }';
+  textarea.props.onChange({
+    target: { value: opaque, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const scanOpaqueView = renderRow();
+  assert.ok(
+    !renderedClasses.includes('dshCc_error'),
+    'a data URI with a semicolon is not reported as broken — status: ' + JSON.stringify(renderedText.slice(-2)),
+  );
+  findNode(scanOpaqueView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const scanUriPanel = renderRow();
+  const scanUriFields = collectPropTexts(scanUriPanel);
+  const scanImageField = scanUriFields.find(field => field.props['aria-label'] === '背景图');
+  assert.strictEqual(
+    scanImageField?.props.value,
+    'url(data:image/svg+xml;charset=utf8,%3Csvg/%3E)',
+    'the whole url() is the value, semicolon included — fields: '
+      + JSON.stringify(scanUriFields.map(field => [field.props['aria-label'], field.props.value])),
+  );
+
+  findNode(scanUriPanel, 'pre').props.onClick({ target: { getAttribute: () => '1' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const scanNestPanel = renderRow();
+  const scanNestFields = collectPropTexts(scanNestPanel);
+  assert.deepStrictEqual(
+    scanNestFields.map(field => field.props['aria-label']),
+    ['文字颜色'],
+    'only the outer rule declares anything: the nested rule is not declaration territory',
+  );
+  scanNestFields[0].props.onChange({
+    target: { value: 'rebeccapurple', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  const scanAfterNest = host.userStyle().textContent;
+  assert.ok(
+    scanAfterNest.includes('&:hover { color: blue; background: green }'),
+    'editing the outer rule leaves the nested block intact — got: ' + JSON.stringify(scanAfterNest),
+  );
+  assert.strictEqual(
+    (scanAfterNest.match(/\{/g) ?? []).length,
+    (scanAfterNest.match(/\}/g) ?? []).length,
+    'the sheet stays balanced — got: ' + JSON.stringify(scanAfterNest),
+  );
+
+  // --- an at-rule statement before a block ---------------------------------
+  // An @import statement ends with its own semicolon. Keeping it in the prelude
+  // buffer glued it to the next block, which was then judged as a style rule (so a
+  // legal @font-face reported broken descriptors) and dropped from the rule list
+  // (so the rule after it was not clickable at all).
+  const scanImported = '@import "a.css";\nbody { color: red }\n@font-face { font-family: "X"; src: url("x.woff2") }';
+  textarea.props.onChange({
+    target: { value: scanImported, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  renderedText.length = 0;
+  const scanImportView = renderRow();
+  assert.ok(
+    !renderedClasses.includes('dshCc_error'),
+    'a legal @font-face after @import is not reported as broken — status: ' + JSON.stringify(renderedText.slice(-2)),
+  );
+  const scanImportHtml = findNode(scanImportView, 'pre').props.dangerouslySetInnerHTML.__html;
+  assert.ok(
+    /data-rule="0">[\s\S]{0,8}body/.test(scanImportHtml),
+    'the rule after @import is a click target — markup: ' + JSON.stringify(scanImportHtml.slice(0, 220)),
+  );
+
+  // --- a pseudo-class selector is clickable as a whole ---------------------
+  // The selector is tokenised on its punctuation, so '.a', ':' and 'hover' are
+  // separate runs; only the run ending exactly at the selector end used to be a
+  // click target, which left the rule name itself inert.
+  const scanPseudo = '.hovered:hover { color: red }';
+  textarea.props.onChange({
+    target: { value: scanPseudo, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const scanPseudoView = renderRow();
+  const scanPseudoHtml = findNode(scanPseudoView, 'pre').props.dangerouslySetInnerHTML.__html;
+  assert.ok(
+    /data-rule="0">\.hovered</.test(scanPseudoHtml),
+    'the rule name is a click target for a pseudo-class selector — markup: ' + JSON.stringify(scanPseudoHtml.slice(0, 220)),
+  );
+
+  // --- a blocking duplicate selector opens the rule that was clicked --------
+  // Two rules may share a selector; looking the open one up by text bound the
+  // panel (and every write it made) to the first of them.
+  const scanDupes = '.dup { color: red }\n.dup { display: block }';
+  textarea.props.onChange({
+    target: { value: scanDupes, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const scanDupView = renderRow();
+  findNode(scanDupView, 'pre').props.onClick({ target: { getAttribute: () => '1' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const scanDupPanel = renderRow();
+  dropdowns.length = 0;
+  collectDropdowns(scanDupPanel);
+  assert.ok(
+    dropdowns.some(item => item.props.ariaLabel === '显示'),
+    'clicking the second rule opens the second rule (its display dropdown renders)',
+  );
+  assert.ok(
+    !collectPropTexts(scanDupPanel).some(field => field.props['aria-label'] === '文字颜色'),
+    'and not the first rule, which declares color',
+  );
+
+  // --- a comment after the colon is part of the value ----------------------
+  // Reading the value from the comment-blanked copy showed text that is not in
+  // the file, and the writer's head pattern then deleted the comment.
+  const scanCommentValue = '.cmtvalue{ font-family: /* fallback */ Arial, sans-serif }';
+  textarea.props.onChange({
+    target: { value: scanCommentValue, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  const scanCommentView = renderRow();
+  findNode(scanCommentView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  const scanCommentPanel = renderRow();
+  const scanCommentField = collectPropTexts(scanCommentPanel).find(field => field.props['aria-label'] === '字体');
+  assert.strictEqual(
+    scanCommentField?.props.value,
+    '/* fallback */ Arial, sans-serif',
+    'the panel shows the value as written, comment included',
+  );
+  scanCommentField.props.onChange({
+    target: { value: '/* fallback */ Arial, sans-serif', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  assert.ok(
+    host.userStyle().textContent.includes('/* fallback */ Arial, sans-serif'),
+    'writing the value back keeps the comment — got: ' + JSON.stringify(host.userStyle().textContent),
+  );
+
+  // --- a completion must match the caret it is applied to ------------------
+  // The list can outlive the caret that opened it: clicking inside the textarea
+  // neither blurs nor re-runs completion. Accepting then spliced the remembered
+  // word at the moved caret, deleting characters and inserting it in the wrong
+  // place.
+  const scanPartial = '.a { disp';
+  textarea.props.onChange({
+    target: { value: scanPartial, selectionStart: scanPartial.length },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  const scanPartialView = renderRow();
+  const scanSuggestions = [];
+  (function collectSuggestions(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (String(node.props?.className ?? '') === 'dshCc_suggestItem') scanSuggestions.push(node);
+    for (const child of node.children ?? []) collectSuggestions(child);
+  })(scanPartialView);
+  const scanDisplayItem = scanSuggestions.find(node => (node.children ?? []).includes('display'));
+  assert.ok(scanDisplayItem !== undefined, 'the completion list offers display for the typed word');
+  findNode(scanPartialView, 'textarea').props.ref.current = { selectionStart: 0, scrollTop: 0, clientHeight: 140 };
+  assert.doesNotThrow(() => {
+    scanDisplayItem.props.onMouseDown({ preventDefault() {} });
+  }, 'accepting a completion whose caret moved does not throw');
+  assert.strictEqual(
+    host.userStyle().textContent,
+    scanPartial,
+    'a completion whose caret moved is dropped instead of splicing at the wrong offset',
+  );
+
+  // --- a failed write must not claim the sheet is saved --------------------
+  // The debounce used to report "已保存" as soon as the write returned, success or
+  // not, so the footer read "已保存" right beside its own failure notice.
+  const scanFailing = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({
+          ok: true,
+          dir: '/tmp/custom-css',
+          files: [{ name: 'custom.css', bytes: 20, mtime: 1 }],
+          active: 'custom.css',
+          disabled: [],
+        });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) throw new Error('disk full');
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const scanFailingRow = scanFailing.registrations[0].component();
+  await scanFailing.runEffects();
+  findNode(scanFailingRow, 'textarea').props.onChange({
+    target: { value: '.x{color:blue}', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  await scanFailing.runTimers();
+  hookIndex = 0;
+  renderedText.length = 0;
+  scanFailing.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('保存失败')),
+    'the write failure is reported — status was: ' + JSON.stringify(renderedText),
+  );
+  assert.ok(
+    !renderedText.some(text => text.includes('已保存')),
+    'a failed write never claims the sheet is saved — status was: ' + JSON.stringify(renderedText),
+  );
+
   // --- the saved indicator must not be claimed by a stale write ------------
   let releaseWrite = null;
   const slow = await boot({
@@ -1073,7 +1401,7 @@ async function main() {
   renderedText.length = 0;
   slow.registrations[0].component();
   assert.ok(
-    !renderedText.includes('已保存'),
+    !renderedText.some(text => text.includes('已保存')),
     'a stale save does not claim the sheet is saved — status was: ' + JSON.stringify(renderedText),
   );
 
@@ -1106,7 +1434,120 @@ async function main() {
     'the sheet keeps its last valid selector',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine verified');
+  // --- strings are not structure -------------------------------------------
+  // CSS strings may legally contain \`{\`, \`}\`, \`;\` and \`:\`. Every scanner in this file used to
+  // treat those as structure: \`content: "}"\` broke the depth tracking (so the next
+  // rule got wrong offsets and clicking it opened the wrong block), and
+  // \`url("data:…;base64,…")\` was split in half at the semicolon.
+  const stringy = '.after::after{ content: "}"; }\n.b{ display: block }';
+  textarea.props.onChange({
+    target: { value: stringy, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const stringyView = renderRow();
+  const stringyHtml = findNode(stringyView, 'pre').props.dangerouslySetInnerHTML.__html;
+  assert.ok(stringyHtml.includes('data-rule="0"'), 'the first rule is a click target');
+  assert.ok(
+    stringyHtml.includes('data-rule="1"'),
+    'a brace inside a string does not swallow the next rule',
+  );
+  assert.ok(
+    !renderedClasses.includes('dshCc_error'),
+    'a valid sheet with a string brace is not reported as broken — status: ' + JSON.stringify(renderedText.slice(-2)),
+  );
+
+  findNode(stringyView, 'pre').props.onClick({ target: { getAttribute: () => '1' } });
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const secondPanel = renderRow();
+  const nameFields = [];
+  (function collectNameFields(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (String(node.props?.className ?? '').includes('dshCc_panelName')) nameFields.push(node);
+    for (const child of node.children ?? []) collectNameFields(child);
+  })(secondPanel);
+  assert.strictEqual(nameFields.length, 1, 'the selector field renders');
+  // Identify the opened rule by what the panel lists: the first rule declares
+  // `content`, the second declares `display`.
+  dropdowns.length = 0;
+  collectDropdowns(secondPanel);
+  assert.ok(
+    dropdowns.some(item => item.props.ariaLabel === '显示'),
+    'clicking the second selector opens the second rule (its display dropdown renders)',
+  );
+
+  // A data URI keeps its semicolon: the panel must show the whole value.
+  const uri = '.uri{ background-image: url("data:image/png;base64,AAA"); color: red }';
+  textarea.props.onChange({
+    target: { value: uri, selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const uriView = renderRow();
+  findNode(uriView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  const uriPanel = renderRow();
+  const uriInputs = [];
+  (function collectUriInputs(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_propText')) uriInputs.push(node);
+    for (const child of node.children ?? []) collectUriInputs(child);
+  })(uriPanel);
+  const uriField = uriInputs.find(input => input.props['aria-label'] === '背景图');
+  assert.ok(uriField !== undefined, 'the background-image field renders');
+  assert.strictEqual(
+    uriField.props.value,
+    'url("data:image/png;base64,AAA")',
+    'a semicolon inside a string does not truncate the value',
+  );
+
+  // --- closing the panel must not drop an unsaved edit ---------------------
+  // The unmount path flushes rather than discarding the pending write. Until the
+  // harness learned to run effects and cleanups, this never executed at all.
+  const writes = [];
+  const closeable = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({
+          ok: true,
+          dir: '/tmp/custom-css',
+          files: [{ name: 'custom.css', bytes: 20, mtime: 1 }],
+          active: 'custom.css',
+          disabled: [],
+        });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) {
+        writes.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  const closeableView = closeable.registrations[0].component();
+  await closeable.runEffects();
+  const closeableArea = findNode(closeableView, 'textarea');
+  closeableArea.props.onChange({
+    target: { value: '.x{color:rebeccapurple}', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  assert.strictEqual(writes.length, 0, 'the write is still debounced');
+  await closeable.unmount();
+  assert.strictEqual(writes.length, 1, 'unmounting flushes the pending write instead of dropping it');
+  assert.strictEqual(
+    writes[0].css,
+    '.x{color:rebeccapurple}',
+    'the flushed write carries the text that was typed',
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, panel binding, click targets, completion guards, unmount flush verified');
 }
 
 main().catch((error) => {

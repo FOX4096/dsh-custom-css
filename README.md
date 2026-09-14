@@ -92,11 +92,15 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点，并且**必须
 | POST | `/write` | 写入指定文件 |
 | POST | `/create` | 新建空文件（已存在 → 409） |
 | POST | `/import` | 导入内容为文件（按设计覆盖同名） |
-| POST | `/active` | 记录当前文件 |
+| POST | `/active` | 记录当前文件（文件不存在 → 404 `not-found`，与 `/toggle` 一致） |
 | POST | `/toggle` | `{ name, enabled }` → 打开 / 关闭某张样式表（**文件保留**），状态记进 `active.json` 的 `disabled` |
-| POST | `/open` | 用系统默认程序打开指定文件（仅限目录内已存在的 `.css`） |
+| POST | `/open` | 用系统默认程序打开指定文件（仅限目录内已存在的 `.css`；不存在 → 404） |
 
-文件名限定为**单个路径段且以 `.css` 结尾**（`^[A-Za-z0-9._一-龥-]+\.css$`，≤64 字符）；`..`、分隔符、无扩展名一律 400。目录外的路径在拼接后还会二次校验。
+文件名限定为**单个路径段且以 `.css` 结尾**（`^[A-Za-z0-9._一-龥-]+\.css$`，≤64 字符）；`..`、分隔符、无扩展名、Windows 设备名（`nul.css`、`con.css`…）一律 400。目录外的路径在拼接后还会二次校验，符号链接也拒绝：目录内的软链会让写入落到目录之外，而字面量校验看不出来。
+
+`active.json` 用**临时文件 + rename** 写入，改动串行执行：直接写入会先截断，中途断电留下的半截文件会被读成"没有当前文件、没有关闭项"，下一次改动就把这个空状态固化下来；两个标签页同时开关两张表也会各写一份、后写覆盖先写。目录簿记里指向已删除文件的关闭项在每次写入时清理，因此删掉再重建同名文件不会一出生就是关闭状态。
+
+`/list` 最多返回 200 个文件，但**当前文件一定在列表里**（哪怕它排在 200 名之外）：否则行会退回到列表第一个文件，每次打开页面都悄悄换掉用户选的样式表。
 
 ## 设计一致性
 
@@ -230,6 +234,7 @@ dsh-custom-css/
 - 只能**追加** CSS，不能修改内置样式表本身。
 - 跨浏览器会话跟随的是**文件**而非 origin，因此端口变化（如 DSH Desktop 每次分配端口）不影响已保存的样式表。
 - host 文件接口不可达时（例如跑在非 Web composition 里）自动降级：编辑器仍在、样式仍生效，但内容退回浏览器 `localStorage`，且此行隐藏下拉与「打开文件」并给出提示。
+- 规则面板只认**顶层**样式规则：写在 `@media` / `@supports` 里的规则不在可点范围内（它们照常生效，只是面板编辑不到），`@font-face`、`@property` 这类块也按各自规矩单独校验而不进面板。
 - 未注册多语言字典，界面文案为中文。
 
 ## 开发
@@ -237,9 +242,9 @@ dsh-custom-css/
 - `lib/client.js` 是交给 DSH 浏览器模块加载器的产物（`window.__ModuleLoader__.load({ id, factory })` 工厂），**不是**普通 ES 模块 —— 与 DSH 自身 `@deepseek-ai/dsh-client-ui-*` 的产物同构。
 - `lib/index.js` 是 host 侧：拥有样式表目录、挂载围栏内的 JSON 接口。路由挂载方式与 `dsh-smooth-stream` 一致（本代内核的 `connection.rpc.handle()` 会因服务内部 Context 未注入 `webServer` 而失败，直挂 Web 服务器是受支持的兜底）。
 - `node --check lib/client.js`：语法自检（浏览器半是 `.js` 但按模块工厂包了一层，**不要**当 ESM 引入）。
-- `node tests/loader-smoke.cjs`：用假 host 真实执行 `lib/client.js`，校验模块形状、槽注册参数、host 支撑的启动应用、离线降级、首次运行从 `localStorage` 播种默认文件，以及**组件真能渲染**。其中包含校验器的两类回归：合法的 `@property` 块必须**零报错**，非法描述符（`syntax: <color>`、`inherits: maybe`）必须**报出来**。补全、规则面板、属性下拉也各有断言。
-- `node tests/host-api-smoke.mjs`：用假 `webServer` 驱动 host 路由，校验文件 API、目录簿记、重名冲突、**路径穿越与非法文件名拒绝**、`/open` 的启动器注入、以及无围栏时的 fail-closed。
-- **CI**（[`.github/workflows/ci.yml`](./.github/workflows/ci.yml)）：Node 20 / 22 两档，跑上面四条 `node --check` 加两套冒烟测试。插件没有构建步骤也没有运行时依赖，所以 CI 里不装任何东西，几秒结束 —— 顶部那枚 CI 徽章就是它。
+- `node tests/loader-smoke.cjs`：用假 host 真实执行 `lib/client.js`，校验模块形状、槽注册参数、host 支撑的启动应用、离线降级、首次运行从 `localStorage` 播种默认文件，以及**组件真能渲染**。其中包含校验器的两类回归：合法的 `@property` 块必须**零报错**，非法描述符（`syntax: <color>`、`inherits: maybe`）必须**报出来**。补全、规则面板、属性下拉、字符串/`url()`/嵌套块的不透明性、同名规则的面板绑定、补全与光标的一致性、保存指示只在写入成功后说"已保存"，也各有断言。每条修复都用「先把补丁反向打回去、确认测试会红」验证过，测试确实在守行为而不是守实现。
+- `node tests/host-api-smoke.mjs`：用假 `webServer` 驱动 host 路由，校验文件 API、目录簿记（含 `active.json` 损坏后的恢复与幽灵关闭项清理）、`/active`、重名冲突、**路径穿越 / 非法文件名 / Windows 设备名 / 符号链接拒绝**、请求体上限、`/open` 的启动器注入、列表上限不会吞掉当前文件、以及无围栏时的 fail-closed（读写都被围栏拦住）。
+- **CI**（[`.github/workflows/ci.yml`](https://github.com/FOX4096/dsh-custom-css/blob/main/.github/workflows/ci.yml)）：Node 20 / 22 两档，跑上面四条 `node --check` 加两套冒烟测试。插件没有构建步骤也没有运行时依赖，所以 CI 里不装任何东西，几秒结束 —— 顶部那枚 CI 徽章就是它。
 
 ## 许可
 

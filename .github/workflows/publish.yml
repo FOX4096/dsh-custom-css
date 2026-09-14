@@ -43,8 +43,29 @@ jobs:
           npm --version
           npm test
 
+      # tag 与 package.json 必须说同一件事。不一致时：tag 落后 → npm 报「版本已存在」
+      # 而 Release 建不出来；package.json 超前 → registry 上是新版本，Release 却挂在旧
+      # tag 上、附件也是新版本的 tarball。两种都只会在发完之后才被发现。
+      - name: 校验 tag 与包版本一致
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "tag $GITHUB_REF_NAME 与 package.json 的 $VERSION 不一致" >&2
+            exit 1
+          fi
+
+      # 预发布版本不能落到 latest：v0.2.0-rc.1 会把 latest 指过去，所有人
+      # npm i 装到的就是候选版。
       - name: 发布（带 provenance 签名）
-        run: npm publish --provenance --access public
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          case "$VERSION" in
+            *-*) npm publish --provenance --access public --tag next ;;
+            *)   npm publish --provenance --access public ;;
+          esac
 
       # 只有 tag 触发才建 Release。发布说明取 CHANGELOG 里对应版本的那一段 ——
       # 默认的 --generate-notes 只会给一行 "Full Changelog"，等于没有说明。
