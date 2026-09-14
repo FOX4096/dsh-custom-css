@@ -185,21 +185,27 @@ function matchesCompound(node, compound) {
   if (/"[^"]*\n/.test(compound)) throw new Error('invalid selector: unescaped newline in a string');
   const tag = String(node.tagName ?? '').toLowerCase();
   const classes = String(node.className ?? '').split(/\s+/).filter(Boolean);
+  // `:root` is the node at the top of the chain in this bed; it counts as a part like any
+  // other, so a compound of only `:root` is a match rather than an unparsed selector.
+  const rootRequired = compound.includes(':root');
+  if (rootRequired && (node.parentElement ?? null) !== null) return false;
+  const rest = compound.replace(/:root/g, '');
   const readAttribute = (name) => {
     // `class` is the one attribute the doubles keep beside their attribute map.
     if (name === 'class') return String(node.className ?? '');
     if (typeof node.getAttribute === 'function') return node.getAttribute(name);
     return node.attributes?.[name] ?? null;
   };
-  let seen = false;
+  let seen = rootRequired;
   COMPOUND_PART.lastIndex = 0;
   let part;
-  while ((part = COMPOUND_PART.exec(compound)) !== null) {
+  while ((part = COMPOUND_PART.exec(rest)) !== null) {
     seen = true;
     const [, name, className, id, nth, attribute, operator, rawValue] = part;
     if (name !== undefined && name !== '*' && tag !== name.toLowerCase()) return false;
     if (className !== undefined && !classes.includes(className)) return false;
     if (id !== undefined && String(readAttribute('id') ?? '') !== id) return false;
+    if (/:root/.test(compound) && (node.parentElement ?? null) !== null) return false;
     if (nth !== undefined) {
       const siblings = node.parentElement?.children ?? [];
       if (siblings.indexOf(node) !== Number(nth) - 1) return false;
@@ -2163,6 +2169,9 @@ async function main() {
         delete element.attributes[name];
       },
       getBoundingClientRect: () => options.rect ?? { top: 0, left: 0, width: 100, height: 40 },
+      // Real matching, so a rule scoped to another component is not mistaken for one that
+      // applies here. (`:root` is the node at the top of the chain in this bed.)
+      matches: selector => matchesSelector(element, selector),
     };
     return element;
   };
@@ -2706,6 +2715,140 @@ async function main() {
     'a candidate nobody could probe does not win the default — written: ' + JSON.stringify(unknownWrites[0].css),
   );
 
+  // --- the token chips must not offer a token of the wrong kind or scope ---
+  // The value → names map is keyed by VALUE, so unrelated tokens share a key: DSH really does
+  // carry `--dsl-terminal-line-height: 22px` next to anything else that is 22px, and the old
+  // "fall back to the first name" produced `border-radius: var(--dsl-terminal-line-height)` —
+  // a rule that resolves to nothing. A token also only counts where its defining rule matches
+  // the element: one declared inside another component's card is not in scope for a rule the
+  // user writes for an element outside it.
+  const tokenBoot = async (styleSheets, computed) => boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { nodes: pickPool, styleSheets, computed },
+  });
+  /** Arm the picker, select the element, and read the token chips the panel offers. */
+  const chipsFor = async (harness) => {
+    hookIndex = 0;
+    const view = harness.registrations[0].component();
+    await harness.runEffects();
+    buttonWith(view, '拾取元素').props.onClick();
+    hookIndex = 0;
+    harness.registrations[0].component();
+    await harness.runEffects();
+    harness.dispatch('pointermove', { clientX: 30, clientY: 50 });
+    harness.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
+    const board = harness.document.body.children.find(child => child.className === 'dshCc_pickPanel');
+    const row = (board?.children ?? [])[2];
+    return (row?.children ?? []).map(child => child.textContent);
+  };
+  /** One stylesheet double whose single rule carries these custom properties. */
+  const sheetOf = (names, values, selectorText) => {
+    const style = [...names];
+    style.getPropertyValue = name => values[name] ?? '';
+    const rule = { style };
+    if (selectorText !== undefined) rule.selectorText = selectorText;
+    return { cssRules: [rule] };
+  };
+
+  const wrongKind = await tokenBoot(
+    [sheetOf(['--dsl-terminal-line-height'], { '--dsl-terminal-line-height': '22px' })],
+    { getPropertyValue: name => (name === 'border-radius' ? '22px' : '') },
+  );
+  assert.deepStrictEqual(
+    await chipsFor(wrongKind), [],
+    'a token whose name does not read like the property is not offered at all',
+  );
+
+  const outOfScope = await tokenBoot(
+    [
+      sheetOf(['--dsw-alias-corner-full'], { '--dsw-alias-corner-full': '22px' }, '.CY-8Ka_terminal'),
+      sheetOf(['--dsl-terminal-line-height'], { '--dsl-terminal-line-height': '22px' }, ':root'),
+    ],
+    { getPropertyValue: name => (name === 'border-radius' ? '22px' : '') },
+  );
+  assert.deepStrictEqual(
+    await chipsFor(outOfScope), [],
+    'and a token defined inside another component is not offered for an element outside it',
+  );
+
+  // The other half: a token that IS in scope and DOES read like the property is still offered.
+  const inScope = await tokenBoot(
+    [sheetOf(['--dsw-alias-corner-full'], { '--dsw-alias-corner-full': '22px' }, ':root')],
+    { getPropertyValue: name => (name === 'border-radius' ? '22px' : '') },
+  );
+  assert.deepStrictEqual(
+    await chipsFor(inScope), ['border-radius: var(--dsw-alias-corner-full)'],
+    'a global token of the right kind is still suggested',
+  );
+
+  // --- a rule appended far down must be revealed, not just selected --------
+  // The picker writes a new rule at the END of the sheet. The caret was moved to it, but
+  // nothing brought it into view: the textarea was left wherever it was, and the colour layer
+  // and gutter — which this plugin positions by transform, because they cannot scroll — were
+  // never told either. So 插入规则 looked like it had done nothing to a 60-line sheet.
+  const longSheet = Array.from({ length: 60 }, (_, index) => '.line-' + index + ' { color: red; }').join('\n');
+  const revealed = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: longSheet });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { nodes: pickPool },
+  });
+  const revealedPick = await pickWith(revealed);
+  // The two layers are positioned from refs, so a double has to be in place before the pass
+  // that consumes the handoff — that is the pass this test is about.
+  hookIndex = 0;
+  const revealedView = revealed.registrations[0].component();
+  const highlightLayer = findNode(revealedView, 'pre').props.ref;
+  highlightLayer.current = { style: {} };
+  let gutterLayer = null;
+  (function findGutter(node) {
+    if (gutterLayer !== null || node === null || typeof node !== 'object') return;
+    if (String(node.props?.className ?? '') === 'dshCc_gutterInner') {
+      gutterLayer = node.props.ref;
+      return;
+    }
+    for (const child of node.children ?? []) findGutter(child);
+  })(revealedView);
+  gutterLayer.current = { style: {} };
+  await revealed.runEffects();
+  const sheetWithRule = revealed.userStyle().textContent;
+  assert.strictEqual(
+    revealedPick.carets.length, 1,
+    'the picker places the caret once — got: ' + JSON.stringify(revealedPick.carets),
+  );
+  const caretOffset = revealedPick.carets[0][0];
+  const caretLine = sheetWithRule.slice(0, caretOffset).split('\n').length - 1;
+  const lineTop = caretLine * 19;
+  const port = revealedPick.editor.props.ref.current;
+  assert.ok(
+    lineTop >= port.scrollTop && lineTop + 19 <= port.scrollTop + port.clientHeight,
+    'the caret line is inside the scroll port — line ' + caretLine + ' at ' + lineTop
+      + ', port ' + port.scrollTop + '..' + (port.scrollTop + port.clientHeight),
+  );
+  assert.ok(port.scrollTop > 0, 'and the view actually moved down — scrollTop: ' + port.scrollTop);
+  assert.strictEqual(
+    highlightLayer.current.style.transform,
+    'translate(' + (-(port.scrollLeft ?? 0)) + 'px,' + (-port.scrollTop) + 'px)',
+    'the colour layer follows the scroll it did not make itself',
+  );
+  assert.strictEqual(
+    gutterLayer.current.style.transform,
+    'translateY(' + (-port.scrollTop) + 'px)',
+    'and so does the gutter',
+  );
+
   // --- a pick taken mid-debounce must still report "已保存" -----------------
   // The picker takes this row's pending debounced write out of the way before it writes
   // through: without that, the stale text fires after the pick and puts the old sheet
@@ -2843,7 +2986,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
 }
 
 main().catch((error) => {
