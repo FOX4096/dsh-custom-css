@@ -111,7 +111,7 @@ const fakeReact = {
     for (const child of children.flat()) {
       if (typeof child === 'string') renderedText.push(child);
     }
-    return { type, props, children };
+    return { type, props, children: children.flat() };
   },
 };
 
@@ -3520,7 +3520,167 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
+  // --- 历史版本 (the versions page of the actions menu) ----------------------
+  // The Host keeps what each write replaced (see tests/host-api-smoke.mjs). Nothing in the
+  // editor can reach it — the rows and the panel are all about the CURRENT text — so the way
+  // back is a menu page of its own, and these assertions are about that page: it opens from
+  // the actions menu without closing it, it shows the versions the Host reported, and picking
+  // one leaves the editor on the restored text.
+  const RESTORED_SHEET = '.x{color:red}\n.edited { color: lime; }';
+  /**
+   * The text the editor holds before the restore — deliberately not what the file holds, so
+   * the edit is a real one: a no-op edit records nothing in the undo history, and the
+   * "Ctrl+Z must not undo a restore" assertion would then hold for the wrong reason.
+   */
+  const EDITED_SHEET = '.x{color:red}\n.edited { color: lime; }\n.changed { color: blue; }';
+  const versionEntries = [
+    { stamp: '1746147784000', bytes: 1200, mtime: 1746147784000 },
+    { stamp: '1746061384000', bytes: 24, mtime: 1746061384000 },
+  ];
+  /** What the file holds; a write to it moves this on, the way the Host would. */
+  let sheetNow = '.x{color:red}\n\n.changed { color: blue; }';
+  const historyCalls = [];
+  const restores = [];
+  const historyWrites = [];
+  const historic = await boot({
+    fetchImpl: async (url, init) => {
+      historyCalls.push(url);
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/history')) return jsonResponse({ ok: true, name: 'custom.css', entries: versionEntries });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: sheetNow });
+      if (url.endsWith('/restore')) {
+        restores.push(JSON.parse(init.body));
+        sheetNow = RESTORED_SHEET;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: RESTORED_SHEET.length });
+      }
+      if (url.endsWith('/write')) {
+        const body = JSON.parse(init.body);
+        historyWrites.push(body);
+        sheetNow = body.css;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: body.css.length });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  /**
+   * A stamp as the menu writes it — computed here, not hard-coded: `formatStamp` reads the
+   * timestamp in the LOCAL zone, and pinning one would make this suite pass or fail by the
+   * machine's clock rather than by the code.
+   */
+  const stampLabel = (stamp) => {
+    const at = new Date(Number(stamp));
+    const pad = (value) => String(value).padStart(2, '0');
+    return pad(at.getMonth() + 1) + '-' + pad(at.getDate())
+      + ' ' + pad(at.getHours()) + ':' + pad(at.getMinutes()) + ':' + pad(at.getSeconds());
+  };
+  hookIndex = 0;
+  const historyView = historic.registrations[0].component();
+  await historic.runEffects();
+  const historyArea = findNode(historyView, 'textarea');
+  const historyCarets = [];
+  historyArea.props.ref.current = {
+    selectionStart: 0,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange(start) { historyCarets.push(start); },
+  };
+  // An edit of this session, so the undo stack is demonstrably aimed at the text the restore
+  // is about to replace — and the debounce is landed, so the edit stays reachable (an
+  // unsaved edit is dropped when the sheet is reopened, and the undo stack with it).
+  historyArea.props.onChange({
+    target: { value: EDITED_SHEET, selectionStart: 35 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  await historic.runTimers();
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  let versionsView = historic.registrations[0].component();
+  assert.ok(!renderedText.some(text => text.includes('历史版本')), 'the versions page is not inline in the row');
+  const triggerNode = buttonWith(versionsView, '更多操作');
+  triggerNode.props.onClick();
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  versionsView = historic.registrations[0].component();
+  const historyEntry = buttonWith(versionsView, '历史版本');
+  assert.ok(historyEntry !== null, 'the actions menu offers 历史版本 — menu: ' + JSON.stringify(renderedText));
+  historyEntry.props.onClick();
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  versionsView = historic.registrations[0].component();
+  assert.ok(
+    historyCalls.some(url => url.includes('/history?name=custom.css')),
+    'the page asks the Host for this sheet versions — calls: ' + JSON.stringify(historyCalls),
+  );
+  for (const entry of versionEntries) {
+    assert.ok(
+      renderedText.some(text => text.includes(stampLabel(entry.stamp))),
+      'the list shows when ' + entry.stamp + ' was taken — list: ' + JSON.stringify(renderedText),
+    );
+  }
+  assert.ok(
+    renderedText.includes('1.2 KB') && renderedText.includes('24 B'),
+    'each version carries its size — list: ' + JSON.stringify(renderedText),
+  );
+  assert.ok(renderedClasses.includes('dshCc_versionsHead'), 'the page has a header of its own');
+  // `renderedText` is the whole row — the file bar's own copy mentions 导出 in a tooltip — so
+  // "the actions are gone" is asked of the menu's nodes rather than of the page's text.
+  assert.ok(
+    buttonWith(versionsView, '导出') === null && buttonWith(versionsView, '重置') === null,
+    'and it replaces the actions rather than piling onto them — classes: ' + JSON.stringify(renderedClasses),
+  );
+  assert.ok(buttonWith(versionsView, '返回') !== null, 'the page offers a way back to the actions');
+
+  // Picking a version hands the stamp to the Host and puts what comes back into the editor.
+  buttonWith(versionsView, stampLabel(versionEntries[0].stamp)).props.onClick();
+  await settle();
+  await settle();
+  assert.deepStrictEqual(
+    restores.map(entry => ({ name: entry.name, stamp: entry.stamp })),
+    [{ name: 'custom.css', stamp: versionEntries[0].stamp }],
+    'the chosen version is the one restored — restores: ' + JSON.stringify(restores),
+  );
+  assert.strictEqual(
+    historic.userStyle().textContent, RESTORED_SHEET,
+    'the restored text is what the page is styled with — applied: ' + JSON.stringify(historic.userStyle().textContent),
+  );
+  assert.deepStrictEqual(
+    historyWrites.map(entry => entry.css),
+    [EDITED_SHEET],
+    'the only save is the edit made here — the restore is the Host writing its own snapshot, not '
+      + 'the editor saving over it — writes: ' + JSON.stringify(historyWrites),
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  versionsView = historic.registrations[0].component();
+  assert.strictEqual(
+    findNode(versionsView, 'textarea').props.value, RESTORED_SHEET,
+    'and the editor holds it too — editor: ' + JSON.stringify(findNode(versionsView, 'textarea').props.value),
+  );
+  assert.ok(
+    renderedText.some(text => text.includes('已恢复')),
+    'the outcome is reported on the page — status: ' + JSON.stringify(renderedText),
+  );
+
+  // Undo is deliberately emptied by a restore: the text it would walk back to is the text the
+  // user just chose to leave, so Ctrl+Z must not reinstate it.
+  const afterRestore = { key: 'z', ctrlKey: true, preventDefault() {} };
+  hookIndex = 0;
+  findNode(historic.registrations[0].component(), 'textarea').props.onKeyDown(afterRestore);
+  await settle();
+  assert.strictEqual(
+    historic.userStyle().textContent, RESTORED_SHEET,
+    'Ctrl+Z after a restore does not undo it — applied: ' + JSON.stringify(historic.userStyle().textContent),
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified');
 }
 
 main().catch((error) => {

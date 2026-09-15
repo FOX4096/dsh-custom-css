@@ -373,10 +373,70 @@ assert.deepStrictEqual(
   'the listing holds the first 200 names by name-order, with the pinned active sheet among them',
 );
 
+// --- snapshots: what a write replaces is kept -------------------------------
+// A sheet is a file the user may have spent an hour on, and every write replaces all of it.
+// The newest few versions live beside it, under a directory `/list` never reads. Counts here
+// are relative: the tests above have been writing theme.css all along, and those writes are
+// snapshots too.
+const seeded = (await call('GET', '/dsh-custom-css/history?name=theme.css')).payload.entries.length;
+const beforeWrite = await readFile(path.join(stylesDir, 'theme.css'), 'utf8');
+await call('POST', '/dsh-custom-css/write', { name: 'theme.css', css: '.snap-one{}' });
+const kept = (await call('GET', '/dsh-custom-css/history?name=theme.css')).payload.entries;
+assert.strictEqual(kept.length, seeded + 1, 'the replaced contents are kept — entries: ' + JSON.stringify(kept));
+assert.strictEqual(
+  await readFile(path.join(stylesDir, '.history', 'theme.css', kept[0].stamp + '.css'), 'utf8'),
+  beforeWrite,
+  'and the newest snapshot is exactly what was there before the write',
+);
+
+await call('POST', '/dsh-custom-css/write', { name: 'theme.css', css: '.snap-one{}' });
+const unchanged = (await call('GET', '/dsh-custom-css/history?name=theme.css')).payload.entries;
+assert.strictEqual(
+  unchanged.length, kept.length,
+  'writing the same text again adds no copy of the same sheet — entries: ' + JSON.stringify(unchanged),
+);
+
+const restored = await call('POST', '/dsh-custom-css/restore', { name: 'theme.css', stamp: kept[0].stamp });
+assert.strictEqual(restored.status, 200, 'a snapshot can be restored');
+assert.strictEqual(await readFile(path.join(stylesDir, 'theme.css'), 'utf8'), beforeWrite, 'the sheet holds what the snapshot held');
+const afterRestore = (await call('GET', '/dsh-custom-css/history?name=theme.css')).payload.entries;
+assert.ok(
+  afterRestore.length >= kept.length,
+  'and the restore is itself reversible — entries: ' + JSON.stringify(afterRestore),
+);
+
+assert.strictEqual((await call('GET', '/dsh-custom-css/history?name=../evil.css')).status, 400, 'the history refuses a traversal name');
+assert.strictEqual(
+  (await call('POST', '/dsh-custom-css/restore', { name: 'theme.css', stamp: 'not-a-stamp' })).status, 400,
+  'a stamp that is not a timestamp is refused',
+);
+assert.strictEqual(
+  (await call('POST', '/dsh-custom-css/restore', { name: 'theme.css', stamp: '1' })).status, 404,
+  'a snapshot that is not there is a 404',
+);
+assert.strictEqual(
+  (await call('POST', '/dsh-custom-css/restore', { name: '../evil.css', stamp: '1' })).status, 400,
+  'and so is a traversal name',
+);
+
+for (let index = 0; index < 26; index += 1) {
+  await call('POST', '/dsh-custom-css/write', { name: 'theme.css', css: '.prune-' + index + '{}' });
+}
+const pruned = (await call('GET', '/dsh-custom-css/history?name=theme.css')).payload.entries;
+assert.strictEqual(
+  pruned.length, 20,
+  'one sheet keeps a bounded number of versions — entries: ' + pruned.length,
+);
+const listedAfterSnapshots = await call('GET', '/dsh-custom-css/list');
+assert.ok(
+  !listedAfterSnapshots.payload.files.some(file => file.name.includes('history')),
+  'and the history directory is never offered as a sheet',
+);
+
 await rm(home, { recursive: true, force: true });
 const verified = [
   'file API', 'per-sheet switch', '/active', 'validation', 'reserved names', 'body cap',
   ...(linked ? ['symlink refusal'] : []),
-  'bookkeeping recovery', 'listing cap', 'and fail-closed fence',
+  'bookkeeping recovery', 'listing cap', 'version snapshots', 'and fail-closed fence',
 ];
 console.log('host-api-smoke: OK — ' + verified.join(', ') + ' verified');
