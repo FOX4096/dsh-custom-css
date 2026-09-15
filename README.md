@@ -17,9 +17,9 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
   <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.2 与 0.1.5 已真机验证，接口契约断言覆盖到 0.0.1-rc.5" src="https://img.shields.io/badge/DSH-0.1.2_%7E_0.1.5_%28runtime_verified%29-4d6bfe"></a><br /><br />
-  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"><br /><br />
-  <b>拾取元素 · 文件下拉 · 更多操作</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
-  编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验；<br />
+  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"> <img alt="查找替换" src="https://img.shields.io/badge/-查找替换-6048bb"> <img alt="撤销重做" src="https://img.shields.io/badge/-撤销重做-257b56"> <img alt="规则大纲" src="https://img.shields.io/badge/-规则大纲-257083"><br /><br />
+  <b>拾取元素 · 查找 · 文件下拉 · 更多操作</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
+  编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验、撤销重做、查找替换；<br />
   拾取器在界面里点选一个元素，直接给出跨版本尽量稳的选择器，并把它实际生效的令牌写成声明。
 </div>
 
@@ -36,7 +36,9 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 - 注册在 `settings.general.item` 槽，`order: 12`。DSH 自带的 `ui-theme` 在这个槽上占了 `appearance`(order 10) 和 `font-size`(order 11)，所以这一行正好落在它们下面。
 - 样式表由 **host 侧**读写，存放在 `~/.dsh/custom-css/`（`$DSH_HOME/custom-css`，`$DSH_HOME` 未设时为 `~/.dsh`）。是普通文件：可用任意编辑器改、可备份、可放进版本库。
 - 当前活动文件名与**各文件的开关**记录在同目录的 `active.json`（如 `{"active":"custom.css","disabled":["dark-tweak.css"]}`）。
-- 编辑内容**即时生效**（防抖 400ms 后写回文件并重绘页面）。编辑器自带**撤销/重做**（每次连续输入的停顿算一步）、**Tab / Shift+Tab 缩进**、**Ctrl/Cmd+S 立即写盘**；补全列表打开时 Tab 是「采用建议」。
+- 编辑内容**即时生效**（防抖 400ms 后写回文件并重绘页面）。编辑器自带**撤销/重做**（每次连续输入的停顿算一步）、**查找 / 替换**（Ctrl+F）、**Tab / Shift+Tab 缩进**、**Ctrl/Cmd+S 立即写盘**；补全列表打开时 Tab 是「采用建议」。
+- **查找 / 替换**：「查找」按钮或 Ctrl+F 打开表头的查找栏 —— 查询取编辑器里选中的那段文字，`Aa` 控制大小写，命中在彩色层里被圈出来（当前那条更重），Enter / Shift+Enter 走命中，**替换** / **全部替换**都是一次编辑（一次 Ctrl+Z 全撤回）。查询是纯文本，不是正则。窄窗口下命中计数、按钮文字会依次让位（见「已知坑」）。
+- **格式化**在「更多操作」里：一条规则一行、每层缩进两空格、去掉空行。它只重排行，不改一行里写的东西（缺分号留给校验器报）；括号不配对的表原样返回。
 - **写盘前会先读一次**：文件在别处被改过（「打开文件」用的系统编辑器、另一个标签页）就不写，页脚改成问你「重新载入 / 覆盖它」。窗口重新回到前台时也会检查一次 —— 所以外部改动不会被静默覆盖。
 - **每次覆盖写盘前留一份快照**：被替换掉的内容存进同目录的 `.history/<文件名>/<毫秒戳>.css`，**每张表最多 20 份**（按时间从旧的开始剪）。内容与最新一份相同时不重复留档 —— 否则自动保存的防抖写盘会把有用的版本挤出去。整张表的任何一次覆盖都留档（编辑器的自动保存、导入、以及**恢复本身**），所以恢复是可逆的。从「更多操作 → 历史版本」可以查和回退（见下表）。
 - 编辑器是 DevTools Styles 标签页的样式：左侧**行号 gutter**、**语法高亮**（注释 / 选择器 / 属性 / 值 / 标点）、输入时弹出**补全列表**。
@@ -72,11 +74,12 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 
 ## 这一行上的控件
 
-表头只留两个常驻入口 + 一个菜单：**[拾取元素] [文件下拉] [更多操作]**（后者含 打开文件 / 导入 / 导出 / 重置 / 历史版本）；**编辑器整块（表头 + 正文 + 状态行）在同一个容器里** —— 表头右侧另有一个**开关胶囊**。原来的六个控件一行放不下，所以除了留在手边的拾取器，其余折进了菜单（菜单用的就是文件下拉那套 chrome）。「历史版本」是菜单里的第二页（不关菜单，就地翻页），左上角有「返回」。
+表头只留两个常驻入口 + 一个菜单：**[拾取元素] [查找] [文件下拉] [更多操作]**（后者含 打开文件 / 导入 / 导出 / 重置 / 格式化 / 历史版本）；**编辑器整块（表头 + 正文 + 状态行）在同一个容器里** —— 表头右侧另有一个**开关胶囊**。原来的六个控件一行放不下，所以除了留在手边的拾取器，其余折进了菜单（菜单用的就是文件下拉那套 chrome）。「历史版本」是菜单里的第二页（不关菜单，就地翻页），左上角有「返回」。
 
 | 控件 | 行为 |
 | --- | --- |
 | 拾取元素 | 在界面里点选一个元素，把它写成一条规则（见下一节）。武装期间按钮变成「取消拾取」，Esc 等效 |
+| 查找 | 打开表头的**查找栏**（Ctrl+F 等效）：查找 / 替换为 / 命中计数 / 区分大小写 / 上一个 / 下一个 / 替换 / 全部替换 / 关闭。栏打开时按钮变成「关闭查找」。命中在彩色层里圈出，当前那条更重。窄窗口下计数与按钮文字依次让位，控件不会消失 |
 | 大纲（文件栏右侧） | 整张表的**顶层规则**按顺序列出，每条后面跟着它**在当前页面命中几个元素**（`无命中` 就是那条规则什么都没做）。点一下就跳到那条规则并打开它的面板 |
 | 文件选择器 | DSH 原生样式的下拉（触发按钮 + 弹出菜单，**不是**原生 `<select>`）：列出目录里全部 `.css`，当前项带勾选；切换即写回 `active.json` 并立刻换用该文件。**最下面一项是「＋ 新建…」** |
 | ＋ 新建… | 选中后行内出现文件名输入框（Enter 创建 / Esc 取消），创建空文件并切换过去；重名返回「已存在」 |
@@ -84,6 +87,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 | 导入 | 用文件对话框从磁盘选一个 `.css`，其内容复制为目录里的新文件并切换过去；同名自动加 `-2`、`-3` 后缀，绝不静默覆盖 |
 | 导出 | 把当前样式表另存为文件：优先用 File System Access 的「另存为」选择器指定位置，不支持时回退为浏览器下载 |
 | 重置 | 清空当前文件内容（移除注入的样式；文件本身保留）。语义是破坏性的，用错误色与其他控件区分（`--dsw-alias-state-error-primary`） |
+| 格式化 | 把整张表重排：一条规则一行、每层缩进两空格、去掉空行。**只动行的排布，不改一行里写的东西**（缺分号、缺空格留给校验器报），括号不配对的表原样返回；已经排好的表上这一项置灰 |
 | 历史版本 | 「更多操作」菜单里的最后一页：把**当前这张表**留在磁盘上的版本按时间倒序列出来（本地时间 + 字节数），点一条就把那一版恢复进编辑器并落盘。恢复前会先把被替换的内容也留一份快照，所以**恢复本身也可以反悔**；恢复会清空编辑器的撤销栈 —— Ctrl+Z 不该把你刚决定离开的那一版又变回来。一次都没被覆盖过的表显示「还没有历史版本」 |
 | 开关胶囊（容器表头） | 编辑器容器**表头**的右侧：**临时停用当前样式表** —— 样式不再注入页面，而文件内容、当前选择、校验状态全都不动。状态写进 `active.json` 的 `disabled` 列表，因此多个浏览器与重启后一致。左侧是「CSS 图标 + 文件名 + `CSS` 徽章」，与状态点一起构成这一行的身份区 |
 
@@ -237,6 +241,7 @@ profile bundle "…" declares no dsh.bundle in its package.json
 | `:has()` 不能嵌套 | 写成 `:has(div:has(> .foo))` 时 Chrome 抛 `is not a valid selector`，**整条规则被静默丢弃**（不报错、不生效） | `:has()` 只写一层，把「直接父级」的约束放进同一条相对选择器里（`> div:not(...) > .foo`） |
 | 描述符不是属性 | `@property` 块被校验器报成「syntax 的值无效」等 3 处 | 校验按块类型分流（见上文「格式校验」）；`CSS.supports` 判不了 descriptor |
 | host 半不热更新 | 改 `lib/index.js` 后刷新页面毫无变化 | host 半必须**重启 dsh**；只有浏览器半（`lib/client.js`）走 `dsh-client-hmr` 热更新 |
+| 一行放不下就换行，而换行不报错 | 查找栏的两个输入框加六个控件是固定 610px，而行宽只有 600px（侧栏打开时 440px）：字段被压到最小值之后，最后两个按钮**掉到第二行**，栏变两倍高，页面看起来只是有点挤 | 用实测定位（`%TEMP%\css-probe\findbar-fit.mjs`，视口宽 = 行宽），加两级让步：**640px 以下隐去命中计数**、**540px 以下 `替换` / `全部替换` 换成 ↦ / ⇉**。阈值取在仍有富余处。任何装进固定宽度行的 flex 行都该这样量一遍 |
 | 自定义属性动画 | `--my-color` 在关键帧之间硬跳，不插值 | 这是规范行为：先用 `@property --my-color { syntax: '<color>'; inherits: true; initial-value: … }` 声明类型，浏览器才肯对它做插值 |
 | 跨代插件 | 插件加载失败：`client-modules: require("…") missed the module table` | 那是给**旧一代 DSH** 编译的 bundle：它把平台包硬写进了产物（如 `@deepseek-ai/dsh-client-runtime/client`、`dsh-client-ui-primitives`），而当前代已删掉这些包。只能等插件作者更新；本插件运行时 require 数为 0，不受这类漂移影响 |
 
