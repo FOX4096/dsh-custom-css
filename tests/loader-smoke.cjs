@@ -2523,6 +2523,35 @@ async function main() {
     'the standard scrollbar properties are only set to `none`, or inside the webkit feature query — got: ' + JSON.stringify(unguarded),
   );
 
+  // --- every scroll container caps its own height ---------------------------
+  // A list that scrolls but has no ceiling is a list that grows past the window: the sheet
+  // picker's menu did exactly that (24 sheets = 968px of menu, 236px of it below an 800px
+  // window, and nothing to scroll because the container itself was the overflow). Each
+  // selector that opts into `overflow-y:auto` therefore has to declare a `max-height`.
+  const declarationsOf = (css) => {
+    const blocks = new Map();
+    for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      for (const selector of match[1].split(',')) {
+        const key = selector.trim();
+        if (key === '' || key.includes('@')) continue;
+        blocks.set(key, (blocks.get(key) ?? '') + match[2]);
+      }
+    }
+    return blocks;
+  };
+  const blocks = declarationsOf(injected.textContent);
+  const uncapped = [...blocks.entries()]
+    .filter(([, body]) => /overflow-y\s*:\s*auto/.test(body) && !/max-height\s*:/.test(body))
+    .map(([selector]) => selector);
+  assert.deepStrictEqual(
+    uncapped, [],
+    'a scroll container with no height ceiling can leave the window — got: ' + JSON.stringify(uncapped),
+  );
+  assert.ok(
+    [...blocks.keys()].some(selector => selector.includes('dshCc_menu')),
+    'the audit actually saw the menu rule — got: ' + JSON.stringify([...blocks.keys()].slice(0, 6)),
+  );
+
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
   // lives outside the settings row (so picking keeps working after the settings page
@@ -3362,7 +3391,7 @@ async function main() {
     'the pick reports back once its own write lands — status was: ' + footerOf(taken),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified');
 }
 
 main().catch((error) => {
