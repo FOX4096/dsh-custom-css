@@ -17,7 +17,7 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
   <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.2 与 0.1.5 已真机验证，接口契约断言覆盖到 0.0.1-rc.5" src="https://img.shields.io/badge/DSH-0.1.2_%7E_0.1.5_%28runtime_verified%29-4d6bfe"></a><br /><br />
-  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"><br /><br />
+  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"><br /><br />
   <b>拾取元素 · 文件下拉 · 更多操作</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
   编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验；<br />
   拾取器在界面里点选一个元素，直接给出跨版本尽量稳的选择器，并把它实际生效的令牌写成声明。
@@ -38,6 +38,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 - 当前活动文件名与**各文件的开关**记录在同目录的 `active.json`（如 `{"active":"custom.css","disabled":["dark-tweak.css"]}`）。
 - 编辑内容**即时生效**（防抖 400ms 后写回文件并重绘页面）。编辑器自带**撤销/重做**（每次连续输入的停顿算一步）、**Tab / Shift+Tab 缩进**、**Ctrl/Cmd+S 立即写盘**；补全列表打开时 Tab 是「采用建议」。
 - **写盘前会先读一次**：文件在别处被改过（「打开文件」用的系统编辑器、另一个标签页）就不写，页脚改成问你「重新载入 / 覆盖它」。窗口重新回到前台时也会检查一次 —— 所以外部改动不会被静默覆盖。
+- **每次覆盖写盘前留一份快照**：被替换掉的内容存进同目录的 `.history/<文件名>/<毫秒戳>.css`，**每张表最多 20 份**（按时间从旧的开始剪）。内容与最新一份相同时不重复留档 —— 否则自动保存的防抖写盘会把有用的版本挤出去。整张表的任何一次覆盖都留档（编辑器的自动保存、导入、以及**恢复本身**），所以恢复是可逆的。从「更多操作 → 历史版本」可以查和回退（见下表）。
 - 编辑器是 DevTools Styles 标签页的样式：左侧**行号 gutter**、**语法高亮**（注释 / 选择器 / 属性 / 值 / 标点）、输入时弹出**补全列表**。
   - 高亮用 DSH 自己的 shiki 配色 token（`--shiki-token-keyword/constant/string/comment/punctuation`），所以与 Markdown 代码块同色并随浅深主题切换；渲染前逐段 HTML 转义，样式表永远不可能变成标记。
   - **补全数据来自浏览器本身**：属性名是从 `CSSStyleDeclaration.prototype` 枚举出来的（即该引擎真正认识的全部属性，含厂商前缀与新增属性），不再依赖手写列表 —— 手写列表只在没有 DOM 的调用方（如测试）里兜底。属性值的枚举集合仍由插件维护，但每个候选都先过 `CSS.supports(prop, value)`，引擎不认的直接不显示。
@@ -71,7 +72,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 
 ## 这一行上的控件
 
-表头只留两个常驻入口 + 一个菜单：**[拾取元素] [文件下拉] [更多操作]**（后者含 打开文件 / 导入 / 导出 / 重置）；**编辑器整块（表头 + 正文 + 状态行）在同一个容器里** —— 表头右侧另有一个**开关胶囊**。原来的六个控件一行放不下，所以除了留在手边的拾取器，其余折进了菜单（菜单用的就是文件下拉那套 chrome）。
+表头只留两个常驻入口 + 一个菜单：**[拾取元素] [文件下拉] [更多操作]**（后者含 打开文件 / 导入 / 导出 / 重置 / 历史版本）；**编辑器整块（表头 + 正文 + 状态行）在同一个容器里** —— 表头右侧另有一个**开关胶囊**。原来的六个控件一行放不下，所以除了留在手边的拾取器，其余折进了菜单（菜单用的就是文件下拉那套 chrome）。「历史版本」是菜单里的第二页（不关菜单，就地翻页），左上角有「返回」。
 
 | 控件 | 行为 |
 | --- | --- |
@@ -83,6 +84,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 | 导入 | 用文件对话框从磁盘选一个 `.css`，其内容复制为目录里的新文件并切换过去；同名自动加 `-2`、`-3` 后缀，绝不静默覆盖 |
 | 导出 | 把当前样式表另存为文件：优先用 File System Access 的「另存为」选择器指定位置，不支持时回退为浏览器下载 |
 | 重置 | 清空当前文件内容（移除注入的样式；文件本身保留）。语义是破坏性的，用错误色与其他控件区分（`--dsw-alias-state-error-primary`） |
+| 历史版本 | 「更多操作」菜单里的最后一页：把**当前这张表**留在磁盘上的版本按时间倒序列出来（本地时间 + 字节数），点一条就把那一版恢复进编辑器并落盘。恢复前会先把被替换的内容也留一份快照，所以**恢复本身也可以反悔**；恢复会清空编辑器的撤销栈 —— Ctrl+Z 不该把你刚决定离开的那一版又变回来。一次都没被覆盖过的表显示「还没有历史版本」 |
 | 开关胶囊（容器表头） | 编辑器容器**表头**的右侧：**临时停用当前样式表** —— 样式不再注入页面，而文件内容、当前选择、校验状态全都不动。状态写进 `active.json` 的 `disabled` 列表，因此多个浏览器与重启后一致。左侧是「CSS 图标 + 文件名 + `CSS` 徽章」，与状态点一起构成这一行的身份区 |
 
 > 「导入」是复制而不是链接原文件：浏览器出于安全不会把所选文件的完整路径交给页面。原文件不受影响；要反复编辑同一份文件，请用「打开文件」。
@@ -131,12 +133,14 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点，并且**必须
 | --- | --- | --- |
 | GET | `/list` | `{ files, active, disabled, dir }` |
 | GET | `/read?name=<name>` | `{ name, css }` |
-| POST | `/write` | 写入指定文件 |
+| GET | `/history?name=<name>` | `{ name, entries: [{ stamp, bytes, mtime }] }`，按时间倒序（快照目录 `.history/<name>/`，`.history` 这一层不会被 `/list` 当成表列出来） |
+| POST | `/write` | 写入指定文件（写之前把被替换的内容留一份快照） |
 | POST | `/create` | 新建空文件（已存在 → 409） |
 | POST | `/import` | 导入内容为文件（按设计覆盖同名） |
 | POST | `/active` | 记录当前文件（文件不存在 → 404 `not-found`，与 `/toggle` 一致） |
 | POST | `/toggle` | `{ name, enabled }` → 打开 / 关闭某张样式表（**文件保留**），状态记进 `active.json` 的 `disabled` |
 | POST | `/open` | 用系统默认程序打开指定文件（仅限目录内已存在的 `.css`；不存在 → 404） |
+| POST | `/restore` | `{ name, stamp }` → 把某一版快照写回该文件（被替换的内容先留一份快照，所以恢复可逆；`stamp` 不是时间戳 → 400，快照不存在 → 404） |
 
 文件名限定为**单个路径段且以 `.css` 结尾**（`^[A-Za-z0-9._一-龥-]+\.css$`，≤64 字符）；`..`、分隔符、无扩展名、Windows 设备名（`nul.css`、`con.css`…）一律 400。目录外的路径在拼接后还会二次校验，符号链接也拒绝：目录内的软链会让写入落到目录之外，而字面量校验看不出来。
 
