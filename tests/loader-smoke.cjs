@@ -21,16 +21,16 @@ const source = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8'
 /**
  * The module text this suite runs.
  *
- * One internal is exposed by name: the dropdown placement math. It is pure, it decides
- * something a user sees directly (a menu opened from the right end of a row must not leave
- * the window), and nothing else about the text changes — the export is additive and the
- * plugin never looks at it. Everything else is asserted through the components, as usual.
+ * A few internals are exposed by name through `__probe`: the dropdown placement math, the
+ * find bar's scan and its hit markup, and the formatter. Each is pure, each decides something
+ * a user sees directly, and nothing else about the text changes — the export is additive and
+ * the plugin never looks at it. Everything else is asserted through the components, as usual.
  */
 const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -654,6 +654,18 @@ async function main() {
     '.dshCc_foot{box-sizing:border-box;',
     '.dshCc_panel{box-sizing:border-box;',
     '.dshCc_propGrid{box-sizing:border-box;',
+    // The find bar is a second flex row inside the editor box, and it holds two fields plus
+    // six controls in ~600px. Two things keep it from spilling: the fields may shrink below
+    // their content width, and the row may not take more height than it needs.
+    '.dshCc_findBar{box-sizing:border-box;display:flex;flex:none;',
+    '.dshCc_findField{box-sizing:border-box;flex:1;min-width:0;',
+    '.dshCc_editorRow{display:flex;flex:1;min-height:0;min-width:0}',
+    // And the editor box is the column those two rows divide between them.
+    '.dshCc_editorWrap{box-sizing:border-box;position:relative;display:flex;flex-direction:column;',
+    // The two steps the bar takes when the row is narrower than its contents (measured:
+    // 610px of content at every width, so it wrapped until these existed).
+    '@media (max-width:640px){.dshCc_findCount,.dshCc_findCountBad{display:none}}',
+    '@media (max-width:540px){.dshCc_findLabel{display:none}',
   ];
   for (const guard of boundsGuards) {
     assert.ok(rowSheets[0].textContent.includes(guard), 'explicit box: ' + guard);
@@ -3680,7 +3692,309 @@ async function main() {
     'Ctrl+Z after a restore does not undo it — applied: ' + JSON.stringify(historic.userStyle().textContent),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified');
+  // --- 查找 / 替换 与格式化 ---------------------------------------------------
+  // The find bar is one of the few things here with a right answer that does not need a
+  // browser: what counts as a hit, and where a hit is marked in the colour layer. The first
+  // two blocks below are those two, straight against the internals; the third drives the row,
+  // because "the toolbar opens it, Enter walks it, 替换 writes through the normal edit path"
+  // is only true of the row.
+  const probe = host.mod.__probe;
+
+  // What counts as a hit. Case folding and overlapping are the two decisions worth pinning:
+  // folding is ASCII-only (CSS identifiers ARE ASCII, and `toLowerCase()` moves offsets for
+  // İ), and an overlapping query is two hits rather than one.
+  assert.deepStrictEqual(
+    [...probe.searchHits('border-radius: 4px; BORDER-RADIUS: 8px;', 'border-radius', false)].map(hit => hit.start),
+    [0, 'border-radius: 4px; '.length],
+    'a query is found however it is cased, and the hits are in document order',
+  );
+  assert.deepStrictEqual(
+    [...probe.searchHits('border-radius: 4px; BORDER-RADIUS: 8px;', 'border-radius', true)].map(hit => hit.start),
+    [0],
+    'and only as written when 区分大小写 is on',
+  );
+  assert.strictEqual(
+    probe.searchHits('.aaa { }', 'aa', false).length, 2,
+    'an overlapping query is two hits, not one — stepping by the match length would miss the second',
+  );
+  assert.strictEqual(probe.searchHits('.a { }', '', false).length, 0, 'an empty query is no hits, not every offset');
+  // A sheet holding a character that folds to MORE than one code unit: the hits are offsets
+  // into the folded string, and everything after that character would be one off without the
+  // map back. `.İ { }\n.A { }` is 9 characters; the `A` sits at 8, not at 7.
+  const dotted = '.İ { }\n.A { }';
+  assert.deepStrictEqual(
+    [...probe.searchHits(dotted, 'a', false)].map(hit => hit.start), [dotted.indexOf('A')],
+    'a fold that changes length does not push every later hit off by one',
+  );
+  assert.strictEqual(probe.searchHits('.İ { }\n.A { }', 'a', true).length, 0, 'and 区分大小写 still means case-sensitive');
+  assert.strictEqual(probe.searchHits('.a { }\n.A { }', 'a', false).length, 2, 'the ordinary fold finds both spellings');
+  const manyHits = probe.searchHits('.x{}\n.y{}\n.z{}', '}', false);
+  assert.strictEqual(probe.hitAtOrAfter(manyHits, 0), 0, 'the bar lands on the first hit at the caret');
+  assert.strictEqual(probe.hitAtOrAfter(manyHits, 6), 1, 'and on the next one once the caret has passed it');
+  assert.strictEqual(probe.hitAtOrAfter(manyHits, 999), 0, 'and wraps to the top from the end of the sheet');
+  assert.strictEqual(probe.hitAtOrAfter([], 0), -1, 'with no hits there is nowhere to land');
+
+  // Where a hit is marked. The offsets the bar has are offsets into the text; the layer's
+  // markup is what has to be marked, and the two stop agreeing the moment a `<` is escaped.
+  const HIT_SHEET = '.a { color: red; }\n.b { color: red; }';
+  const marked = probe.highlightCss(HIT_SHEET, [], probe.searchHits(HIT_SHEET, 'color', false), 1);
+  assert.strictEqual(
+    (marked.match(/<mark class="dshCc_hit"/g) ?? []).length, 1,
+    'every hit is marked in the colour layer — layer: ' + marked,
+  );
+  assert.strictEqual(
+    (marked.match(/<mark class="dshCc_hit dshCc_hitActive"/g) ?? []).length, 1,
+    'and exactly the one the bar points at is singled out — layer: ' + marked,
+  );
+  assert.ok(
+    marked.indexOf('dshCc_hitActive') > marked.indexOf('class="dshCc_hit"'),
+    'the active mark is the second hit when the bar points at the second',
+  );
+  assert.ok(
+    /<span class="dshCc_tokProp"> <mark class="dshCc_hit">color<\/mark><\/span>/.test(marked),
+    'and the mark wraps the hit text, not the token span around it — layer: ' + marked,
+  );
+  // Escaping is the case the mark cannot be placed by arithmetic: `&` is one character of the
+  // sheet and five of the markup, so a hit inside it would be marked five characters late.
+  // The bar still counts it; the layer leaves it unmarked.
+  const escaped = probe.highlightCss('.a { content: "&"; }', [], probe.searchHits('.a { content: "&"; }', '&', false), 0);
+  assert.strictEqual(
+    (escaped.match(/<mark/g) ?? []).length, 0,
+    'a hit that lands inside an escaped character is left unmarked rather than marked off by four — layer: ' + escaped,
+  );
+  assert.ok(escaped.includes('&amp;'), 'and the character itself is still escaped — layer: ' + escaped);
+  assert.strictEqual(
+    (probe.highlightCss('.a { color: red; }', [], probe.searchHits('.a { color: red; }', 'red', false), 0)
+      .match(/<mark/g) ?? []).length, 1,
+    'while an ordinary hit in the same sheet is marked',
+  );
+
+  // The layer draws the same characters the textarea holds, or the two would drift apart
+  // line by line. A mark adds markup, so it is stripped before comparing.
+  const layerText = marked.replace(/<\/?mark[^>]*>/g, '').replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  assert.strictEqual(
+    layerText, HIT_SHEET + '\n',
+    'marking a hit leaves the layer drawing exactly the sheet text — layer text: ' + JSON.stringify(layerText),
+  );
+
+  // The row: the toolbar opens it, Enter walks it, 替换 writes one edit, 全部替换 writes them
+  // all, Esc closes it.
+  const SEARCH_SHEET = '.a { color: red; }\n.b { color: blue; }';
+  let searchDisk = SEARCH_SHEET;
+  const searchWrites = [];
+  const searcher = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: searchDisk });
+      if (url.endsWith('/write')) {
+        const body = JSON.parse(init.body);
+        searchWrites.push(body);
+        searchDisk = body.css;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: body.css.length });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  let searchView = searcher.registrations[0].component();
+  await searcher.runEffects();
+  assert.ok(buttonWith(searchView, '查找') !== null, 'the toolbar offers 查找 — text: ' + JSON.stringify(renderedText));
+  assert.ok(!renderedClasses.includes('dshCc_findBar'), 'and the bar is not open until it is asked for');
+
+  const searchArea = findNode(searchView, 'textarea');
+  const searchCarets = [];
+  // `.a { color: red; }` — `color` starts at 5 (the space and `{` are at 3 and 4).
+  searchArea.props.ref.current = {
+    selectionStart: SEARCH_SHEET.indexOf('color'),
+    selectionEnd: SEARCH_SHEET.indexOf('color') + 'color'.length,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange(start) { searchCarets.push(start); },
+  };
+  // Ctrl+F: the selection becomes the query, the way every editor's find bar works.
+  const ctrlF = { key: 'f', ctrlKey: true, preventDefault() {} };
+  hookIndex = 0;
+  findNode(searcher.registrations[0].component(), 'textarea').props.onKeyDown(ctrlF);
+  hookIndex = 0;
+  renderedClasses.length = 0;
+  searchView = searcher.registrations[0].component();
+  assert.ok(renderedClasses.includes('dshCc_findBar'), 'Ctrl+F opens the bar');
+  const fields = [];
+  (function collect(node) {
+    if (node === null || typeof node !== 'object') return;
+    if (node.type === 'input') fields.push(node.props);
+    for (const child of node.children ?? []) collect(child);
+  })(searchView);
+  const findField = fields.find(field => field['aria-label'] === '查找');
+  const replaceField = fields.find(field => field['aria-label'] === '替换为');
+  assert.ok(findField !== undefined && replaceField !== undefined, 'the bar has a 查找 field and a 替换为 field');
+  assert.strictEqual(findField.value, 'color', 'the editor selection became the query — value: ' + JSON.stringify(findField.value));
+  assert.ok(renderedText.includes('1 / 2'), 'the bar says which hit it is on — text: ' + JSON.stringify(renderedText));
+  // Opening the bar puts the caret on the hit it points at: the first one at or after where
+  // the caret already was. It is the effect that moves it, so the layers get synced too.
+  await searcher.runEffects();
+  assert.deepStrictEqual(
+    [...searchCarets], [SEARCH_SHEET.indexOf('color')],
+    'opening the bar takes the caret to the hit it points at — carets: ' + JSON.stringify(searchCarets),
+  );
+  // Enter walks: the bar was pointing at the first hit, so Enter goes to the second, and one
+  // more wraps to the top again. Shift+Enter walks back.
+  const pressEnter = async (modifiers = {}) => {
+    hookIndex = 0;
+    findNode(searcher.registrations[0].component(), 'textarea')
+      .props.onKeyDown({ key: 'Enter', preventDefault() {}, ...modifiers });
+    await searcher.runEffects();
+  };
+  await pressEnter();
+  await pressEnter();
+  await pressEnter({ shiftKey: true });
+  await pressEnter();
+  assert.deepStrictEqual(
+    [...searchCarets],
+    [SEARCH_SHEET.indexOf('color'), SEARCH_SHEET.lastIndexOf('color'), SEARCH_SHEET.indexOf('color'),
+      SEARCH_SHEET.lastIndexOf('color'), SEARCH_SHEET.indexOf('color')],
+    'Enter walks to the next hit and wraps around, and Shift+Enter walks back — carets: ' + JSON.stringify(searchCarets),
+  );
+
+  // 替换: one edit through the normal path, so one debounced write and one undo step.
+  hookIndex = 0;
+  renderedText.length = 0;
+  searchView = searcher.registrations[0].component();
+  const replaceInput = (function find(node) {
+    if (node === null || typeof node !== 'object') return null;
+    if (node.type === 'input' && node.props['aria-label'] === '替换为') return node;
+    for (const child of node.children ?? []) {
+      const hit = find(child);
+      if (hit !== null) return hit;
+    }
+    return null;
+  })(searchView);
+  replaceInput.props.onChange({ target: { value: 'background' } });
+  hookIndex = 0;
+  searchView = searcher.registrations[0].component();
+  buttonWith(searchView, '替换').props.onClick();
+  await searcher.runTimers();
+  await settle();
+  assert.deepStrictEqual(
+    searchWrites.map(entry => entry.css),
+    ['.a { background: red; }\n.b { color: blue; }'],
+    '替换 writes the sheet with that one hit replaced — writes: ' + JSON.stringify(searchWrites),
+  );
+  hookIndex = 0;
+  searchView = searcher.registrations[0].component();
+  assert.ok(
+    renderedText.includes('1 / 1'),
+    'and the hit list shrank to the one that is left — text: ' + JSON.stringify(renderedText),
+  );
+  // 全部替换: still one edit, and now nothing is left to find.
+  buttonWith(searchView, '全部替换').props.onClick();
+  await searcher.runTimers();
+  await settle();
+  assert.deepStrictEqual(
+    searchWrites.map(entry => entry.css),
+    ['.a { background: red; }\n.b { color: blue; }', '.a { background: red; }\n.b { background: blue; }'],
+    '全部替换 replaces every hit in one edit — writes: ' + JSON.stringify(searchWrites),
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  searchView = searcher.registrations[0].component();
+  assert.ok(renderedText.includes('无命中'), 'and says so when nothing is left — text: ' + JSON.stringify(renderedText));
+  assert.ok(
+    renderedClasses.includes('dshCc_findCountBad'),
+    'the count turns into a problem when the query matches nothing',
+  );
+
+  // Esc closes the bar and hands the caret back to the editor.
+  findNode(searchView, 'input').props.onKeyDown({ key: 'Escape', preventDefault() {} });
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  searchView = searcher.registrations[0].component();
+  assert.ok(!renderedClasses.includes('dshCc_findBar'), 'Esc closes the bar');
+
+  // 格式化: a whole-sheet edit, one undo step, and the same sheet the scanner already read.
+  // 格式化 re-flows the LINES: one rule per line, two spaces per nesting level, blank lines
+  // gone. It deliberately does not paraphrase what is inside a line — a missing `;` or a
+  // missing space before `{` is the validator's business, and a formatter that rewrote
+  // declarations would be making changes the user never asked for.
+  const messy = '.a{color:red}\n\n.b { color: blue; }\n@media (min-width: 600px) {\n.c{color:lime}\n}';
+  /** Every write the formatter's row makes, so the assertion can name the text it sent. */
+  const formatWrites = [];
+  const tidy = probe.formatCss(messy);
+  assert.strictEqual(
+    tidy,
+    ['.a{', '  color:red', '}', '.b {', '  color: blue;', '}',
+      '@media (min-width: 600px) {', '  .c{', '    color:lime', '  }', '}'].join('\n') + '\n',
+    '格式化 puts each brace on its own line and indents by nesting — got: ' + JSON.stringify(tidy),
+  );
+  assert.strictEqual(
+    probe.formatCss('.a { color: red; }\n.b { color: blue; }'),
+    '.a {\n  color: red;\n}\n.b {\n  color: blue;\n}\n',
+    'and a one-line rule is opened up, its declaration kept exactly as it was written',
+  );
+  assert.strictEqual(
+    probe.formatCss('.a { color: red; }\n\n\n.b { color: blue; }'),
+    '.a {\n  color: red;\n}\n.b {\n  color: blue;\n}\n',
+    'while the blank lines between rules do go',
+  );
+  assert.deepStrictEqual(
+    [...probe.formatCss(tidy)], [...tidy],
+    'and running it again changes nothing, so the menu entry has a state where it is disabled',
+  );
+  assert.strictEqual(
+    probe.formatCss('.a { content: "}"; }\n.b { color: red; }'),
+    '.a {\n  content: "}";\n}\n.b {\n  color: red;\n}\n',
+    'a brace inside a string does not open or close a block',
+  );
+  assert.strictEqual(probe.formatCss('.a { color: red;'), '.a { color: red;', 'an unclosed sheet is left exactly as it is');
+  assert.strictEqual(probe.formatCss('.a { color: red; } }'), '.a { color: red; } }', 'and so is one with a brace too many');
+
+  const messyRow = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: messy });
+      if (url.endsWith('/write')) {
+        const body = JSON.parse(init.body);
+        formatWrites.push(body);
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: body.css.length });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });  hookIndex = 0;
+  let messyView = messyRow.registrations[0].component();
+  buttonWith(messyView, '更多操作').props.onClick();
+  hookIndex = 0;
+  messyView = messyRow.registrations[0].component();
+  const formatItem = buttonWith(messyView, '格式化');
+  assert.ok(formatItem !== null, 'the actions menu offers 格式化');
+  assert.notStrictEqual(formatItem.props.disabled, true, 'and it is offered while the sheet is unformatted');
+  formatItem.props.onClick();
+  await messyRow.runTimers();
+  await settle();
+  assert.deepStrictEqual(
+    formatWrites.map(entry => entry.css), [tidy],
+    'the formatted sheet is what lands on disk — writes: ' + JSON.stringify(formatWrites),
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  messyView = messyRow.registrations[0].component();
+  const tidyLayer = findNode(messyView, 'pre').props.dangerouslySetInnerHTML.__html;
+  const tidyText = tidyLayer.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  assert.strictEqual(
+    tidyText, tidy + '\n',
+    'and the colour layer draws the formatted text, not the text that was there when it landed',
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified');
 }
 
 main().catch((error) => {
