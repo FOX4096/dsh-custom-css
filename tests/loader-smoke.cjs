@@ -2552,6 +2552,122 @@ async function main() {
     'the audit actually saw the menu rule — got: ' + JSON.stringify([...blocks.keys()].slice(0, 6)),
   );
 
+  // --- an outside edit stops the next write instead of being clobbered ------
+  // A sheet is a real file, and 「打开文件」 exists so it can be edited in a real editor — so the
+  // copy a row holds can go stale without anything saying so, and the next debounced write
+  // would land on top of the other editor's work. That is the one failure in this row that
+  // loses data rather than looking untidy. A write therefore reads first; a disagreement is a
+  // question with two answers, not a failure and not a silent overwrite.
+  let diskText = '.x{color:red}';
+  const outsideWrites = [];
+  const outside = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: diskText });
+      if (url.endsWith('/write')) {
+        outsideWrites.push(JSON.parse(init.body));
+        diskText = JSON.parse(init.body).css;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  const outsideView = outside.registrations[0].component();
+  await outside.runEffects();
+  const outsideArea = findNode(outsideView, 'textarea');
+  outsideArea.props.ref.current = {
+    selectionStart: 0,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange() {},
+  };
+  // Somebody else writes the file — VS Code via 「打开文件」, or another tab.
+  diskText = '.x{color:red}\n\n.edited-elsewhere { color: blue; }';
+  outsideArea.props.onChange({
+    target: { value: '.x{color:green}', selectionStart: 14 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  await outside.runTimers();
+  await settle();
+  await settle();
+  assert.strictEqual(
+    outsideWrites.length, 0,
+    'the write is refused rather than landing on the other copy — writes: ' + JSON.stringify(outsideWrites),
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  outside.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('已被改动')),
+    'and the footer asks which copy to keep — status: ' + JSON.stringify(renderedText),
+  );
+  // 「重新载入」: the disk copy becomes the sheet.
+  buttonWith(outside.registrations[0].component(), '重新载入').props.onClick();
+  hookIndex = 0;
+  renderedText.length = 0;
+  outside.registrations[0].component();
+  assert.ok(
+    outside.userStyle().textContent.includes('.edited-elsewhere'),
+    'taking the disk copy applies the text from the other editor — applied: ' + JSON.stringify(outside.userStyle().textContent),
+  );
+  assert.ok(
+    !renderedText.some(text => text.includes('已被改动')),
+    'and the question is gone',
+  );
+
+  // The same collision, answered the other way: 「覆盖它」 writes this editor's text on purpose.
+  let keepDisk = '.k{color:red}';
+  const keepWrites = [];
+  const keep = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: keepDisk });
+      if (url.endsWith('/write')) {
+        keepWrites.push(JSON.parse(init.body));
+        keepDisk = JSON.parse(init.body).css;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  const keepMineView = keep.registrations[0].component();
+  await keep.runEffects();
+  const keepArea = findNode(keepMineView, 'textarea');
+  keepArea.props.ref.current = { selectionStart: 0, scrollTop: 0, scrollLeft: 0, clientHeight: 140, focus() {}, setSelectionRange() {} };
+  keepArea.props.onChange({
+    target: { value: '.k{color:blue}', selectionStart: 13 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  // The window comes back into view: the outside edit is noticed before anyone types again.
+  keepDisk = '.k{color:red}\n\n.another-tab { color: lime; }';
+  keep.dispatch('visibilitychange', {});
+  await settle();
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  keep.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('已被改动')),
+    'coming back into view surfaces the outside edit — status: ' + JSON.stringify(renderedText),
+  );
+  buttonWith(keep.registrations[0].component(), '覆盖它').props.onClick();
+  await settle();
+  await settle();
+  assert.strictEqual(keepWrites.length, 1, 'keeping mine writes exactly once — writes: ' + JSON.stringify(keepWrites));
+  assert.strictEqual(keepWrites[0].css, '.k{color:blue}', 'with this editor text, deliberately');
+  hookIndex = 0;
+  renderedText.length = 0;
+  keep.registrations[0].component();
+  assert.ok(!renderedText.some(text => text.includes('已被改动')), 'and the question is cleared');
+
   // --- element picker -------------------------------------------------------
   // Two architectural promises are what these tests are really about: the session
   // lives outside the settings row (so picking keeps working after the settings page
@@ -3066,6 +3182,10 @@ async function main() {
     dom: { nodes: [newlineNode] },
   });
   await pickWith(newline, newlineNode);
+  // The write goes through writeSheet, which reads the file first to confirm nobody moved
+  // it — so it lands a microtask later than the click that started it.
+  await settle();
+  await settle();
   assert.strictEqual(newlineWrites.length, 1, 'the pick is written');
   assert.ok(
     newlineWrites[0].css.includes('第一行\\a 第二行'),
@@ -3109,6 +3229,8 @@ async function main() {
     const board = unknown.document.body.children.find(child => child.className === 'dshCc_pickPanel');
     for (const row of (board?.children ?? [])[1]?.children ?? []) unknownLabels.push(row.textContent);
   });
+  await settle();
+  await settle();
   assert.strictEqual(unknownWrites.length, 1, 'the pick is written');
   assert.ok(
     unknownLabels.some(label => label.includes('命中数未知')),
@@ -3310,6 +3432,10 @@ async function main() {
     handoff.debounces(WRITE_TICK).length, 0,
     'the pending debounced write is taken over rather than left to fire',
   );
+  // The pick writes through `writeSheet`, which reads the file first (see T1b), so give the
+  // two round trips a chance to happen before counting writes.
+  await settle();
+  await settle();
   assert.strictEqual(
     handoffWrites.length, 1,
     'and it never reaches the host on its own: the pick is the only write — got: ' + JSON.stringify(handoffWrites),
@@ -3375,6 +3501,9 @@ async function main() {
   taken.dispatch('pointermove', { clientX: 30, clientY: 50 });
   taken.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
   taken.dispatch('keydown', { key: 'Enter', preventDefault() {} });
+  // Same read-then-write as above: the second request is on the wire a microtask later.
+  await settle();
+  await settle();
   assert.strictEqual(inflight.length, 2, 'and the pick writes through on top of it');
   // The taken-over write answers first — it must not speak for the sheet.
   inflight[0]();

@@ -37,6 +37,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 - 样式表由 **host 侧**读写，存放在 `~/.dsh/custom-css/`（`$DSH_HOME/custom-css`，`$DSH_HOME` 未设时为 `~/.dsh`）。是普通文件：可用任意编辑器改、可备份、可放进版本库。
 - 当前活动文件名与**各文件的开关**记录在同目录的 `active.json`（如 `{"active":"custom.css","disabled":["dark-tweak.css"]}`）。
 - 编辑内容**即时生效**（防抖 400ms 后写回文件并重绘页面）。编辑器自带**撤销/重做**（每次连续输入的停顿算一步）、**Tab / Shift+Tab 缩进**、**Ctrl/Cmd+S 立即写盘**；补全列表打开时 Tab 是「采用建议」。
+- **写盘前会先读一次**：文件在别处被改过（「打开文件」用的系统编辑器、另一个标签页）就不写，页脚改成问你「重新载入 / 覆盖它」。窗口重新回到前台时也会检查一次 —— 所以外部改动不会被静默覆盖。
 - 编辑器是 DevTools Styles 标签页的样式：左侧**行号 gutter**、**语法高亮**（注释 / 选择器 / 属性 / 值 / 标点）、输入时弹出**补全列表**。
   - 高亮用 DSH 自己的 shiki 配色 token（`--shiki-token-keyword/constant/string/comment/punctuation`），所以与 Markdown 代码块同色并随浅深主题切换；渲染前逐段 HTML 转义，样式表永远不可能变成标记。
   - **补全数据来自浏览器本身**：属性名是从 `CSSStyleDeclaration.prototype` 枚举出来的（即该引擎真正认识的全部属性，含厂商前缀与新增属性），不再依赖手写列表 —— 手写列表只在没有 DOM 的调用方（如测试）里兜底。属性值的枚举集合仍由插件维护，但每个候选都先过 `CSS.supports(prop, value)`，引擎不认的直接不显示。
