@@ -715,8 +715,33 @@ async function main() {
   renderedText.length = 0;
   renderedClasses.length = 0;
   const menuView = renderRow();
-  for (const label of ['打开文件', '导入', '导出', '重置']) {
+  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '历史版本']) {
     assert.ok(renderedText.includes(label), 'the menu renders the ' + label + ' action');
+  }
+  // The order is a decision, not an accident: the file actions together, the whole-sheet
+  // actions next, and the one entry that destroys work last — where the pointer has to
+  // travel to it and cannot land on it on the way to anything else.
+  {
+    const order = [];
+    (function walk(current) {
+      if (current === null || typeof current !== 'object') return;
+      if (current.type === 'button' && typeof current.props?.title === 'string') order.push(textOf(current));
+      for (const child of current.children ?? []) walk(child);
+    })(menuView);
+    const wanted = ['打开文件', '导入', '导出', '格式化', '历史版本', '重置'];
+    const seen = order
+      .map(entry => wanted.find(label => entry.startsWith(label)))
+      .filter(label => label !== undefined);
+    assert.deepStrictEqual(
+      [...seen], wanted,
+      'the actions menu lists the file actions, then the whole-sheet ones, then 重置 — got: ' + JSON.stringify(order),
+    );
+    // And the destructive one is styled as destructive, in its new place as before.
+    const resetItem = buttonWith(menuView, '重置');
+    assert.ok(
+      String(resetItem.props.className).includes('dshCc_menuItemDanger'),
+      '重置 keeps its destructive styling at the bottom — className: ' + JSON.stringify(resetItem.props.className),
+    );
   }
   assert.ok(renderedClasses.some(entry => entry.includes('dshCc_menuItemDanger')), '重置 keeps its destructive styling in the menu');
   assert.ok(renderedClasses.some(entry => entry.includes('dshCc_menuHint')), 'each menu item says what it does');
@@ -3861,6 +3886,35 @@ async function main() {
       SEARCH_SHEET.lastIndexOf('color'), SEARCH_SHEET.indexOf('color')],
     'Enter walks to the next hit and wraps around, and Shift+Enter walks back — carets: ' + JSON.stringify(searchCarets),
   );
+
+  // The case toggle is the one control in the bar whose state is invisible in the field's
+  // text: a pressed `Aa` has to LOOK pressed, or the user cannot tell which search they are
+  // running. The class is the assertion; the appearance is the user's to confirm.
+  hookIndex = 0;
+  searchView = searcher.registrations[0].component();
+  const caseBtn = buttonWith(searchView, 'Aa');
+  assert.ok(caseBtn !== null, 'the bar has a case toggle');
+  assert.strictEqual(caseBtn.props['aria-pressed'], false, 'and it starts unpressed');
+  assert.ok(
+    !String(caseBtn.props.className).includes('dshCc_findOn'),
+    'with no pressed styling while it is off',
+  );
+  caseBtn.props.onClick();
+  hookIndex = 0;
+  renderedText.length = 0;
+  searchView = searcher.registrations[0].component();
+  const caseBtnOn = buttonWith(searchView, 'Aa');
+  assert.strictEqual(caseBtnOn.props['aria-pressed'], true, 'clicking it presses it');
+  assert.ok(
+    String(caseBtnOn.props.className).includes('dshCc_findOn'),
+    'and the pressed state carries a class of its own — a toggle nobody can see is a toggle '
+      + 'nobody can use — className: ' + JSON.stringify(caseBtnOn.props.className),
+  );
+  // Back to case-insensitive for the rest of the block.
+  caseBtnOn.props.onClick();
+  hookIndex = 0;
+  searchView = searcher.registrations[0].component();
+  assert.strictEqual(buttonWith(searchView, 'Aa').props['aria-pressed'], false, 'and clicking again releases it');
 
   // 替换: one edit through the normal path, so one debounced write and one undo step.
   hookIndex = 0;
