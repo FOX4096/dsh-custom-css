@@ -31,7 +31,7 @@
 
 > 菜单本身也有两个坑，同一个根子：大纲的触发按钮在**文件栏最右端**。原来的菜单一律 `left: 触发按钮的左边缘` 往右展开，于是 320px 的菜单有 250px 跑到窗口外面；而未给确定宽度时菜单会跟着内容长（条目是 `white-space:nowrap` 的选择器），长选择器把框越撑越宽。现在定位交给 `placeMenu()`：右边缘放不下就改成**靠右对齐**（向左展开），宽度取「想要的宽度」与「窗口可用宽度」的较小值，内容驱动的菜单也套一个 `max-width` 上限。菜单条目被省略号截断时，**悬停可以看全文**。
 
-> 滚动条不要再自己写样式了：**DSH 有一份全局样式表**统一给所有元素画滚动条（8px 宽、圆角 4px 的拇指，颜色取 `--dsh-scrollbar-thumb` / `--dsh-scrollbar-thumb-hover`）。插件里原先给菜单和规则面板写过 `scrollbar-width: thin` —— 在 Chromium 里，元素上一旦出现这种**标准属性**，该元素的 `::-webkit-scrollbar` 样式就会被忽略，于是全应用只有这两处掉回平台默认的灰条。现在这两句都去掉了，并加了一条审计：插件样式表里的 `scrollbar-width` / `scrollbar-color` 只能是 `none`（编辑器故意隐藏自己的滚动条）或位于 `@supports not selector(::-webkit-scrollbar)` 之内。
+> 滚动条不要再自己写样式了：**DSH 有一份全局样式表**统一给所有元素画滚动条（8px 宽、圆角 4px 的拇指，颜色取 `--dsh-scrollbar-thumb` / `--dsh-scrollbar-thumb-hover`）。插件里原先给菜单和规则面板写过 `scrollbar-width: thin` —— 在 Chromium 里，元素上一旦出现这种**标准属性**，该元素的 `::-webkit-scrollbar` 样式就会被忽略，于是全应用只有这两处掉回平台默认的灰条。现在这两句都去掉了，只补上一处 DSH 自己的可滚动面板也在用的**轨道内缩**（`::-webkit-scrollbar-track{margin:6px}`，菜单 / 拾取器面板 / 规则面板），否则拇指的行程顶到两端、末端会从面板的圆角外面露出去。审计（`scrollbar-width` / `scrollbar-color` 只能是 `none` 或位于 webkit 特性查询内）守着这两句不回来。
 
 ### 变量体检：不起作用的声明现在会说话
 
