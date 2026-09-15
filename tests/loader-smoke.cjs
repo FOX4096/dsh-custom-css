@@ -30,7 +30,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -63,13 +63,14 @@ function sameDeps(left, right) {
   return left.every((entry, index) => Object.is(entry, right[index]));
 }
 /** Text nodes produced by the last render pass, for copy assertions. */
-const renderedText = [];
-/** Class names produced by the last render pass, for structure assertions. */
+const renderedText = [];/** Class names produced by the last render pass, for structure assertions. */
 const renderedClasses = [];
 /** Effect slots of the boot in progress, so a test can run them. */
 const effects = [];
 /** Pending timers of the boot in progress, so a test can fire them. */
 const timers = [];
+/** Repeating timers of the boot in progress (the external-change poll). */
+const intervals = [];
 
 const fakeReact = {
   useState(initial) {
@@ -324,12 +325,49 @@ async function settle() {
  * @param options - `fetchImpl(url, init)` double and optional stored values.
  * @returns the observed host doubles and plugin state.
  */
+/**
+ * Which sheet a request is about, as the fake Host would see it.
+ *
+ * `/read` carries it in the query, `/write` and `/restore` in the JSON body; anything else (the
+ * listing, the switch) is about no single sheet and gets null.
+ * @param url - the request URL.
+ * @param init - the fetch init.
+ * @returns the sheet name, or null.
+ */
+function nameOfRequest(url, init) {
+  if (typeof url !== 'string') return null;
+  if (url.includes('/read')) {
+    const match = /[?&]name=([^&]*)/.exec(url);
+    return match === null ? null : decodeURIComponent(match[1]);
+  }
+  if (url.includes('/write') || url.includes('/restore')) {
+    try {
+      const body = JSON.parse(init?.body ?? '{}');
+      return typeof body.name === 'string' ? body.name : null;
+    }
+    catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
   const styleTags = [];
   const storage = new Map(stored);
   const calls = [];
+  /**
+   * The fake filesystem's revisions, per sheet name.
+   *
+   * The client's external-change policy is "the revision moved and the editor is clean → take the
+   * disk copy; the revision moved and the editor has unsaved work → ask". Making every case in
+   * this file construct a revision by hand would be a hundred chances to get it wrong, so the
+   * fetch wrapper below stamps one on every read and bumps it on every write.
+   */
+  const revisions = new Map();
   effects.length = 0;
   timers.length = 0;
+  intervals.length = 0;
   // A boot is a fresh component instance: reusing the previous boot's hook slots
   // handed it that instance's refs and its leftover cleanups, so an unmount here
   // ran a stale effect (and fetched through the previous sandbox).
@@ -414,6 +452,9 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
   const document = {
     documentElement,
     body,
+    // The external-change poll only runs while the page is on screen (`visibilitychange` is the
+    // other half of it). A boot starts visible; a case can switch it off by assigning here.
+    visibilityState: 'visible',
     head: { appendChild: element => { styleTags.push(element); } },
     styleSheets: dom.styleSheets ?? [],
     querySelector(selector) {
@@ -461,7 +502,26 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     },
     fetch: async (url, init) => {
       calls.push({ url, init });
-      return fetchImpl(url, init);
+      const response = await fetchImpl(url, init);
+      const name = nameOfRequest(url, init);
+      if (name === null) return response;
+      // The Host reports a REVISION with every read and every write, and the client's whole
+      // external-change policy turns on it. Rather than make every case in this file carry one,
+      // the fake filesystem tracks it here: each mutation of a name bumps its revision, and the
+      // payload is stamped on the way out. A case that wants to simulate an outside edit calls
+      // `touch(name)` rather than building a revision by hand.
+      //
+      // Stamping means going THROUGH the Response the case returned (`json()` then rebuild), and
+      // jsonResponse is lazy — reading its body twice hands back the same text.
+      if (response === undefined || typeof response.json !== 'function') return response;
+      const payload = await response.json();
+      if (payload?.ok === true) {
+        if (url.includes('/write') || url.includes('/restore')) {
+          revisions.set(name, (revisions.get(name) ?? 0) + 1);
+        }
+        payload.rev = revisions.get(name) ?? 0;
+      }
+      return jsonResponse(payload, response.status);
     },
     setTimeout: (fn, ms) => {
       const id = timers.length + 1;
@@ -470,6 +530,18 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     },
     clearTimeout: (id) => {
       const entry = timers.find((item) => item.id === id);
+      if (entry !== undefined) entry.cancelled = true;
+    },
+    // The external-change poll (`WATCH_POLL_MS`). Kept apart from `timers` — a repeating timer is
+    // not a one-shot, and firing it by "run every pending timer once" would make it look like a
+    // debounce — and fired on demand by `tickIntervals`.
+    setInterval: (fn, ms) => {
+      const id = intervals.length + 1;
+      intervals.push({ id, fn, ms, cancelled: false });
+      return id;
+    },
+    clearInterval: (id) => {
+      const entry = intervals.find((item) => item.id === id);
       if (entry !== undefined) entry.cancelled = true;
     },
     console,
@@ -507,6 +579,21 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       entry.cancelled = true;
       entry.fn();
     }
+    await settle();
+  };
+  /**
+   * Fire every repeating timer once, the way `WATCH_POLL_MS` would elapse.
+   *
+   * On demand rather than by clock: the poll is how an external save reaches the editor, and a
+   * test that had to wait 1.5 real seconds for it would be a test nobody runs.
+   * @returns nothing; awaits the work the tick started.
+   */
+  const tickIntervals = async () => {
+    for (const entry of [...intervals]) {
+      if (entry.cancelled) continue;
+      entry.fn();
+    }
+    await settle();
     await settle();
   };
   /**
@@ -560,12 +647,28 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     dom,
     effects,
     timers,
+    intervals,
     runTimers,
+    tickIntervals,
     runEffects,
     debounces,
     unmount,
     waits,
     registrations,
+    /**
+     * Simulate an edit made OUTSIDE the plugin (a text editor, another tab).
+     *
+     * The payload a case's `fetchImpl` serves is the file's content; this is the other half —
+     * the revision the Host would report alongside it. Bumping the revision without touching
+     * the payload is exactly what a re-save by an editor that normalises line endings looks
+     * like from here.
+     * @param name - the sheet that changed.
+     * @param times - how many revisions to move it (default 1).
+     */
+    touch: (name, times = 1) => {
+      revisions.set(name, (revisions.get(name) ?? 0) + times);
+    },
+    revisionOf: name => revisions.get(name) ?? 0,
     userStyle: () => styleTags.find(element => element.id === 'dsh-custom-css-user-style'),
   };
 }
@@ -2623,8 +2726,10 @@ async function main() {
     focus() {},
     setSelectionRange() {},
   };
-  // Somebody else writes the file — VS Code via 「打开文件」, or another tab.
+  // Somebody else writes the file — VS Code via 「打开文件」, or another tab. The payload alone
+  // is not the edit: the Host reports a new REVISION for it, and that is what the row compares.
   diskText = '.x{color:red}\n\n.edited-elsewhere { color: blue; }';
+  outside.touch('custom.css');
   outsideArea.props.onChange({
     target: { value: '.x{color:green}', selectionStart: 14 },
     nativeEvent: { inputType: 'insertText' },
@@ -2634,7 +2739,9 @@ async function main() {
   await settle();
   assert.strictEqual(
     outsideWrites.length, 0,
-    'the write is refused rather than landing on the other copy — writes: ' + JSON.stringify(outsideWrites),
+    'the write is refused rather than landing on the other copy — writes: ' + JSON.stringify(outsideWrites)
+      + ' revisions: ' + outside.revisionOf('custom.css')
+      + ' calls: ' + JSON.stringify(outside.calls.map(call => call.url)),
   );
   hookIndex = 0;
   renderedText.length = 0;
@@ -2643,8 +2750,11 @@ async function main() {
     renderedText.some(text => text.includes('已被改动')),
     'and the footer asks which copy to keep — status: ' + JSON.stringify(renderedText),
   );
-  // 「重新载入」: the disk copy becomes the sheet.
+  // 「重新载入」: the disk copy becomes the sheet. It re-reads the sheet rather than trusting the
+  // text the conflict carried, so the revision the next write compares against is the real one.
   buttonWith(outside.registrations[0].component(), '重新载入').props.onClick();
+  await settle();
+  await settle();
   hookIndex = 0;
   renderedText.length = 0;
   outside.registrations[0].component();
@@ -2684,7 +2794,10 @@ async function main() {
     nativeEvent: { inputType: 'insertText' },
   });
   // The window comes back into view: the outside edit is noticed before anyone types again.
+  // The editor is NOT clean here (the edit above is still inside the debounce), which is the one
+  // state that must never be overwritten — so this is a question, not an adoption.
   keepDisk = '.k{color:red}\n\n.another-tab { color: lime; }';
+  keep.touch('custom.css');
   keep.dispatch('visibilitychange', {});
   await settle();
   await settle();
@@ -4048,7 +4161,180 @@ async function main() {
     'and the colour layer draws the formatted text, not the text that was there when it landed',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified');
+  // --- 外部改动自动同步 ------------------------------------------------------
+  // The user's report: 「我用文本编辑器修改 css 文件后保存为什么同步不到插件？」 The row now polls
+  // the Host (see `WATCH_POLL_MS`), and the whole policy is the pure `externalChange` — so the
+  // three outcomes are asserted directly first, and then through the row, because "the timer
+  // calls it" is the half a pure function cannot say anything about.
+  assert.strictEqual(probe.externalChange(7, 7, false), 'idle', 'the same revision is not a change');
+  assert.strictEqual(probe.externalChange(7, 7, true), 'idle', 'even while the editor is dirty');
+  assert.strictEqual(
+    probe.externalChange(7, 8, false), 'adopt',
+    'a moved revision with a clean editor is adopted — nothing can be lost',
+  );
+  assert.strictEqual(
+    probe.externalChange(7, 8, true), 'conflict',
+    'a moved revision with unsaved work is a question, never an overwrite',
+  );
+  assert.strictEqual(probe.externalChange(undefined, 8, false), 'idle', 'a sheet never looked at is not a change');
+  assert.strictEqual(probe.externalChange(7, null, false), 'idle', 'an unreadable revision is not a change');
+
+  let syncDisk = '.a { color: red; }';
+  const syncWrites = [];
+  const synced = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: syncDisk });
+      if (url.endsWith('/write')) {
+        const body = JSON.parse(init.body);
+        syncWrites.push(body);
+        syncDisk = body.css;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: body.css.length });
+      }
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  let syncView = synced.registrations[0].component();
+  await synced.runEffects();
+  const syncArea = findNode(syncView, 'textarea');
+  const syncCarets = [];
+  syncArea.props.ref.current = {
+    selectionStart: 0,
+    scrollTop: 0,
+    scrollLeft: 0,
+    clientHeight: 140,
+    focus() {},
+    setSelectionRange(start) { syncCarets.push(start); },
+  };
+  assert.ok(synced.intervals.length > 0, 'the row starts a poll for outside changes');
+  assert.ok(
+    synced.intervals.some(entry => entry.ms === 1500),
+    'and it runs on the external-change interval — intervals: ' + JSON.stringify(synced.intervals.map(entry => entry.ms)),
+  );
+
+  // 1. A clean editor and a save in a text editor: the disk copy is adopted, with no prompt.
+  syncDisk = '.a { color: blue; }\n.from-my-editor { color: lime; }';
+  synced.touch('custom.css');
+  await synced.tickIntervals();
+  hookIndex = 0;
+  renderedText.length = 0;
+  syncView = synced.registrations[0].component();
+  assert.strictEqual(
+    findNode(syncView, 'textarea').props.value, syncDisk,
+    'a save made outside shows up in the editor — editor: ' + JSON.stringify(findNode(syncView, 'textarea').props.value),
+  );
+  assert.strictEqual(
+    synced.userStyle().textContent, syncDisk,
+    'and it is applied to the page — applied: ' + JSON.stringify(synced.userStyle().textContent),
+  );
+  assert.ok(
+    !renderedText.some(text => text.includes('已被改动')),
+    'without asking anything: there was nothing to lose — status: ' + JSON.stringify(renderedText),
+  );
+  assert.ok(renderedText.some(text => text.includes('已保存')), 'and the footer reads as saved');
+
+  // 2. The next poll finds nothing new: adoption advanced the baseline, so this cannot loop.
+  const callsBefore = synced.calls.filter(call => call.url.includes('/read')).length;
+  await synced.tickIntervals();
+  await synced.tickIntervals();
+  hookIndex = 0;
+  syncView = synced.registrations[0].component();
+  assert.strictEqual(
+    findNode(syncView, 'textarea').props.value, syncDisk,
+    'a second poll changes nothing',
+  );
+  assert.ok(
+    synced.calls.filter(call => call.url.includes('/read')).length > callsBefore,
+    'while still asking the Host each time — polls are cheap and the answer is what decides',
+  );
+
+  // 3. Unsaved work in the editor + an outside save: a question, not an adoption, and no write.
+  syncArea.props.onChange({
+    target: { value: '.a { color: teal; }', selectionStart: 19 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  syncDisk = '.a { color: red; }\n.somebody-else { color: pink; }';
+  synced.touch('custom.css');
+  await synced.tickIntervals();
+  hookIndex = 0;
+  renderedText.length = 0;
+  syncView = synced.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('已被改动')),
+    'an outside save while the editor has unsaved work is raised as a conflict — status: '
+      + JSON.stringify(renderedText),
+  );
+  assert.strictEqual(
+    findNode(syncView, 'textarea').props.value, '.a { color: teal; }',
+    'and the text the user was typing is still in the editor — editor: '
+      + JSON.stringify(findNode(syncView, 'textarea').props.value),
+  );
+
+  // 4. A hidden page does not poll: nothing on screen to update, and the Host does not need the
+  // load from a background tab.
+  buttonWith(syncView, '重新载入').props.onClick();
+  await settle();
+  await settle();
+  synced.document.visibilityState = 'hidden';
+  const hiddenReads = synced.calls.length;
+  await synced.tickIntervals();
+  assert.strictEqual(
+    synced.calls.length, hiddenReads,
+    'a hidden page does not ask — calls: ' + JSON.stringify(synced.calls.slice(hiddenReads).map(call => call.url)),
+  );
+  synced.document.visibilityState = 'visible';
+
+  // 5. The plugin's own write is not mistaken for somebody else's: the Host answers a write with
+  // the revision that write produced, so the very next poll must find nothing to do.
+  const beforeOwnWrite = syncWrites.length;
+  syncArea.props.onChange({
+    target: { value: '.a { color: orchid; }', selectionStart: 21 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  await synced.runTimers();
+  await settle();
+  await settle();
+  assert.strictEqual(syncWrites.length, beforeOwnWrite + 1, 'typing lands once');
+  await synced.tickIntervals();
+  hookIndex = 0;
+  renderedText.length = 0;
+  syncView = synced.registrations[0].component();
+  assert.strictEqual(
+    findNode(syncView, 'textarea').props.value, '.a { color: orchid; }',
+    'and the next poll does not try to adopt it back over the editor — editor: '
+      + JSON.stringify(findNode(syncView, 'textarea').props.value),
+  );
+  assert.ok(
+    !renderedText.some(text => text.includes('已被改动')),
+    'nor does it raise a conflict against this plugin own write — status: ' + JSON.stringify(renderedText),
+  );
+
+  // 6. Adoption drops the undo stack: it belongs to the text that was just replaced, and Ctrl+Z
+  // stepping back into a version the file no longer has is exactly the kind of surprise this
+  // feature is supposed to remove rather than add.
+  syncArea.props.onChange({
+    target: { value: '.a { color: plum; }', selectionStart: 18 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  await synced.runTimers();
+  await settle();
+  syncDisk = '.a { color: gold; }\n.typed-elsewhere { color: navy; }';
+  synced.touch('custom.css');
+  await synced.tickIntervals();
+  assert.strictEqual(synced.userStyle().textContent, syncDisk, 'the disk copy is adopted');
+  hookIndex = 0;
+  findNode(synced.registrations[0].component(), 'textarea').props.onKeyDown({ key: 'z', ctrlKey: true, preventDefault() {} });
+  await settle();
+  assert.strictEqual(
+    synced.userStyle().textContent, syncDisk,
+    'and Ctrl+Z does not undo it back to the text that was replaced — applied: '
+      + JSON.stringify(synced.userStyle().textContent),
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified');
 }
 
 main().catch((error) => {

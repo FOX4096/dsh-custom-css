@@ -22,12 +22,25 @@ const stylesDir = path.join(home, 'custom-css');
 let route;
 /** Fence verdict the fake Connection service returns for the next request. */
 let fenceVerdict;
+/**
+ * What every `effect()` handed back, so the test can dispose the plugin the way dsh does.
+ *
+ * Not bookkeeping for its own sake: the plugin starts a filesystem watcher in an effect, and on
+ * Windows a watcher whose directory has been deleted keeps the process alive — this suite
+ * removes its temporary home at the end, so without running these the process never exits (it
+ * printed its OK line and then hung, which is how this was found).
+ */
+const effectCleanups = [];
 
 const ctx = {
   inject(services, body) {
     assert.deepStrictEqual(services, ['webServer'], 'the plugin mounts on webServer');
     body({
-      effect: register => register(),
+      effect: (register) => {
+        const cleanup = register();
+        effectCleanups.push(cleanup);
+        return () => cleanup?.();
+      },
       webServer: {
         register(registration) {
           route = registration;
@@ -42,7 +55,7 @@ const ctx = {
   },
 };
 
-const { apply, setLauncher } = await import('../lib/index.js');
+const { apply, setLauncher, isWatchedSheetName } = await import('../lib/index.js');
 
 /** Spy launcher: the real one would spawn an editor window during the test. */
 const launched = [];
@@ -50,7 +63,11 @@ setLauncher(full => {
   launched.push(full);
 });
 
-apply(ctx);
+// `watch: false`: this suite deletes its temporary home at the end, and a directory watcher
+// whose directory is gone keeps a Node process alive on Windows (see `effectCleanups`).
+// The watcher itself is a doorbell for the browser half's poll — nothing here depends on it, and
+// its own logic (coalescing, name filtering, dispose) is asserted in `tests/watch-smoke.mjs`.
+apply(ctx, { watch: false });
 
 assert.ok(route !== undefined, 'the plugin must mount a route');
 assert.strictEqual(route.kind, 'prefix');
@@ -108,9 +125,33 @@ assert.strictEqual(onDisk, '.a{color:red}', 'the sheet really landed on disk');
 const read = await call('GET', '/dsh-custom-css/read?name=theme.css');
 assert.strictEqual(read.payload.css, '.a{color:red}');
 
+// --- the revision every read and write carries ------------------------------
+// The browser's external-change policy is "did the revision move?", so the shape and the
+// stability of this value are part of the contract: `size/mtimeMs`, different after a write,
+// equal when nothing happened, and present on both the read and the write answer (a write whose
+// answer lacked it would make the browser re-read its own change and call it somebody else's).
+assert.match(String(read.payload.rev), /^\d+\/\d+$/, 'a read reports a size/mtime revision — got: ' + String(read.payload.rev));
+const readAgain = await call('GET', '/dsh-custom-css/read?name=theme.css');
+assert.strictEqual(readAgain.payload.rev, read.payload.rev, 'an untouched sheet keeps its revision');
+
 const written = await call('POST', '/dsh-custom-css/write', { name: 'theme.css', css: '.b{color:blue}' });
 assert.strictEqual(written.status, 200);
+assert.match(String(written.payload.rev), /^\d+\/\d+$/, 'a write answers with its own revision');
+assert.notStrictEqual(written.payload.rev, read.payload.rev, 'and it is a different revision from the one before it');
 assert.strictEqual(await readFile(path.join(stylesDir, 'theme.css'), 'utf8'), '.b{color:blue}', 'write replaces the file');
+const afterWrite = await call('GET', '/dsh-custom-css/read?name=theme.css');
+assert.strictEqual(afterWrite.payload.rev, written.payload.rev, 'so the next read agrees with the write');
+
+// A file changed behind the plugin's back moves the revision without the API being involved —
+// which is the whole signal an external save sends.
+await writeFile(path.join(stylesDir, 'theme.css'), '.c{color:green}', 'utf8');
+const afterOutside = await call('GET', '/dsh-custom-css/read?name=theme.css');
+assert.notStrictEqual(
+  afterOutside.payload.rev, afterWrite.payload.rev,
+  'a write from outside the API moves the revision',
+);
+assert.strictEqual(afterOutside.payload.css, '.c{color:green}', 'and the read carries the new text');
+await call('POST', '/dsh-custom-css/write', { name: 'theme.css', css: '.b{color:blue}' });
 
 // --- bookkeeping file stays out of the listing ------------------------------
 const activeRaw = await readFile(path.join(stylesDir, 'active.json'), 'utf8');
@@ -189,6 +230,9 @@ assert.strictEqual(forbidden.status, 403);
 
 fenceVerdict = undefined;
 let secondRoute;
+// The mount under test is the FAIL-CLOSED path, and this suite deletes its temporary home at
+// the end: a real watcher here would outlive its own directory and keep the process alive (see
+// the first `apply` call), so this second mount skips it too.
 apply({
   inject: (services, body) => {
     assert.deepStrictEqual(services, ['webServer']);
@@ -198,7 +242,7 @@ apply({
     });
   },
   get: () => undefined,
-});
+}, { watch: false });
 const req = Readable.from([]);
 req.method = 'GET';
 req.url = '/dsh-custom-css/list';
@@ -433,10 +477,28 @@ assert.ok(
   'and the history directory is never offered as a sheet',
 );
 
+// --- the watcher's name filter (its notifications come from the OS) ----------
+// The watcher is a doorbell for the browser's poll: what a test can hold on to is which names
+// count as a sheet. A temporary file an editor renames into place, and the plugin's own
+// bookkeeping, must not be announced as sheets; the real save shapes are measured end to end in
+// `%TEMP%\css-probe\host-watch-integration.mjs` (in place, and temp-file + rename).
+assert.strictEqual(isWatchedSheetName('theme.css'), true, 'a sheet is a sheet');
+assert.strictEqual(isWatchedSheetName('my.theme.css'), true, 'including one with dots in its name');
+assert.strictEqual(isWatchedSheetName('active.json'), false, 'the bookkeeping file is not a sheet');
+assert.strictEqual(isWatchedSheetName('.custom.css-1234'), false, "an editor's temporary file is not a sheet");
+assert.strictEqual(isWatchedSheetName('custom.css.tmp-99'), false, 'nor is a temp file with the sheet as a prefix');
+assert.strictEqual(isWatchedSheetName('notes.txt'), false, 'nor is anything that is not a .css');
+assert.strictEqual(isWatchedSheetName('nul.css'), false, 'nor a Windows device name, which is not a file');
+assert.strictEqual(isWatchedSheetName(undefined), false, 'and an event with no name is dropped');
+
 await rm(home, { recursive: true, force: true });
+// Dispose the plugin the way dsh does: the watcher has to be gone before the process can end
+// (see `effectCleanups`), and running the cleanups here is also what proves they close it.
+for (const cleanup of effectCleanups) cleanup?.();
+assert.ok(effectCleanups.length > 0, 'the plugin registered at least one effect to dispose');
 const verified = [
   'file API', 'per-sheet switch', '/active', 'validation', 'reserved names', 'body cap',
   ...(linked ? ['symlink refusal'] : []),
-  'bookkeeping recovery', 'listing cap', 'version snapshots', 'and fail-closed fence',
+  'bookkeeping recovery', 'listing cap', 'version snapshots', 'revisions', 'the watch filter', 'and fail-closed fence',
 ];
 console.log('host-api-smoke: OK — ' + verified.join(', ') + ' verified');
