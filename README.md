@@ -15,7 +15,8 @@
   <a href="https://www.npmjs.com/package/dsh-custom-css"><img alt="npm unpacked size" src="https://img.shields.io/npm/unpacked-size/dsh-custom-css?color=6048bb"></a>
   <a href="https://github.com/FOX4096/dsh-custom-css/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FOX4096/dsh-custom-css?color=3156af"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
-  <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a><br /><br />
+  <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a>
+  <a href="https://dshfind.com/zh/plugins/FOX4096/dsh-custom-css"><img alt="收录于 dshfind" src="https://dshfind.com/api/badge/FOX4096/dsh-custom-css?lang=zh"></a><br /><br />
   <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.1.2 与 0.1.5 已真机验证，接口契约断言覆盖到 0.0.1-rc.5" src="https://img.shields.io/badge/DSH-0.1.2_%7E_0.1.5_%28runtime_verified%29-4d6bfe"></a><br /><br />
   <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"> <img alt="查找替换" src="https://img.shields.io/badge/-查找替换-6048bb"> <img alt="撤销重做" src="https://img.shields.io/badge/-撤销重做-257b56"> <img alt="规则大纲" src="https://img.shields.io/badge/-规则大纲-257083"><br /><br />
   <b>拾取元素 · 查找 · 文件下拉 · 更多操作</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
@@ -26,10 +27,18 @@
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
 
 - npm：[`dsh-custom-css`](https://www.npmjs.com/package/dsh-custom-css)（2026-09-13 首发，当前版本见上方徽章）
+- 收录：[dshfind 插件超市 → 皮肤主题](https://dshfind.com/zh/plugins/FOX4096/dsh-custom-css)（徽章与展示卡由 dshfind 提供，`/api/badge` 与 `/api/card`）
 - 兼容：DSH `0.1.2-rc.1` ~ `0.1.5-rc.1` 已真机验证，接口契约断言覆盖到 `0.0.1-rc.5`；`npm run compat` 可复跑（见「兼容性」）
 - 许可：MIT
 - 形态：DSH profile 插件（host 半 + 浏览器半），无构建步骤，`lib/*.js` 即产物
 - 测试：`node tests/loader-smoke.cjs` / `node tests/host-api-smoke.mjs`
+
+<details>
+<summary>dshfind 展示卡（440×200）</summary>
+
+[![dshfind](https://dshfind.com/api/card/FOX4096/dsh-custom-css?lang=zh)](https://dshfind.com/zh/plugins/FOX4096/dsh-custom-css?ref=badge)
+
+</details>
 
 ## 位置与行为
 
