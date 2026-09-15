@@ -277,6 +277,10 @@ dsh-custom-css/
 ├── examples/
 │   ├── showcase.css        # 可直接导入的示例样式表（只用设计变量，不选哈希类名）
 │   └── README.md           # 用它 + 写自定义样式的三条经验
+├── docs/
+│   ├── architecture.html   # 架构图（自包含 HTML：明暗主题 / 平移缩放 / 焦点 / 导出）
+│   ├── architecture.archify.json  # 图的源码规格（Archify）
+│   └── architecture.visual-check.*  # 桌面containment 证据：截图 + JSON 收据
 ├── assets/
 │   ├── icon.svg            # 图标（矢量，README 顶部用的就是它）
 │   ├── icon-512.png        # 同一图标 512px，带透明通道，可用于仓库头像
@@ -301,6 +305,15 @@ dsh-custom-css/
 - 拾取器给出的候选是「尽量活得久」，不是「绝对唯一」——命中多个元素的候选仍会被列出（标注为「N 个命中」），只是不会默认选中它。
 - 令牌建议可能**一个都不给**：只有作用域内、且名字读起来像该属性的令牌才会被建议（见「元素拾取器 · 令牌反查」）。这是有意的取舍，不是没读到。
 - 未注册多语言字典，界面文案为中文。
+
+## 架构图
+
+[`docs/architecture.html`](docs/architecture.html) —— 一张自包含的可交互架构图（双击即可打开，无依赖）：**浏览器半 + 宿主半**，六个节点、四条边、三张结论卡。
+
+- 图上的节点名就是代码里的东西：`CustomCssRow`、`applySheet`、`handle()`、`watchSheets`、`stylesDir()`，以及「打开文件」那条外部编辑路径 —— 照着图能直接翻到 `lib/client.js` / `lib/index.js` 对应位置。
+- 自带明暗主题、平移缩放、搜索、聚焦、**按关系追踪**，以及三个 guided view：**写盘路径 / 应用路径 / 外部同步**。
+- 规格是 [`docs/architecture.archify.json`](docs/architecture.archify.json)（由 [Archify](https://github.com/tt-a1i/archify) 生成）。改动图形请改规格再重新 `validate --quality showcase` 与 `deliver`，不要手改 HTML —— 交付会把规格冻结成一个私有快照，工件与规格的 sha256 一起写进回执。
+- 桌面 containment 的证据（1440×900 / 1600×1000 / 1920×1080 / 2048×1320 四档全通过）在 `docs/architecture.visual-check.json` 与同名 PNG 里。
 
 ## 开发
 

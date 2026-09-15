@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "dsh-custom-css — 浏览器半 + 宿主半",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1980,
+      800
+    ],
+    "repository": {
+      "url": "https://github.com/FOX4096/dsh-custom-css",
+      "revision": "5c96a458b8841ed62a5eb9f48b1f2222499c54cd"
+    },
+    "views": [
+      {
+        "id": "write-path",
+        "label": "写盘路径",
+        "focus": [
+          "panel",
+          "api",
+          "disk"
+        ],
+        "note": "停顿 400ms 后写盘；写前比对修订号，被替换的内容先留快照。"
+      },
+      {
+        "id": "apply-path",
+        "label": "应用路径",
+        "focus": [
+          "api",
+          "disk",
+          "chrome"
+        ],
+        "note": "读回的样式注入 style#dsh-custom-css-user-style，立刻作用于整个界面。"
+      },
+      {
+        "id": "external-sync",
+        "label": "外部同步",
+        "focus": [
+          "editor",
+          "disk",
+          "watcher",
+          "panel"
+        ],
+        "note": "文本编辑器保存 → 宿主监听目录 → 浏览器轮询修订号 → 干净就采用，有未保存内容就问。"
+      }
+    ]
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [
+      30,
+      30
+    ],
+    "cols": 1,
+    "gapX": 0,
+    "gapY": 0,
+    "cellW": 160,
+    "cellH": 90
+  },
+  "components": [
+    {
+      "id": "panel",
+      "type": "frontend",
+      "label": "设置页 · 自定义 CSS 行",
+      "sublabel": "编辑器 / 工具栏 / 规则面板",
+      "tag": "settings.general.item",
+      "pos": [
+        190,
+        280
+      ],
+      "size": [
+        330,
+        130
+      ],
+      "sources": [
+        {
+          "path": "lib/client.js",
+          "label": "CustomCssRow"
+        }
+      ]
+    },
+    {
+      "id": "chrome",
+      "type": "frontend",
+      "label": "浏览器 — 注入的样式",
+      "sublabel": "style#dsh-custom-css-user-style",
+      "tag": "即时生效",
+      "pos": [
+        190,
+        500
+      ],
+      "size": [
+        360,
+        110
+      ],
+      "sources": [
+        {
+          "path": "lib/client.js",
+          "label": "applySheet"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "宿主 JSON API",
+      "sublabel": "写盘前先读一次",
+      "tag": "/dsh-custom-css",
+      "pos": [
+        1045,
+        290
+      ],
+      "size": [
+        300,
+        110
+      ],
+      "sources": [
+        {
+          "path": "lib/index.js",
+          "label": "handle()"
+        }
+      ]
+    },
+    {
+      "id": "watcher",
+      "type": "messagebus",
+      "label": "文件监听",
+      "sublabel": "fs.watch · 120ms 合并",
+      "tag": "目录级",
+      "pos": [
+        1450,
+        140
+      ],
+      "size": [
+        270,
+        110
+      ],
+      "sources": [
+        {
+          "path": "lib/index.js",
+          "label": "watchSheets"
+        }
+      ]
+    },
+    {
+      "id": "disk",
+      "type": "database",
+      "label": "宿主 — 样式表目录",
+      "sublabel": "~/.dsh/custom-css/",
+      "tag": "+ 每表 20 份快照",
+      "pos": [
+        1045,
+        420
+      ],
+      "size": [
+        315,
+        110
+      ],
+      "sources": [
+        {
+          "path": "lib/index.js",
+          "label": "stylesDir()"
+        }
+      ]
+    },
+    {
+      "id": "editor",
+      "type": "external",
+      "label": "文本编辑器",
+      "sublabel": "VS Code / 记事本",
+      "tag": "打开文件",
+      "pos": [
+        1525,
+        520
+      ],
+      "size": [
+        285,
+        110
+      ],
+      "sources": [
+        {
+          "path": "README.md",
+          "label": "打开文件"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "System 浏览器",
+      "wraps": [
+        "panel",
+        "chrome"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "region",
+      "label": "dsh 宿主进程",
+      "wraps": [
+        "api",
+        "watcher",
+        "disk"
+      ],
+      "pad": 26
+    }
+  ],
+  "connections": [
+    {
+      "id": "write-path",
+      "from": "panel",
+      "to": "api",
+      "label": "写盘 · 读表 + 修订号",
+      "route": "straight",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "watch-dir",
+      "from": "watcher",
+      "to": "disk",
+      "label": "文件变了",
+      "variant": "dashed",
+      "route": "orthogonal-v",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1740,
+          195
+        ],
+        [
+          1900,
+          195
+        ],
+        [
+          1900,
+          740
+        ],
+        [
+          1380,
+          740
+        ],
+        [
+          1380,
+          475
+        ]
+      ],
+      "labelAt": [
+        1500,
+        726
+      ]
+    },
+    {
+      "id": "inject-style",
+      "from": "disk",
+      "to": "chrome",
+      "label": "读回后注入样式",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "via": [
+        [
+          1025,
+          475
+        ],
+        [
+          880,
+          475
+        ],
+        [
+          880,
+          650
+        ],
+        [
+          370,
+          650
+        ],
+        [
+          370,
+          630
+        ]
+      ],
+      "labelAt": [
+        1000,
+        700
+      ]
+    },
+    {
+      "id": "external-save",
+      "from": "editor",
+      "to": "disk",
+      "label": "外部保存",
+      "route": "orthogonal-v",
+      "fromSide": "left",
+      "toSide": "left",
+      "via": [
+        [
+          1505,
+          575
+        ],
+        [
+          980,
+          575
+        ],
+        [
+          980,
+          540
+        ],
+        [
+          1025,
+          540
+        ],
+        [
+          1025,
+          475
+        ]
+      ],
+      "labelAt": [
+        1240,
+        416
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "两个半边，各有各的仓",
+      "items": [
+        "lib/client.js：浏览器半，热更新即生效",
+        "lib/index.js：宿主半，改动必须重启 dsh",
+        "同一组 ROUTE /dsh-custom-css，JSON 进出"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "一次写盘要过的四关",
+      "items": [
+        "400ms 停顿后写，写前先读一次",
+        "修订号（size/mtime）对不上就不写，改为问你",
+        "被替换的内容先留一份历史快照",
+        "写盘回带新修订号，下一次比对才有基准"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "三条同步路径",
+      "items": [
+        "打字：停顿 400ms 自动写盘",
+        "外部保存：监视目录并轮询修订号",
+        "切回前台：只发现、不采用，避免打断阅读"
+      ]
+    }
+  ]
+}
