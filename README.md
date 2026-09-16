@@ -308,12 +308,19 @@ dsh-custom-css/
 
 ## 架构图
 
-[`docs/architecture.html`](docs/architecture.html) —— 一张自包含的可交互架构图（双击即可打开，无依赖）：**浏览器半 + 宿主半**，六个节点、四条边、三张结论卡。
+四张自包含的可交互架构图（双击即可打开，无依赖）。**先看总图，再按下钻到三条链：**
 
-- 图上的节点名就是代码里的东西：`CustomCssRow`、`applySheet`、`handle()`、`watchSheets`、`stylesDir()`，以及「打开文件」那条外部编辑路径 —— 照着图能直接翻到 `lib/client.js` / `lib/index.js` 对应位置。
-- 自带明暗主题、平移缩放、搜索、聚焦、**按关系追踪**，以及三个 guided view：**写盘路径 / 应用路径 / 外部同步**。
-- 规格是 [`docs/architecture.archify.json`](docs/architecture.archify.json)（由 [Archify](https://github.com/tt-a1i/archify) 生成）。改动图形请改规格再重新 `validate --quality showcase` 与 `deliver`，不要手改 HTML —— 交付会把规格冻结成一个私有快照，工件与规格的 sha256 一起写进回执。
-- 桌面 containment 的证据（1440×900 / 1600×1000 / 1920×1080 / 2048×1320 四档全通过）在 `docs/architecture.visual-check.json` 与同名 PNG 里。
+| 图 | 讲什么 | 文件 |
+| --- | --- | --- |
+| 总图 | **浏览器半 + 宿主半**：设置行、注入的样式、宿主 API、文件监听、样式表目录、文本编辑器 —— 一张图看完整条主干 | [`docs/architecture.html`](docs/architecture.html) |
+| 写盘链 | **设置行 → store → 宿主 API → 磁盘**：写前比对修订号、写前留快照、写完之后的目录信号 | [`docs/architecture-write-chain.html`](docs/architecture-write-chain.html) |
+| 读回链 | **磁盘 → 界面**：外部保存 → 目录监听 → 轮询修订号 → 干净则采用、有改动则问你 | [`docs/architecture-read-chain.html`](docs/architecture-read-chain.html) |
+| 编辑器栈 | **一个 textarea 与围着它的四个视图**：彩色层 / 校验 / 格式化 / 补全，以及状态怎么流回 store | [`docs/architecture-editor-stack.html`](docs/architecture-editor-stack.html) |
+
+- 图上的节点名就是代码里的东西：`CustomCssRow`、`applySheet`、`handle()`、`watchSheets`、`stylesDir()`、`validateCss`、`searchHits`、`restoreVersion`… —— 照着图能直接翻到 `lib/client.js` / `lib/index.js` 对应位置。
+- 每张图都自带明暗主题、平移缩放、搜索、聚焦、**按关系追踪**，以及几个 guided view（例如总图的「写盘路径 / 应用路径 / 外部同步」）。
+- 规格是同名的 `.archify.json`（由 [Archify](https://github.com/tt-a1i/archify) 生成）。**改动图形请改规格再重新 `validate --quality showcase` 与 `deliver`，不要手改 HTML** —— 交付会把规格冻结成一个私有快照，工件与规格的 sha256 一起写进回执。
+- 四张图的 `validate` 都是 **9/9 通过、0 error 0 warning**，桌面 containment（1440×900 / 1600×1000 / 1920×1080 / 2048×1320）**全部 pass**；证据在各自的 `.visual-check.json` 与同名 PNG 里。
 
 ## 开发
 
