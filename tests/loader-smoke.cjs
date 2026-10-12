@@ -2518,6 +2518,76 @@ async function main() {
     }
   }
 
+  // --- state changes are announced, and the switch respects a write in flight --------
+  // Measured before this existed: the row had ZERO live regions. Every state transition
+  // it produces — the debounce landing, a validation failing, a sheet being restored —
+  // was information only sighted users received.
+  //
+  // And DSH's Switch documents the other half as the owner's job: "owners also set it
+  // while a write is in flight, not only when a deployment locks the toggle". The switch
+  // here writes through the same Host route the editor debounces into, so a second press
+  // during a write is a race rather than a preference.
+  {
+    const sheet = rowSheets[0].textContent;
+    // Each assertion names the DECLARATIONS that make the state work, not a substring
+    // that happens to appear somewhere. The first version of this guard checked for
+    // `dshCc_statusDot[data-state=ongoing]{animation:none`, which is satisfied by the
+    // reduced-motion override further down the sheet — so deleting the actual ongoing
+    // rule left the guard green. A guard that an unrelated rule can satisfy is not a
+    // guard; both halves are asserted together now.
+    assert.ok(
+      sheet.includes('.dshCc_statusDot[data-state=ongoing]{background:var(--dsw-alias-state-warn-primary);animation:dshCc-status-pulse'),
+      'the status dot has the loading semantic DSH\'s StateDot uses, with its own animation',
+    );
+    assert.ok(
+      sheet.includes('@keyframes dshCc-status-pulse'),
+      'the animation is namespaced — piggy-backing on another module\'s keyframes would '
+        + 'break silently if that module renamed them',
+    );
+    assert.ok(
+      sheet.includes('@media (prefers-reduced-motion: reduce){.dshCc_statusDot[data-state=ongoing]{animation:none'),
+      'and it can be switched off for reduced motion, the way DSH\'s own animations can',
+    );
+  }
+  // The live region and the in-flight switch are asserted against the rendered tree,
+  // because they are props rather than stylesheet text.
+  {
+    const view = host.registrations[0].component();
+    const find = (predicate) => {
+      let found = null;
+      (function walk(node) {
+        if (found !== null || node === null || typeof node !== 'object') return;
+        if (predicate(node)) found = node;
+        for (const child of node.children ?? []) walk(child);
+      })(view);
+      return found;
+    };
+    const live = find(node => String(node.props?.className ?? '').split(' ')[0] === 'dshCc_status'
+      && node.props?.['aria-live'] !== undefined);
+    assert.ok(live !== null, 'the status line is a live region — without it, silence');
+    assert.strictEqual(live.props['aria-live'], 'polite', 'ordinary transitions do not interrupt');
+    assert.strictEqual(live.props['aria-atomic'], true, 'and the whole line is read, not just the fragment that changed');
+
+    const alert = find(node => String(node.props?.className ?? '').split(' ')[0] === 'dshCc_error');
+    if (alert !== null) {
+      assert.strictEqual(alert.props.role, 'alert', 'a validation failure is assertive, not polite');
+      assert.strictEqual(alert.props['aria-live'], 'assertive', 'and says so on the live attribute too');
+    }
+
+    const dot = find(node => String(node.props?.className ?? '').split(' ')[0] === 'dshCc_statusDot');
+    assert.ok(dot !== null, 'the status dot renders');
+    assert.ok(
+      ['on', 'off', 'ongoing'].includes(dot.props['data-state']),
+      'the dot speaks DSH\'s state vocabulary — got ' + JSON.stringify(dot.props['data-state']),
+    );
+    const toggle = find(node => node.props?.role === 'switch');
+    assert.ok(toggle !== null, 'the switch renders');
+    assert.ok(
+      typeof toggle.props.disabled === 'boolean',
+      'the switch states its disabled condition explicitly rather than leaving it undefined',
+    );
+  }
+
   // --- the dropdown's keyboard contract ------------------------------------
   // Two of these come from DSH's own Menu documentation ("Escape or Shift+Tab close it
   // and return focus to the anchor's first button"; arrow keys walk the list). The third
