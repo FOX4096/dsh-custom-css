@@ -760,7 +760,9 @@ async function main() {
     // The shipped settings-row spec: 36px tall, radius-md (12px), 14px text.
     '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
     'border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform);',
-    '.dshCc_propText{flex:1;min-width:0;max-width:100%;box-sizing:border-box;height:36px;padding:0 14px;',
+    // The text fields' last layout declaration: the shared box rule carries height, stroke,
+    // fill and type; each of the three keeps only what its own container needs.
+    '.dshCc_propText{flex:1;min-width:0;max-width:100%;font-family:var(--dshCc-mono)}',
   ]) {
     assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
   }
@@ -2482,14 +2484,28 @@ async function main() {
     const sheet = rowSheets[0].textContent;
     const solidRings = [...sheet.matchAll(/outline-style:solid;outline-offset:1px/g)];
     assert.ok(
-      solidRings.length >= 8,
-      'the row supplies outline-style and outline-offset for its controls — found '
+      solidRings.length >= 6,
+      'the row supplies outline-style and outline-offset for the controls that need a ring — found '
       + solidRings.length,
     );
     for (const banned of ['outline:2px solid', 'outline-color:', 'outline-width:']) {
       assert.ok(
         !sheet.includes(banned),
         'the ring colour and width are DSH\'s business, not the row\'s (found ' + banned + ')',
+      );
+    }
+    // The text fields are the deliberate exception, and it is the change batch B made: a
+    // field in DSH's settings form does not draw a ring on focus, it moves its border
+    // colour to the business state. Asserted both ways so the exception stays a decision
+    // rather than becoming "some fields lost their focus styling".
+    assert.ok(
+      sheet.includes('.dshCc_input:focus-visible,.dshCc_panelField:focus-within,.dshCc_propText:focus-visible{border-color:var(--dsw-alias-state-business-primary)}'),
+      'a focused text field shows it by its border colour, the way DSH\'s form fields do',
+    );
+    for (const field of ['dshCc_input', 'dshCc_panelField', 'dshCc_propText']) {
+      assert.ok(
+        !new RegExp('\\.' + field + ':[a-z-]+\\{[^}]*outline-style').test(sheet),
+        'the text field ' + field + ' does not also draw a ring',
       );
     }
   }
