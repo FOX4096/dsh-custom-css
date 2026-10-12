@@ -2711,6 +2711,7 @@ async function main() {
   const outline = findOutline(outlineView);
   assert.ok(outline !== null, 'the file bar carries an outline dropdown');
   assert.strictEqual(outline.props.display, '大纲', 'labelled as the sheet outline');
+  assert.notStrictEqual(outline.props.disabled, true, 'a sheet with rules has an outline to open');
   await outlineBoot.runTimers();
   hookIndex = 0;
   const outlineReady = outlineBoot.registrations[0].component();
@@ -2763,6 +2764,45 @@ async function main() {
   assert.deepStrictEqual(
     carets, [outlineSheet.indexOf('.gone')],
     'with the caret on its selector so the line comes into view',
+  );
+
+  // --- an empty sheet has no outline to show --------------------------------
+  // Reported from use: the file starts out empty, and the outline was still clickable.
+  // Opening it showed a menu with no rows, which reads as broken rather than as
+  // "there is nothing here yet". The rule this row follows is the same one the rest of
+  // the interface follows: **a control is disabled when its action would produce
+  // nothing**, not when it is inconvenient.
+  const emptyBoot = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 0, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '' });
+      if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 0 });
+      throw new Error('unexpected request: ' + url);
+    },
+    dom: { nodes: [] },
+  });
+  hookIndex = 0;
+  emptyBoot.registrations[0].component();
+  await emptyBoot.runEffects();
+  hookIndex = 0;
+  const emptyView = emptyBoot.registrations[0].component();
+  const emptyOutline = findOutline(emptyView);
+  assert.ok(emptyOutline !== null, 'the empty sheet still renders the file bar');
+  assert.strictEqual(
+    emptyOutline.props.disabled, true,
+    'an empty sheet disables the outline instead of offering an empty menu',
+  );
+  assert.deepStrictEqual(
+    [...emptyOutline.props.items], [],
+    'and it has no entries to offer — got: ' + JSON.stringify(emptyOutline.props.items),
+  );
+
+  // The disabled look itself: one treatment for the row, not a second invention.
+  assert.ok(
+    rowSheets[0].textContent.includes('.dshCc_select:disabled{opacity:.4;cursor:not-allowed}'),
+    'a disabled dropdown looks disabled (opacity + a cursor that says why)',
   );
 
   // --- a menu opened from the right end of a row stays inside the window ----
