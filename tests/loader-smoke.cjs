@@ -2737,6 +2737,56 @@ async function main() {
     );
   }
 
+  // --- controls carry an accessible name, not only a tooltip ----------------
+  // Measured before this: seven controls in this row relied on a `title` for their name,
+  // the find bar's chevrons among them. A `title` is not an accessible name — assistive
+  // technology may announce "button" and drop the tooltip entirely, and a touch device
+  // never shows one at all.
+  //
+  // `aria-label` is used rather than a visually-hidden span: it takes precedence over
+  // `title` in the accessible-name computation, so the tooltip can stay for the mouse
+  // without the two disagreeing.
+  //
+  // Asserted against the rendered tree, which is where the naming actually lives.
+  {
+    const view = host.registrations[0].component();
+    // Text can sit at any depth — the dropdown's label is a span inside the trigger, and
+    // reading only the direct children made every wrapped control look unnamed.
+    const textOf = (node) => {
+      if (typeof node === 'string') return node;
+      if (node === null || typeof node !== 'object') return '';
+      return (node.children ?? []).map(textOf).join('');
+    };
+    const unnamed = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      const isInteractive = node.type === 'button'
+        || String(node.props?.role ?? '') === 'switch'
+        || String(node.props?.className ?? '').includes('dshCc_editor');
+      if (isInteractive) {
+        const props = node.props ?? {};
+        if (props['aria-label'] === undefined && textOf(node).trim() === '') {
+          unnamed.push(String(props.className ?? node.type));
+        }
+      }
+      for (const child of node.children ?? []) walk(child);
+    })(view);
+    assert.deepStrictEqual(
+      unnamed, [],
+      'every control has an accessible name or visible text — unnamed: ' + JSON.stringify(unnamed),
+    );
+    // The icon-only find-bar buttons are the ones this was written for; named here so the
+    // assertion says which controls it is talking about when it fails.
+    assert.ok(
+      code.includes("'aria-label': '上一个命中'") && code.includes("'aria-label': '下一个命中'"),
+      'the find bar\'s chevron buttons are named',
+    );
+    assert.ok(
+      code.includes("'aria-label': '关闭查找'") && code.includes("'aria-label': '区分大小写'"),
+      'so are its close and case buttons',
+    );
+  }
+
   // --- menu cells keep DSH's menu metrics ----------------------------------
   // Taken from `Menu.module.css` (`.item` 34px / `6px 8px` / `gap: 6px` / 13px over 20px,
   // `.check` in label-primary, `.danger:hover` on the danger hover fill). Ours used to be
