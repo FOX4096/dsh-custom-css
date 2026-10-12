@@ -2641,6 +2641,41 @@ async function main() {
     );
   }
 
+  // --- menu cells keep DSH's menu metrics ----------------------------------
+  // Taken from `Menu.module.css` (`.item` 34px / `6px 8px` / `gap: 6px` / 13px over 20px,
+  // `.check` in label-primary, `.danger:hover` on the danger hover fill). Ours used to be
+  // a 40px row with 14px text — a size nothing else in the settings sheet uses, which is
+  // what made two menus opened from the same row look like they came from two plugins.
+  //
+  // Asserted with the declarations, not with the class name: a rule that keeps its
+  // selector but loses its numbers is exactly the regression this is for.
+  {
+    const sheet = rowSheets[0].textContent;
+    const required = [
+      ['menu row metrics', 'min-height:34px;padding:6px 8px'],
+      ['menu row type', 'font:var(--dsw-font-xs-13)'],
+      ['menu row gap', 'gap:6px'],
+      ['selected check colour', '.dshCc_menuCheck{flex:none;color:var(--dsw-alias-label-primary)}'],
+      ['danger hover fill', '.dshCc_menuItemDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}'],
+      ['group heading weight', 'font-weight:500'],
+      ['group heading padding', 'padding:4px 7px 2px'],
+      ['list rows sit flush', 'flex-direction:column;gap:0;overflow-y:auto'],
+    ];
+    for (const [what, declaration] of required) {
+      assert.ok(
+        sheet.includes(declaration),
+        what + ' follows the shipped menu — expected ' + JSON.stringify(declaration),
+      );
+    }
+    // The sticky heading's background is a hook, not a live rule: nothing in this row sets
+    // `data-stuck` yet. It is kept because the day one is wired up, the alternative is
+    // inventing a second look for it.
+    assert.ok(
+      sheet.includes('.dshCc_selectGroup[data-stuck]{background:var(--dsw-alias-menu-group-header-fill)}'),
+      'the sticky group heading has its fill ready for the day an observer sets data-stuck',
+    );
+  }
+
   // --- the dropdown's keyboard contract ------------------------------------
   // Two of these come from DSH's own Menu documentation ("Escape or Shift+Tab close it
   // and return focus to the anchor's first button"; arrow keys walk the list). The third
