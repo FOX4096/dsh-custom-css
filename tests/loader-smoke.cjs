@@ -2494,6 +2494,30 @@ async function main() {
     }
   }
 
+  // --- text on a filled surface reads DSH's foreground token ---------------
+  // Two defects, found by resolving every token this sheet uses against the theme:
+  //   • `color: #fff` on the picker's primary button — a hard-coded white that ignores
+  //     the theme entirely;
+  //   • `color: var(--dsw-alias-label-inverse, #fff)` on the picker's size label — the
+  //     token in that var() DOES NOT EXIST anywhere in DSH, so the #fff fallback was the
+  //     only thing painting it. A fallback is not a colour choice: it means the name is
+  //     wrong, and it fails silently.
+  // DSH paints text on a filled surface with `--dsw-alias-label-primary-foreground`
+  // (Button's `.primary`, and the theme defines it per colour scheme).
+  {
+    const sheet = rowSheets[0].textContent;
+    assert.ok(
+      sheet.includes('var(--dsw-alias-label-primary-foreground)'),
+      'text on a filled surface uses DSH\'s foreground token',
+    );
+    for (const banned of ['--dsw-alias-label-inverse', 'color:#fff']) {
+      assert.ok(
+        !sheet.includes(banned),
+        'no non-existent token or hard-coded white paints text (found ' + banned + ')',
+      );
+    }
+  }
+
   // --- a keyboard user can see where they are in a menu ---------------------
   // Both list surfaces give the pointer a fill on hover; without the same fill on
   // `:focus-visible` (and with the browser's default ring suppressed, the way DSH's own
