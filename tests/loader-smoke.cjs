@@ -2518,6 +2518,77 @@ async function main() {
     }
   }
 
+  // --- the dropdown's keyboard contract ------------------------------------
+  // Two of these come from DSH's own Menu documentation ("Escape or Shift+Tab close it
+  // and return focus to the anchor's first button"; arrow keys walk the list). The third
+  // was found by testing in the real browser, and it is the one that mattered most:
+  //
+  //   **Escape must not escape.**
+  //
+  // Measured: with the menu focused, one Escape closed the menu AND the settings dialog
+  // around it — the whole row vanished and focus landed on whatever the page had
+  // underneath. The panel treats Escape as "close the settings", so a dismissal that
+  // leaks upward takes the dialog with it. That is why the handlers stop propagation,
+  // and it is exactly the kind of thing a suite that only reads props cannot see.
+  //
+  // Asserted against the source for the handlers (the harness renders no function
+  // components) and against the rendered props for the wiring.
+  {
+    assert.ok(
+      code.includes('function onMenuKeyDown(event)'),
+      'the dropdown owns its list keys',
+    );
+    for (const key of ['ArrowDown', 'ArrowUp', 'Home', 'End']) {
+      assert.ok(
+        code.includes("event.key === '" + key + "'"),
+        'the list walks with ' + key,
+      );
+    }
+    // Every Escape path in the dropdown stops the event before the dialog sees it.
+    //
+    // Written as one slice per branch, from the marker to the branch's own closing
+    // `}` — found by brace matching rather than by searching for the next `closeMenu(`,
+    // because that call ALSO appears in `closeMenu`'s own definition earlier in the file
+    // and the search would land there instead. (That is how the first version of this
+    // guard reported one branch instead of two.)
+    const escapeBranches = [];
+    for (let at = code.indexOf("event.key === 'Escape'"); at >= 0; at = code.indexOf("event.key === 'Escape'", at + 1)) {
+      const open = code.indexOf('{', at);
+      if (open < 0) continue;
+      let depth = 0;
+      let end = open;
+      for (; end < code.length; end += 1) {
+        if (code[end] === '{') depth += 1;
+        else if (code[end] === '}') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      const snippet = code.slice(at, end + 1);
+      // The dropdown's two branches are the ones that dismiss the menu.
+      if (snippet.includes('closeMenu')) escapeBranches.push({ snippet, line: code.slice(0, at).split('\n').length });
+    }
+    assert.ok(
+      escapeBranches.length >= 2,
+      'both the trigger and the list handle Escape — got ' + escapeBranches.length
+        + ' at lines ' + JSON.stringify(escapeBranches.map(branch => branch.line)),
+    );
+    for (const branch of escapeBranches) {
+      assert.ok(
+        branch.snippet.includes('stopPropagation'),
+        'dismissing the menu must not also dismiss the panel around it (line ' + branch.line + ')',
+      );
+    }
+    assert.ok(
+      code.includes('focusRow('),
+      'the list moves focus between rows rather than only tracking a virtual index',
+    );
+    assert.ok(
+      code.includes("'aria-activedescendant'"),
+      'the list tells assistive technology which row the keyboard is on',
+    );
+  }
+
   // --- a keyboard user can see where they are in a menu ---------------------
   // Both list surfaces give the pointer a fill on hover; without the same fill on
   // `:focus-visible` (and with the browser's default ring suppressed, the way DSH's own
