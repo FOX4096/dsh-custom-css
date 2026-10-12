@@ -53,7 +53,13 @@
   ],
   "scripts": {
     "test": "node tests/loader-smoke.cjs && node tests/host-api-smoke.mjs",
-    "compat": "node tests/compat-matrix.mjs"
+    "compat": "node tests/compat-matrix.mjs",
+    "dev": "node dev/instance.mjs up",
+    "dev:down": "node dev/instance.mjs down",
+    "dev:status": "node dev/instance.mjs status",
+    "dev:dump": "node dev/instance.mjs dump",
+    "ego": "node dev/ego.mjs",
+    "probe": "node tests/visual-probe.mjs"
   },
   "dsh": {
     "bundle": {

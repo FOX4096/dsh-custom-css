@@ -265,9 +265,17 @@ dsh-custom-css/
 ├── lib/
 │   ├── index.js        # host 半：样式表目录 + 围栏内的 JSON 接口
 │   └── client.js       # 浏览器半：设置行、编辑器、补全、校验、规则面板
+├── dev/
+│   ├── README.md       # 开发实例：一个只加载本插件的 DSH（端口 3081）
+│   ├── instance.mjs    # 起 / 停 / 状态 / dump 组合配置树
+│   ├── ego.mjs         # 取件窗口：让 ego 浏览器带令牌进开发实例，令牌不落痕
+│   ├── home/           # 它的 DSH_HOME（独立，含会话与凭据）
+│   └── state/          # 带令牌的入口 URL + 实例日志
+├── temp/               # 探针与 ego 的截图、量出来的 JSON（不进版本库）
 ├── tests/
 │   ├── loader-smoke.cjs    # 假 host 里真跑 client.js（含校验、补全、规则面板、开关、分量）
 │   ├── host-api-smoke.mjs  # 假 webServer 驱动 host 路由（含穿越拒绝、fail-closed、/toggle）
+│   ├── visual-probe.mjs    # 无头 Edge + CDP：在真浏览器里量几何、截图、收控制台错误
 │   └── compat-matrix.mjs   # 跨版本兼容断言（槽位 + inject id），npm run compat
 ├── .github/
 │   ├── workflows/ci.yml        # CI：Node 20/22 × 语法自检 + 冒烟测试 + 兼容断言
@@ -278,6 +286,7 @@ dsh-custom-css/
 │   ├── showcase.css        # 可直接导入的示例样式表（只用设计变量，不选哈希类名）
 │   └── README.md           # 用它 + 写自定义样式的三条经验
 ├── docs/
+│   ├── naming.md           # 命名表：每个界面元素唯一的名字（提需求、写代码、记日志都用它）
 │   ├── architecture.html   # 架构图（自包含 HTML：明暗主题 / 平移缩放 / 焦点 / 导出）
 │   ├── architecture.archify.json  # 图的源码规格（Archify）
 │   └── architecture.visual-check.*  # 桌面containment 证据：截图 + JSON 收据
@@ -287,6 +296,7 @@ dsh-custom-css/
 │   ├── social-preview.svg  # 社交预览卡（1280×640）源文件
 │   └── social-preview.png  # 同上，位图版
 ├── compat.json             # 跨版本兼容契约（槽位 / inject id / 已验证版本）
+├── naming.md               # 见 docs/naming.md
 ├── .editorconfig
 ├── CONTRIBUTING.md         # 本地跑起来、硬约束、发版流程
 ├── SECURITY.md             # 攻击面与私密报告渠道
@@ -332,6 +342,20 @@ dsh-custom-css/
   - 另外两条**样式审计**守着那些"看不出来"的错：规则若用 `attr()` 取一个元素没有的属性就点名（曾有锁定框因此画出一条 12×2 的横线）；样式表里出现、源码里没人命中的类也点名（它同时也是**类名拼错**的探测器 —— 审计要认得出 `'dshCc_tok' + kindOf()` 这类拼接出来的名字）。
 - `node tests/host-api-smoke.mjs`：用假 `webServer` 驱动 host 路由，校验文件 API、目录簿记（含 `active.json` 损坏后的恢复与幽灵关闭项清理）、`/active`、重名冲突、**路径穿越 / 非法文件名 / Windows 设备名 / 符号链接拒绝**、请求体上限、`/open` 的启动器注入、列表上限不会吞掉当前文件、以及无围栏时的 fail-closed（读写都被围栏拦住）。
 - **CI**（[`.github/workflows/ci.yml`](https://github.com/FOX4096/dsh-custom-css/blob/main/.github/workflows/ci.yml)）：Node 20 / 22 两档，跑上面四条 `node --check` 加两套冒烟测试。插件没有构建步骤也没有运行时依赖，所以 CI 里不装任何东西，几秒结束 —— 顶部那枚 CI 徽章就是它。
+
+## 开发实例与视觉探针
+
+改这一行的界面时，用 `npm run dev` 起一个**只加载本插件**的 DSH：独立 `DSH_HOME`（`dev/home`）、端口 `3081`、profile `ccdev`，与你正在用的那个实例完全无关。
+
+```bash
+npm run dev          # 起（幂等）；npm run dev:down 停；npm run dev:status 看状态
+npm run probe -- --open-settings --sel .dshCc_row --shot
+```
+
+- **它不是「复制一份 profiles/web」**。真机 profile 的 `cordis.patch.yml` 把 `webserver.port` 写死成 3080，而 DSH 出厂配置里那个字段是跟着 `--port` 走的 —— 复制过来的实例会去抢真机的端口。现在用官方模板 `--from-default-profile web`，它只复制 bundle 列表，不读真机的本地状态。详见 [`dev/README.md`](./dev/README.md)。
+- **探针在真 Chromium 里量，不靠看**。`npm run probe` 用无头 Edge + CDP（零依赖：Node 24 自带 `WebSocket`）量几何、截图、收控制台错误。它只测量、不断言 —— `看起来有点挤` 与 `真的溢出 16px` 是两回事，后者只有数字能说。
+- **要实时看着界面**用 ego（一个真窗口）：`npm run ego` 会起一个取件窗口并打印一个本机地址，让 AI 用 `ego_navigate` 打开它 —— 页面自己取走带令牌的 URL 并跳转，令牌因此不出现在对话、终端或日志里。
+- 截图与临时产物落在 `temp/`（`temp/probe/` 是探针的，`temp/ego/` 是 ego 的），整个目录不进版本库。
 
 ## 许可
 
