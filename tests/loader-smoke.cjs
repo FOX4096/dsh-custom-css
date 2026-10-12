@@ -1432,7 +1432,13 @@ async function main() {
   assert.ok(renderedText.includes('custom.css'), 'the file bar names the sheet');
   assert.ok(renderedText.includes('CSS'), 'the file bar badges the language');
   assert.strictEqual(switchButton.props['aria-checked'], true, 'the switch starts on');
-  assert.ok(String(switchButton.props.className).includes('dshCc_switchOn'), 'the on state is styled');
+  // The checked look is written against `aria-checked` in the stylesheet, so there is no
+  // parallel "on" class to get out of step with it. The stylesheet half of that pair is
+  // asserted in the stylesheet section below, where the injected text is in scope.
+  assert.ok(
+    !String(switchButton.props.className).includes('switchOn'),
+    'the switch paints from aria-checked rather than from a class that could disagree with it',
+  );
 
   // The requested layout: one container holding header / body / footer, rather
   // than three separate boxes that only look adjacent.
@@ -2482,11 +2488,19 @@ async function main() {
   // was what made the first version look correct while it was pinning the colour.
   {
     const sheet = rowSheets[0].textContent;
-    const solidRings = [...sheet.matchAll(/outline-style:solid;outline-offset:1px/g)];
+    // Two offsets, because DSH's own components use two: input-height controls and buttons
+    // take 1px, and the switch takes 2px (it is a 20px control, and the ring needs the extra
+    // room to clear its capsule). Both are asserted, so neither can silently become the other.
+    const ringsAtOne = [...sheet.matchAll(/outline-style:solid;outline-offset:1px/g)];
+    const ringsAtTwo = [...sheet.matchAll(/outline-style:solid;outline-offset:2px/g)];
     assert.ok(
-      solidRings.length >= 6,
+      ringsAtOne.length + ringsAtTwo.length >= 6,
       'the row supplies outline-style and outline-offset for the controls that need a ring — found '
-      + solidRings.length,
+      + ringsAtOne.length + ' at 1px and ' + ringsAtTwo.length + ' at 2px',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_switch:focus-visible{outline-style:solid;outline-offset:2px}'),
+      'the switch keeps the 2px offset its own spec uses',
     );
     for (const banned of ['outline:2px solid', 'outline-color:', 'outline-width:']) {
       assert.ok(
@@ -2552,9 +2566,23 @@ async function main() {
     // rule left the guard green. A guard that an unrelated rule can satisfy is not a
     // guard; both halves are asserted together now.
     assert.ok(
-      sheet.includes('.dshCc_statusDot[data-state=ongoing]{background:var(--dsw-alias-state-warn-primary);animation:dshCc-status-pulse'),
+      sheet.includes('.dshCc_statusDot[data-state=ongoing]{color:var(--dsw-alias-state-warn-primary);animation:dshCc-status-pulse'),
       'the status dot has the loading semantic DSH\'s StateDot uses, with its own animation',
     );
+    // All three states paint the same way — the colour on the box, the core reading it
+    // through `currentColor`. Asserted because the first version of the ongoing rule set
+    // `background` while the other two set `color`, which would have left the loading dot
+    // with two colours fighting over one element.
+    assert.ok(
+      sheet.includes('.dshCc_statusDot::after{content:"";position:absolute;inset:20%;border-radius:50%;background:currentColor}'),
+      'the dot is a 10px box painting a 6px core, the way DSH\'s StateDot draws it',
+    );
+    for (const state of ['on', 'off', 'ongoing']) {
+      assert.ok(
+        sheet.includes('.dshCc_statusDot[data-state=' + state + ']{color:var(--dsw-alias-state-'),
+        'the ' + state + ' state reads from DSH\'s state family rather than from a colour of its own',
+      );
+    }
     assert.ok(
       sheet.includes('@keyframes dshCc-status-pulse'),
       'the animation is namespaced — piggy-backing on another module\'s keyframes would '
@@ -2664,6 +2692,48 @@ async function main() {
     assert.ok(
       sheet.includes('--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2)'),
       'the elevated surfaces take the l2 scrollbar tokens, the way DSH binds them on the card',
+    );
+  }
+
+  // --- the controls DSH gives specific metrics get those metrics --------------
+  // Three shapes that had drifted to sizes of their own. Each one is asserted with the
+  // declaration that carries it, because "the rule exists" is not the same claim.
+  {
+    const sheet = rowSheets[0].textContent;
+    // Switch: 36x20 track with a 16x16 thumb, from `Switch.module.css`. Ours was 30x16 with a
+    // 12x12 thumb, and the 14px travel that went with them.
+    assert.ok(
+      sheet.includes('.dshCc_switchTrack{position:relative;flex:none;width:36px;height:20px;'),
+      'the switch track is 36x20, the size DSH\'s Switch uses',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_switchThumb{position:absolute;top:2px;left:2px;width:16px;height:16px;'),
+      'and its thumb is 16x16',
+    );
+    // The checked state paints from the attribute rather than from a class, so the paint
+    // cannot disagree with what assistive technology reads (DSH states this outright).
+    assert.ok(
+      sheet.includes('.dshCc_switch[aria-checked="true"] .dshCc_switchTrack{background:var(--dsw-alias-brand-primary)}'),
+      'the switch paints its checked state from aria-checked',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_switchThumb{') && sheet.includes('background:var(--dsw-alias-switch-thumb)'),
+      'the thumb takes DSH\'s thumb token rather than a hard-coded white',
+    );
+    // Status dot: DSH's StateDot draws a 10px box with a 6px core.
+    assert.ok(
+      sheet.includes('.dshCc_statusDot{position:relative;flex:none;width:10px;height:10px;border-radius:50%}'),
+      'the status dot is a 10px box, the way StateDot draws it',
+    );
+    // The `CSS` badge: DSH's Tag outline tone — a capsule on a border-l4 hairline.
+    assert.ok(
+      sheet.includes('.dshCc_languageBadge{flex:none;padding:1px 8px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:999px;'),
+      'the language badge is a capsule on DSH\'s tag hairline',
+    );
+    // And the switch keeps its own focus offset: 2px, where buttons use 1.
+    assert.ok(
+      sheet.includes('.dshCc_switch:focus-visible{outline-style:solid;outline-offset:2px}'),
+      'the switch uses the 2px offset its spec gives it',
     );
   }
 
