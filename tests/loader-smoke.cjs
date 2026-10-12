@@ -2588,6 +2588,43 @@ async function main() {
     );
   }
 
+  // --- type scale comes from DSH's font tokens ------------------------------
+  // Same reasoning as the radii above, and the same history: the sheet carried 50 literal
+  // `font-size` and 29 literal `line-height` declarations, and ZERO font tokens. A literal
+  // pair that happens to equal a ladder step looks right until a theme changes the step —
+  // then this row alone keeps the old size.
+  //
+  // A pair is written as the token's shorthand (`font: var(--dsw-font-xxs-12)`), which
+  // also carries the font family, so the row picks up DSH's own stack instead of the
+  // browser's default for a bare `font-size`.
+  //
+  // Pairs that do NOT match a ladder step are the exception, and they are listed here so
+  // the count is explicit rather than accidental: 10px/16px, 11px/16px and 11px/18px have
+  // no step, so tokenising them would silently resize them — that belongs to a visible
+  // change, not to this one.
+  {
+    const sheet = rowSheets[0].textContent;
+    for (const token of ['--dsw-font-s-14', '--dsw-font-xxs-12', '--dsw-font-xs-13']) {
+      assert.ok(
+        sheet.includes('font:var(' + token + ')'),
+        'the sheet takes at least one type size from DSH: ' + token,
+      );
+    }
+    const TOKENISED = new Set(['14px/22px', '12px/18px', '13px/20px']);
+    const pairs = [...sheet.matchAll(/font-size:(\d+px);line-height:(\d+px)/g)]
+      .map(match => match[1] + '/' + match[2]);
+    for (const pair of pairs) {
+      assert.ok(
+        !TOKENISED.has(pair),
+        'a ladder step is written as its token rather than as a literal pair: ' + pair,
+      );
+    }
+    assert.ok(
+      pairs.length < TOKENISED.size + 8,
+      'the exceptions stay a short, deliberate list — found ' + pairs.length + ': ' + JSON.stringify(pairs),
+    );
+  }
+
   // --- the dropdown's keyboard contract ------------------------------------
   // Two of these come from DSH's own Menu documentation ("Escape or Shift+Tab close it
   // and return focus to the anchor's first button"; arrow keys walk the list). The third
