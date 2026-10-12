@@ -2641,6 +2641,32 @@ async function main() {
     );
   }
 
+  // --- both menus share DSH's menu material --------------------------------
+  // The fill was already the same token the sheet picker used (`--dsw-menu-surface-fill`
+  // and `--dsw-specific-menu` both resolve to #f8f9fa94), so swapping tokens changed
+  // nothing. What was missing is the blur DSH pairs with it — and that one is visible:
+  // the fill is 58% opaque, so with no blur the page scrolls *through* the menu.
+  //
+  // Counted rather than spot-checked: this row has exactly two menus, and the interesting
+  // failure is one of them getting the material and the other not. That is not
+  // hypothetical — while writing this, a replace meant for the panel menu landed on the
+  // sheet menu instead, so the two disagreed and the guard below is what caught it.
+  {
+    const sheet = rowSheets[0].textContent;
+    const fills = [...sheet.matchAll(/background:var\(--dsw-menu-surface-fill\)/g)].length;
+    const blurs = [...sheet.matchAll(/backdrop-filter:var\(--dsw-menu-backdrop-filter\)/g)].length;
+    assert.strictEqual(
+      blurs, fills,
+      'every surface using the menu fill also pairs the backdrop filter DSH pairs with it — '
+        + fills + ' fills, ' + blurs + ' blurs',
+    );
+    assert.ok(fills >= 2, 'both of this row\'s menus use the shared menu material — got ' + fills);
+    assert.ok(
+      sheet.includes('--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2)'),
+      'the elevated surfaces take the l2 scrollbar tokens, the way DSH binds them on the card',
+    );
+  }
+
   // --- menu cells keep DSH's menu metrics ----------------------------------
   // Taken from `Menu.module.css` (`.item` 34px / `6px 8px` / `gap: 6px` / 13px over 20px,
   // `.check` in label-primary, `.danger:hover` on the danger hover fill). Ours used to be
