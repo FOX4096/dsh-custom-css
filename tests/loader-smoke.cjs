@@ -2805,6 +2805,26 @@ async function main() {
     'a disabled dropdown looks disabled (opacity + a cursor that says why)',
   );
 
+  // ...and the prop has to actually REACH the button.
+  //
+  // This one came out of a reverse test that quietly passed: deleting the prop's use
+  // inside `Dropdown` still left every assertion green, because they read
+  // `outline.props.disabled` — the value the *caller* passes. Nothing checked that the
+  // component does anything with it, so a refactor could have dropped the wiring while
+  // the suite stayed green and the outline stayed clickable. The harness does not render
+  // function components, so this is asserted against the source: the trigger's own
+  // attribute object must carry the prop.
+  {
+    const cssStart = code.indexOf('const ROW_CSS = [');
+    const triggerAt = code.indexOf("className: 'dshCc_select'", cssStart);
+    assert.ok(triggerAt > 0, 'the dropdown trigger is findable in the source');
+    const trigger = code.slice(triggerAt, triggerAt + 700);
+    assert.ok(
+      /disabled:\s*props\.disabled/.test(trigger),
+      'the dropdown trigger actually applies the disabled prop it is handed',
+    );
+  }
+
   // --- a menu opened from the right end of a row stays inside the window ----
   // The outline sits at the right end of the file bar, and a menu laid out as
   // `left: trigger.left` ran off the screen with a long selector inside it (measured: 250px).
