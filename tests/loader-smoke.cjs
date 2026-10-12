@@ -72,6 +72,33 @@ const timers = [];
 /** Repeating timers of the boot in progress (the external-change poll). */
 const intervals = [];
 
+/**
+ * The effect a hook slot records.
+ *
+ * Shared by `useEffect` and `useLayoutEffect` because the harness has no paint, so
+ * the ONLY thing that separates them here is that React runs one earlier — a
+ * distinction nothing in a headless smoke test can observe. Extracted rather than
+ * aliased because the object literal cannot reference itself while it is being
+ * built (`fakeReact.useEffect` inside `fakeReact`'s own literal is a TDZ throw).
+ * @param effect - the callback React would run.
+ * @param deps - the dependency array, or undefined for "every commit".
+ */
+function runEffect(effect, deps) {
+  const index = beginHook();
+  // React enough for a smoke test: keep the latest effect of this slot so a test
+  // can run it, and its cleanup so an unmount can be simulated. Without this the
+  // debounce / flush / unmount paths never executed at all.
+  const slot = hookSlots[index] ?? { effect: null, cleanup: null, deps: undefined, ranDeps: undefined, ran: false };
+  slot.effect = effect;
+  // Deps decide whether the effect runs again: an array re-runs only when an
+  // entry changed, no array runs after every commit. Re-running everything made
+  // tests pass on behaviour React would never produce.
+  slot.pending = !slot.ran || deps === undefined || !sameDeps(slot.ranDeps, deps);
+  slot.deps = deps;
+  hookSlots[index] = slot;
+  effects.push(slot);
+}
+
 const fakeReact = {
   useState(initial) {
     const index = beginHook();
@@ -80,26 +107,18 @@ const fakeReact = {
       hookSlots[index] = typeof next === 'function' ? next(hookSlots[index]) : next;
     }];
   },
-  useEffect(effect, deps) {
-    const index = beginHook();
-    // React enough for a smoke test: keep the latest effect of this slot so a test
-    // can run it, and its cleanup so an unmount can be simulated. Without this the
-    // debounce / flush / unmount paths never executed at all.
-    const slot = hookSlots[index] ?? { effect: null, cleanup: null, deps: undefined, ranDeps: undefined, ran: false };
-    slot.effect = effect;
-    // Deps decide whether the effect runs again: an array re-runs only when an
-    // entry changed, no array runs after every commit. Re-running everything made
-    // tests pass on behaviour React would never produce.
-    slot.pending = !slot.ran || deps === undefined || !sameDeps(slot.ranDeps, deps);
-    slot.deps = deps;
-    hookSlots[index] = slot;
-    effects.push(slot);
-  },
+  useEffect: runEffect,
   useRef(value) {
     const index = beginHook();
     if (hookSlots[index] === undefined) hookSlots[index] = { current: value };
     return hookSlots[index];
   },
+  // React runs this one before paint, which is the entire reason the plugin uses it:
+  // it measures its anchor there so the menu never paints at a stale position. There
+  // is no paint in this harness, so it shares useEffect's implementation — but it has
+  // to EXIST, or the row throws instead of rendering and every assertion below would
+  // be measuring a crashed component rather than the behaviour it names.
+  useLayoutEffect: runEffect,
   // Handed the accessors as bare references, exactly like React does — so an
   // accessor that reads `this` throws here the way it would in the browser.
   useSyncExternalStore(subscribe, getSnapshot) {
@@ -2336,6 +2355,45 @@ async function main() {
     'the stylesheet has no rule for a class nothing applies — got: ' + JSON.stringify(orphanRules),
   );
 
+  // --- the anchored menu keeps up with its anchor ---------------------------
+  // The panel's dropdown is `position: fixed` from the trigger's viewport rect, so three
+  // things invalidate that measurement and every one of them has to be listened for:
+  // the window resizing, anything scrolling (the settings dialog is the scroller here,
+  // and it is NOT the document — so the listener has to be in the capture phase), and
+  // the menu's own size changing while it is open. Each of these was missing at some
+  // point, and each one is invisible in a screenshot: the menu simply sits where the
+  // trigger used to be.
+  // Guarded as source text because there is no DOM here to scroll; the behaviour itself
+  // is measured in the real browser with `npm run probe`.
+  assert.ok(
+    code.includes("window.addEventListener('resize', reanchor)"),
+    'the anchored menu re-measures when the window resizes',
+  );
+  assert.ok(
+    code.includes("window.addEventListener('scroll', reanchor, true)"),
+    'and when anything scrolls — capture phase, or a nested scroller is missed',
+  );
+  assert.ok(
+    code.includes('new ResizeObserver(reanchor)'),
+    'and when the menu itself grows while it is open',
+  );
+  assert.ok(
+    /removeEventListener\('scroll', reanchor, true\)/.test(code),
+    'and all three are taken back down when the menu closes',
+  );
+
+  // --- a keyboard user can see where they are in a menu ---------------------
+  // Both list surfaces give the pointer a fill on hover; without the same fill on
+  // `:focus-visible` (and with the browser's default ring suppressed, the way DSH's own
+  // menu does it) walking the list with the arrow keys highlights nothing at all.
+  const rowCss = rowSheets[0].textContent;
+  for (const surface of ['dshCc_selectItem', 'dshCc_menuItem']) {
+    assert.ok(
+      rowCss.includes('.' + surface + ':focus-visible'),
+      'the ' + surface + ' shows keyboard focus, not only hover',
+    );
+  }
+
   // --- the editor's own undo history ---------------------------------------
   // A controlled textarea has no usable undo stack: React writes `value` on every keystroke,
   // and that assignment clears whatever the engine had recorded — Ctrl+Z would do nothing.
@@ -2625,6 +2683,44 @@ async function main() {
   const nearBottom = placeMenu({ left: 40, right: 90, top: 560, bottom: 588, width: 50 }, window900, 320);
   assert.ok(nearBottom.bottom !== undefined && nearBottom.top === undefined, 'a menu near the bottom flips up');
   assert.strictEqual(placeMenu(undefined, window900, 320), undefined, 'no layout, no menu placement');
+
+  // --- the height ceiling is the space that exists, not a constant ----------
+  // The cap used to be `MENU_MAX_HEIGHT` flat, which is only right while the window is
+  // tall. A menu opened near the bottom of a short window then promised 260px it did
+  // not have, and its last rows sat under the window edge with no way to reach them.
+  const shortWindow = { width: 900, height: 250 };
+  const deepInShortWindow = { left: 40, right: 90, top: 220, bottom: 248, width: 50 };
+  const squeezed = placeMenu(deepInShortWindow, shortWindow, 320);
+  const squeezedHeight = Number.parseFloat(squeezed.maxHeight);
+  assert.ok(
+    squeezedHeight < 260,
+    'a menu in a short window is capped by the space above it, not by the constant — got ' + squeezed.maxHeight,
+  );
+  // above = 220 - 8*2 = 204
+  assert.strictEqual(squeezed.maxHeight, '204px', 'and the ceiling is exactly the room above the trigger');
+  assert.ok(squeezed.bottom !== undefined, 'which is also why it sits above the trigger');
+
+  const roomyHeight = placeMenu(triggerAt(40), window900, 320);
+  assert.strictEqual(roomyHeight.maxHeight, '260px', 'a tall window still gets the preferred height');
+
+  // Flipping and sizing read the same side of the trigger. When they disagree the menu
+  // is placed on one side and measured against the other, which is how a menu ends up
+  // half outside the window while looking correctly anchored.
+  const tallWindow = { width: 900, height: 900 };
+  const justFits = placeMenu({ left: 40, right: 90, top: 400, bottom: 428, width: 50 }, tallWindow, 320);
+  assert.strictEqual(justFits.top, '432px', 'a trigger with room below keeps the menu below it');
+  assert.strictEqual(justFits.maxHeight, '260px', 'and is capped by the preferred height, not by the room below');
+  // 500 - 428 - 16 = 56 below, 400 - 16 = 384 above → flips, and the ceiling is the
+  // room above capped at the preferred height.
+  const flips = placeMenu({ left: 40, right: 90, top: 400, bottom: 428, width: 50 }, { width: 900, height: 500 }, 320);
+  assert.ok(flips.bottom !== undefined, 'the same trigger flips once the window is too short below it');
+  assert.strictEqual(flips.maxHeight, '260px', 'and the room above it (384) is capped at the preferred 260');
+  // The two sides disagree in this one, which is the case the shared helper exists for:
+  // below is larger than above, so the menu stays below even though it does not fit
+  // there — and the ceiling has to agree with that placement.
+  const staysPut = placeMenu({ left: 40, right: 90, top: 120, bottom: 148, width: 50 }, { width: 900, height: 300 }, 320);
+  assert.strictEqual(staysPut.top, '152px', 'a menu stays below when that side has more room');
+  assert.strictEqual(staysPut.maxHeight, '136px', 'and the ceiling follows the side it was placed on (300 - 148 - 16)');
 
   // --- nothing may switch off the app's own scrollbars ----------------------
   // DSH styles every scrollbar from one global stylesheet, with `::-webkit-scrollbar`. In
