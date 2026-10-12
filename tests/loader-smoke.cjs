@@ -2423,6 +2423,77 @@ async function main() {
     'and all three are taken back down when the menu closes',
   );
 
+  // --- no JavaScript placeholder syntax ends up inside a CSS string ---------
+  // A real defect, and the one this suite did NOT catch: a sweep replaced
+  // `outline:2px solid …;outline-offset:1px` with the literal text `+ FOCUS_RING +`
+  // INSIDE the quoted string (this file builds CSS by concatenating string literals,
+  // not by templating). Every assertion here still passed — the rule was present, the
+  // `focus-visible` text was present — while the browser threw the whole rule away
+  // because `{+ FOCUS_RING +}` is not CSS. Measured in the real browser: zero focus
+  // rings in the injected sheet. The suite only noticed after a reload made the
+  // missing rules visible in a different probe.
+  //
+  // The invariant is simply that a CSS string never contains the concatenation
+  // syntax that was meant to happen outside it.
+  {
+    const cssStart = code.indexOf('const ROW_CSS = [');
+    const cssEnd = code.indexOf("].join('');", cssStart);
+    const sheetSource = code.slice(cssStart, cssEnd);
+    // `{+` / `+}` — a bare `+` directly against a brace is never valid CSS in any of
+    // these rules, so those two cannot false-alarm.
+    for (const marker of ['{+', '+}']) {
+      assert.ok(
+        !sheetSource.includes(marker),
+        'no JS placeholder text inside a CSS string (found ' + JSON.stringify(marker) + ')',
+      );
+    }
+    // The constant-name form needs a tighter test than a substring: the legitimate
+    // concatenation also contains `+ FOCUS_RING +`. A placeholder is that text sitting
+    // in a position where a brace is right before the `+`.
+    assert.ok(
+      !/\{[^']*\+\s*[A-Z_]{3,}\s*\+/.test(sheetSource),
+      'no constant name is embedded inside a CSS string (it belongs outside the quotes)',
+    );
+  }
+
+  // --- the focus ring is DSH's, and we only add the two parts it omits -------
+  // This started as "every focusable control used `outline:2px solid
+  // var(--dsw-alias-brand-primary)` — nine hand-rolled copies". The first attempt at a
+  // fix rewrote them to read `--dsw-focus-ring-width` / `--dsw-focus-ring-color`, which
+  // looked right and was still wrong: DSH's theme ships a GLOBAL focus ring
+  //
+  //     :root { --dsw-focus-ring-width: 2px }
+  //     :focus-visible { outline-color: var(--…-color, var(--…state-business-primary));
+  //                      outline-width: var(--…-width) }
+  //     html[data-input-modality=pointer] body :focus-visible:not(:read-write) {
+  //       --dsw-focus-ring-color: transparent; outline-color: #0000 }
+  //
+  // so the colour, the width AND the pointer-modality suppression are already handled.
+  // Pinning the colour here would have overridden that: measured with the keyboard in
+  // the real browser, the ring colour comes from DSH's fallback
+  // (`rgb(65,118,230)`), and our rule only had to supply the two things the global one
+  // leaves out — `outline-style` (it defaults to `none`, so nothing would paint) and
+  // `outline-offset` (it defaults to 0).
+  //
+  // The assertion therefore checks the intent, not a token name: the sheet sets the
+  // style and the offset, and never hard-codes a ring colour. Asserting the token names
+  // was what made the first version look correct while it was pinning the colour.
+  {
+    const sheet = rowSheets[0].textContent;
+    const solidRings = [...sheet.matchAll(/outline-style:solid;outline-offset:1px/g)];
+    assert.ok(
+      solidRings.length >= 8,
+      'the row supplies outline-style and outline-offset for its controls — found '
+      + solidRings.length,
+    );
+    for (const banned of ['outline:2px solid', 'outline-color:', 'outline-width:']) {
+      assert.ok(
+        !sheet.includes(banned),
+        'the ring colour and width are DSH\'s business, not the row\'s (found ' + banned + ')',
+      );
+    }
+  }
+
   // --- a keyboard user can see where they are in a menu ---------------------
   // Both list surfaces give the pointer a fill on hover; without the same fill on
   // `:focus-visible` (and with the browser's default ring suppressed, the way DSH's own

@@ -2,6 +2,63 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 未发布 — 聚焦环交还给 DSH（界面统一·批次 E）
+
+### 我们一直在自己画聚焦环，而 DSH 本来就有一份全局的
+
+这一批的方向查到最后**反了过来**。原计划是「把 9 处硬编码的聚焦环改成读 DSH 的令牌」，
+做到一半去真浏览器验证，发现 DSH 的 `ui-theme` 里本来就有一份**全局**聚焦环：
+
+```css
+:root { --dsw-focus-ring-width: 2px }
+
+:focus-visible {
+  outline-color: var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-width: var(--dsw-focus-ring-width);
+}
+
+html[data-input-modality=pointer] body :focus-visible:not(:read-write) {
+  --dsw-focus-ring-color: transparent;
+  outline-color: #0000;
+}
+```
+
+**颜色、宽度、以及「鼠标操作时不画环」这三件事，DSH 全都做完了。** 实测（键盘 Tab 走进
+这一行）：`outline: 2px solid rgb(65,118,230)` —— 那个颜色正是它的回退值，形状才是我们的。
+
+所以问题不只是「重复」，更是**有害**：我们原来那 9 条 `outline:2px solid brand-primary`
+把颜色**钉死成品牌色**，盖住了 DSH 按输入模态自动决定的那套 —— 鼠标点进来的环本该是透明，
+被我们画了出来。
+
+现在只留全局规则没有的两件：
+
+```css
+outline-style: solid;    /* 全局规则没设 style，默认 none —— 不写就什么都画不出来 */
+outline-offset: 1px;     /* 全局规则没设偏移，默认 0 —— 环会贴着边框 */
+```
+
+颜色与宽度一律交给 DSH：主题换配色、改环宽、改模态策略，这一行自动跟上。
+
+### 中途踩的两个坑（都是我的）
+
+1. **把常量名写进了字符串。** 用脚本替换 9 处时，`outline:2px solid …;outline-offset:1px`
+   被换成了字符串里的 `+ FOCUS_RING +` —— 它成了 CSS 文本（`{+ FOCUS_RING +}`），浏览器
+   看不懂就**整条丢弃**。而**两套测试全部通过**：断言查的是源码文本里有没有某个子串，
+   占位符照样让它过。是真浏览器探针发现注入的样式表里一处聚焦环都没有。
+2. **修它时又把引号搞坏了**：替换后残留的 `';` 提前闭合了字符串，`node --check` 直接语法错。
+
+两条都补了守卫，但**第一条的守卫写错过一次**：第一版守卫断言「事件里出现了哪两个令牌名」，
+而那句断言在**颜色被钉死**的状态下同样是绿的 —— 它锁的是实现，不是意图。现在断言的是：
+
+```js
+// 行的职责只有 style 与 offset；颜色和宽度是 DSH 的事
+assert.ok(sheet.includes('outline-style:solid;outline-offset:1px'))
+for (const banned of ['outline:2px solid', 'outline-color:', 'outline-width:']) assert.ok(!sheet.includes(banned))
+```
+
+外加一条更基础的守卫：**CSS 字符串里不许出现 JS 拼接语法的痕迹**（`{+`、`+}`，以及常量名
+嵌在引号内）。这三条都反向打过补丁确认会红。
+
 ## 未发布 — 控件圆角改用 DSH 的令牌（界面统一·批次 A）
 
 ### 圆角不再写死，读 DSH 自己的那一套
