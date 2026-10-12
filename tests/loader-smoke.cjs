@@ -2651,22 +2651,31 @@ async function main() {
   // selector but loses its numbers is exactly the regression this is for.
   {
     const sheet = rowSheets[0].textContent;
+    // Every entry names the SELECTOR it is about, not just a declaration. A declaration-only
+    // substring is satisfied by any rule that happens to share it — and this pair of menus
+    // shares most of its metrics, so `min-height:34px;padding:6px 8px` alone stayed true
+    // while the rule it was supposed to protect had already been changed back to 40px.
+    // That is the third time in this sweep a guard turned out to be satisfiable by an
+    // unrelated rule; the fix is always the same: assert the rule, not the fragment.
     const required = [
-      ['menu row metrics', 'min-height:34px;padding:6px 8px'],
-      ['menu row type', 'font:var(--dsw-font-xs-13)'],
-      ['menu row gap', 'gap:6px'],
+      ['menu rows are menu-sized', '.dshCc_menuItem{display:flex;align-items:center;gap:6px;width:100%;min-height:34px;padding:6px 8px;'],
+      ['dropdown rows are menu-sized', '.dshCc_selectItem{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;'],
+      ['menu row type', 'cursor:pointer;font:var(--dsw-font-xs-13);'],
+      ['the list has no row gaps', '.dshCc_selectMenu{z-index:60;box-sizing:border-box;display:flex;flex-direction:column;gap:0;'],
       ['selected check colour', '.dshCc_menuCheck{flex:none;color:var(--dsw-alias-label-primary)}'],
       ['danger hover fill', '.dshCc_menuItemDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}'],
-      ['group heading weight', 'font-weight:500'],
-      ['group heading padding', 'padding:4px 7px 2px'],
-      ['list rows sit flush', 'flex-direction:column;gap:0;overflow-y:auto'],
+      ['group heading', '.dshCc_selectGroup{position:sticky;top:0;z-index:1;padding:4px 7px 2px;color:var(--dsw-alias-label-tertiary);font-weight:500;'],
     ];
     for (const [what, declaration] of required) {
-      assert.ok(
-        sheet.includes(declaration),
-        what + ' follows the shipped menu — expected ' + JSON.stringify(declaration),
-      );
+      assert.ok(sheet.includes(declaration), what + ' — expected ' + JSON.stringify(declaration));
     }
+    // The brand colour must be gone from the check mark specifically: a selected row is
+    // marked, not emphasised. Scoped to the rule, since the brand colour legitimately
+    // appears elsewhere in the sheet.
+    assert.ok(
+      !sheet.includes('.dshCc_menuCheck{flex:none;color:var(--dsw-alias-brand-primary)}'),
+      'the selected check is not painted in the brand colour',
+    );
     // The sticky heading's background is a hook, not a live rule: nothing in this row sets
     // `data-stuck` yet. It is kept because the day one is wired up, the alternative is
     // inventing a second look for it.
