@@ -757,12 +757,53 @@ async function main() {
     '.dshCc_panel>*{flex:none}',
     '.dshCc_partName{flex:none;padding:1px 7px;border-radius:6px;background:var(--dsw-alias-markdown-tag);',
     '.dshCc_select{justify-content:space-between}',
-    // The shipped settings-row spec: 36px tall, 18px pill, 14px text.
+    // The shipped settings-row spec: 36px tall, radius-md (12px), 14px text.
     '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
-    'border-radius:18px;background:var(--dsw-alias-bg-module-platform);',
+    'border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform);',
     '.dshCc_propText{flex:1;min-width:0;max-width:100%;box-sizing:border-box;height:36px;padding:0 14px;',
   ]) {
     assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
+  }
+
+  // --- radii come from DSH's ladder, not from literals ----------------------
+  // A regression guard with a specific history: every control in this row used to carry
+  // `border-radius:18px`, copied value-for-value from a class (`_button_cfgyt_4`) that no
+  // longer exists in this DSH generation. A literal survives a redesign silently — it
+  // keeps looking like the number someone measured once — while every real control in the
+  // same settings sheet had moved to `--dsw-radius-md`. Reading the token means a reskin
+  // carries this row with it, and a mistyped token is wrong in one place instead of seven.
+  //
+  // The list below is every literal that is allowed to stay, with why. Anything not on it
+  // fails, so a new `border-radius:8px` cannot be slipped in beside the tokenised ones:
+  //   • 8px   — editorBox / findField / panelClose, where it IS the ladder's step sm and
+  //             the value has been stable since before the ladder was introduced
+  //   • 4px   — the small `CSS` badge, the picker's target box and its label
+  //   • 2px / 3px / 6px — decoration on inline spans (hit mark, clickable selector,
+  //             component-name chip, candidate row, token chip)
+  //   • 50%   — a round dot (status dot, switch thumb)
+  //   • 999px — a capsule (the switch and its track); no step expresses half the height
+  {
+    const sheet = rowSheets[0].textContent;
+    const allowedShapes = ['2px', '3px', '4px', '6px', '8px', '50%', '999px'];
+    const literals = [...sheet.matchAll(/border-radius:([^;}]+)/g)]
+      .map(match => match[1].trim())
+      .filter(value => !value.startsWith('var(--dsw-radius-'));
+    for (const value of literals) {
+      assert.ok(
+        allowedShapes.includes(value),
+        'a radius literal outside the allowed shapes: border-radius:' + value,
+      );
+    }
+    assert.ok(
+      literals.length > 0,
+      'the allowed literals are still present — this check would pass vacuously otherwise',
+    );
+    for (const step of ['sm', 'md', 'lg']) {
+      assert.ok(
+        sheet.includes('border-radius:var(--dsw-radius-' + step + ')'),
+        'the sheet takes at least one radius from DSH: --dsw-radius-' + step,
+      );
+    }
   }
 
   // Width contract of the editor container. The shell is a single-column grid and
