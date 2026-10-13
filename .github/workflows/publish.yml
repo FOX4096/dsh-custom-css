@@ -56,12 +56,25 @@ jobs:
             exit 1
           fi
 
+      # 幂等：版本已经在 registry 上时不算失败。
+      #
+      # 这不是防御性代码，是踩出来的：把 v0.2.0 那个 tag 移到修复提交之后，tag 重新推送
+      # 又触发了一次本工作流，`npm publish` 报「You cannot publish over the previously
+      # published versions」而失败 —— 于是后面**建 Release 与传附件两步全被跳过**，
+      # 而这两步在「源码动了、需要重新生成产物」时恰恰是要跑的。
+      #
+      # 所以判据是「registry 上有没有这个版本」，不是「publish 命令成不成功」。
+      #
       # 预发布版本不能落到 latest：v0.2.0-rc.1 会把 latest 指过去，所有人
       # npm i 装到的就是候选版。
       - name: 发布（带 provenance 签名）
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
+          if npm view "dsh-custom-css@$VERSION" version >/dev/null 2>&1; then
+            echo "registry 上已有 $VERSION —— 跳过发布，继续建 Release / 传附件"
+            exit 0
+          fi
           case "$VERSION" in
             *-*) npm publish --provenance --access public --tag next ;;
             *)   npm publish --provenance --access public ;;
@@ -69,6 +82,11 @@ jobs:
 
       # 只有 tag 触发才建 Release。发布说明取 CHANGELOG 里对应版本的那一段 ——
       # 默认的 --generate-notes 只会给一行 "Full Changelog"，等于没有说明。
+      #
+      # `--draft=false`：v0.1.4～v0.1.8 都是公开的，v0.2.0 却停在 Draft 上 —— 说明
+      # 依赖默认值并不稳定（仓库的「默认创建为草稿」设置、或 `gh` 自身的行为都会影响它）。
+      # 发布流程的产物该是公开的，所以写死，不再依赖默认。
+      #
       # 幂等：Release 已存在就只打印提示，交给人工维护。
       - name: 建 GitHub Release（发布说明取自 CHANGELOG）
         if: github.ref_type == 'tag'
@@ -88,21 +106,31 @@ jobs:
             echo "CHANGELOG 里没有 $VERSION 的段落"
           fi
 
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME 已存在，跳过创建"
+          # `--draft` 让 view 也能看到草稿：只看已发布的会漏掉上次运行留下的草稿，
+          # 于是这里会以为「不存在」而再去 create 一次并失败。
+          NOTES=()
+          if [ -s release-notes.md ]; then NOTES=(--notes-file release-notes.md); fi
+          if gh release view "$GITHUB_REF_NAME" --draft >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME 已存在，只更新说明与公开状态"
+            gh release edit "$GITHUB_REF_NAME" --draft=false "${NOTES[@]}"
           elif [ -s release-notes.md ]; then
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+            gh release create "$GITHUB_REF_NAME" --draft=false --title "$GITHUB_REF_NAME" --notes-file release-notes.md
           else
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+            gh release create "$GITHUB_REF_NAME" --draft=false --title "$GITHUB_REF_NAME" --generate-notes
           fi
 
       # 把刚发布到 npm 的那个 tarball 附到 Release 上：registry 与 Release 页
       # 指向同一个产物（字节一致），下载与校验都不用再去 registry 找。
-      - name: 附上 npm tarball
+      #
+      # 从 registry 取、而不是就地 `npm pack`：两者本该一致，但 `npm pack` 会带上
+      # 工作区的 .npmignore/files 解析差异，而这里要的是「registry 上那一个的副本」——
+      # 从 registry 下载就天然保证了这一点。
+      - name: 附上 npm tarball（取自 registry）
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          npm pack
+          VERSION="$(node -p "require('./package.json').version")"
+          npm pack "dsh-custom-css@$VERSION"
           gh release upload "$GITHUB_REF_NAME" dsh-custom-css-*.tgz --clobber
