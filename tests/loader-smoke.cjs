@@ -3170,6 +3170,34 @@ async function main() {
     );
   }
 
+  // --- the row does not overflow a narrow dialog ----------------------------
+  // Measured before this: at a 420px viewport the row carried 291px of horizontal overflow,
+  // essentially all of it from `.dshCc_head` — a fixed-size title beside a row of labelled
+  // buttons that had `flex:none`, so nothing could give. The row pushed out past the dialog
+  // instead. (The file bar was only 37px of it, and the breakpoints further up the sheet show
+  // narrow widths were designed for; the head had simply never joined in.)
+  //
+  // Two things are load-bearing and neither works alone: `flex-wrap` on the head moves the
+  // actions to their own line, and giving up `flex:none` for `min-width: 0` on the actions is
+  // what actually lets that line be narrower than the buttons. With `flex:none` and no
+  // `min-width`, wrapping the children changed the outer width not at all — measured, 256px of
+  // overflow remained.
+  {
+    const sheet = rowSheets[0].textContent;
+    assert.ok(
+      sheet.includes('.dshCc_head{align-items:center;justify-content:space-between;gap:12px;display:flex;flex-wrap:wrap}'),
+      'the head wraps rather than pushing the row past the dialog',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_actions{align-items:center;gap:8px;display:flex;flex-wrap:wrap;min-width:0}'),
+      'and the action row can be narrower than its buttons, which is what makes wrapping help',
+    );
+    assert.ok(
+      !sheet.includes('.dshCc_actions{align-items:center;gap:8px;display:flex;flex:none}'),
+      'the unshrinkable action row cannot come back',
+    );
+  }
+
   // --- menu cells keep DSH's menu metrics ----------------------------------
   // Taken from `Menu.module.css` (`.item` 34px / `6px 8px` / `gap: 6px` / 13px over 20px,
   // `.check` in label-primary, `.danger:hover` on the danger hover fill). Ours used to be
