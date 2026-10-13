@@ -2787,6 +2787,50 @@ async function main() {
     );
   }
 
+  // --- control heights come from DSH's two button steps ---------------------
+  // DSH's Button ships exactly two heights: 36px (14px text, `0 14px`) and 28px (12px text,
+  // `0 10px`). A sweep for invented sizes found two controls that were neither:
+  //
+  //   · `.dshCc_conflictBtn` at 22px — below every step the app ships, i.e. a button that is
+  //     merely harder to hit, in a notice the user has to act on;
+  //   · `.dshCc_pickInsert` at 30px with 14px text — between the steps and matching neither,
+  //     sitting in the same row as secondary buttons at 28px.
+  //
+  // The allow-list below is the full set of heights this sheet may declare for something that
+  // is sized like a control. Decoration is not in scope and is skipped by selector.
+  {
+    const sheet = rowSheets[0].textContent;
+    const CONTROL_STEPS = new Set(['28px', '34px', '36px']);
+    // Rows that are sized, not controls: the editor's drag-resizable default, and the two
+    // menus' scroll ceilings.
+    const SKIP = /dshCc_editorWrap|dshCc_suggest|dshCc_menu\b|dshCc_selectMenu|dshCc_panel\b/;
+    const offenders = [];
+    for (const rule of sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = rule[1].trim().split('\n').pop().trim();
+      if (selector.startsWith('@') || SKIP.test(selector)) continue;
+      for (const match of rule[2].matchAll(/(?:^|;)(?:min-)?height:(\d+px)/g)) {
+        if (CONTROL_STEPS.has(match[1])) continue;
+        offenders.push(selector + ' → ' + match[1]);
+      }
+    }
+    // 16/17/18/20/22/26/10px all legitimately appear as line heights and icon or dot sizes,
+    // so the assertion names the two that are controls rather than banning every small number.
+    const controlOffenders = offenders.filter(entry => /conflictBtn|pickInsert|dshCc_btn|dshCc_trigger|dshCc_select\b|dshCc_findBtn|dshCc_findField|dshCc_pickBarBtn/.test(entry));
+    assert.deepStrictEqual(
+      controlOffenders, [],
+      'controls are sized on DSH\'s button ladder — off-step: ' + JSON.stringify(controlOffenders),
+    );
+    assert.ok(
+      sheet.includes('.dshCc_conflictBtn{appearance:none;flex:none;height:28px;padding:0 10px;'),
+      'the conflict notice\'s buttons are the smallest DSH step rather than 22px',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_pickInsert{appearance:none;margin-left:auto;height:28px;padding:0 10px;')
+        && sheet.includes('background:var(--dsw-alias-button-primary-fill)'),
+      'and the picker\'s primary action is the same 28px step as the buttons beside it',
+    );
+  }
+
   // --- every corner in the sheet is a ladder step or a capsule --------------
   // Generalised from a sweep that found five literal radii: 8px and 4px (which happened to
   // equal `radius-sm` and `radius-xs`, so nothing looked wrong — they would simply have
