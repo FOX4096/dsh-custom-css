@@ -247,17 +247,25 @@ function localToday() {
 const today = localToday()
 const passing = passed.map((r) => r.version)
 const realMachine = contract.runtimeVerified ?? []
+// knownGood 是**累积**的，不是「本次测过的那些」。
+//
+// 第一版把它整个覆盖成 passing，于是在样本之外的版本会从记录里掉出去 —— 实测：
+// 它一度只剩 8 个版本，连 README 散文里一直写着的 0.0.1-rc.5 都不在里面了。
+// 契约断言有个性质：某个版本通过过一次就是通过过，不会因为后来出了新版本而失效。
+// 所以这里取并集，`probe` 只记录**本次**实际断言过的（那是「这次的证据」）。
+const knownGood = [...new Set([...(contract.knownGood ?? []), ...passing])].sort(compareVersions)
 const probeOnly = passing.filter((v) => !realMachine.includes(v))
 
 const nextContract = {
   ...contract,
   lastChecked: today,
   lastCheckedNewest: newest,
-  knownGood: passing,
+  knownGood,
   probe: probeOnly,
   notes: [
     ...(contract.notes ?? []).filter((n) => !n.startsWith('上次自动核对')),
-    `上次自动核对 ${today}：最新已发布版本 ${newest}，本次断言 ${passing.length} 个版本全部通过（由 tests/update-compat.mjs 写入）。`,
+    `上次自动核对 ${today}：最新已发布版本 ${newest}，本次断言 ${passing.length} 个版本全部通过`
+      + `（由 tests/update-compat.mjs 写入）。knownGood 是累积的：某个版本通过过一次即保留。`,
   ],
 }
 writeFileSync(contractPath, `${JSON.stringify(nextContract, null, 2)}\n`, 'utf8')
@@ -272,8 +280,17 @@ const notes = contract.runtimeVerifiedNotes ?? {}
 const realRows = realMachine
   .filter((v) => passing.includes(v))
   .map((v) => `| \`${v}\` | ${notes[v] ?? '真机运行（本仓库开发环境）'} | 通过 |`)
-const probeLine = probeOnly.length > 0
-  ? `| ${probeOnly.map((v) => `\`${v}\``).join(' / ')} | 接口契约断言（\`npm run compat\` 解包该版本的 settings 包，核对槽位与 id） | 通过 |`
+// 契约断言那一行：一行里塞 31 个版本没人读得下去（全量跑一次之后就是这样）。
+// 只列首尾并给出总数，完整清单留在 compat.json 的 knownGood —— 那里是权威、
+// 也是机器读的地方；README 这一行是给人看的，要能一眼读完。
+//
+// 30 个以内就全列：早期版本少的时候整列是有用的（能看出具体覆盖了哪几个）。
+const PROBE_INLINE_LIMIT = 12
+const probeText = knownGood.length <= PROBE_INLINE_LIMIT
+  ? knownGood.map((v) => `\`${v}\``).join(' / ')
+  : `\`${knownGood[0]}\` ~ \`${knownGood[knownGood.length - 1]}\`（共 ${knownGood.length} 个）`
+const probeLine = knownGood.length > 0
+  ? `| ${probeText} | 接口契约断言（\`npm run compat\` 解包该版本的 settings 包，核对槽位与 id） | 通过 |`
   : null
 const table = [
   '| DSH 版本 | 验证方式 | 结论 |',
@@ -298,18 +315,31 @@ const realSorted = [...realMachine].sort(compareVersions)
 const realRange = realSorted.length > 0
   ? `\`${realSorted[0]}\` ~ \`${realSorted[realSorted.length - 1]}\``
   : '（无）'
+// 断言覆盖的范围：用**累积**的 knownGood，而不是本次样本。
+//
+// 徽章原先只写「真机验证过的那两个版本」，看起来像只支持 0.1.2 ~ 0.1.5 —— 而实际上
+// 大部分版本是自动化契约断言跑过的（0.0.1-rc.1 到 0.2.1-alpha.2 都在其中）。
+// 那才是这个徽章该传达的信息。
+const assertedSorted = knownGood
+const assertedRange = assertedSorted.length > 0
+  ? `\`${assertedSorted[0]}\` ~ \`${assertedSorted[assertedSorted.length - 1]}\``
+  : '（无）'
+const assertedShort = assertedSorted.length > 0
+  ? `${assertedSorted[0]} ~ ${assertedSorted[assertedSorted.length - 1]}`
+  : 'unknown'
 // 静态徽章的语法里 `-` 是分段符，正文里的连字符必须写成 `--`；`_` 表示空格。
 // 第一版直接写了 `0.1.5-rc.1_%7E_...`，shields.io 返回 404（实测），
 // 而 `--` 形式的 `0.1.2--0.1.5` 实测渲染为 `0.1.2-0.1.5`。
-const badgeRange = realSorted.length > 0
-  ? `${realSorted[0].replace(/-/g, '--')}_${realSorted[realSorted.length - 1].replace(/-/g, '--')}`
+const badgeRange = assertedSorted.length > 0
+  ? `${assertedSorted[0].replace(/-/g, '--')}_${assertedSorted[assertedSorted.length - 1].replace(/-/g, '--')}`
   : 'unknown'
 const badge = `<a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions">`
-  + `<img alt="支持的 DSH 版本：${realSorted.join(' 与 ')} 已真机验证，接口契约断言覆盖到 ${newest}" `
-  + `src="https://img.shields.io/badge/DSH-${badgeRange}_%28runtime_verified%29-4d6bfe"></a>`
-const lineCompat = `- 兼容：DSH ${realRange} 已真机验证，接口契约断言覆盖到 \`${newest}\`；`
-  + '`npm run compat` 可复跑（见「兼容性」）'
-const linePrereq = `**前置**：DSH ${realRange}（**已真机验证**；接口契约断言覆盖到 \`${newest}\`，见「兼容性」），`
+  + `<img alt="支持的 DSH 版本：${assertedShort}（接口契约断言，${assertedSorted.length} 个版本）；`
+  + `其中 ${realSorted.join(' 与 ')} 已真机验证" `
+  + `src="https://img.shields.io/badge/DSH-${badgeRange}_%28asserted%29-4d6bfe"></a>`
+const lineCompat = `- 兼容：DSH ${realRange} 已真机验证；接口契约断言覆盖 ${assertedRange}`
+  + `（共 ${assertedSorted.length} 个版本）；\`npm run compat\` 可复跑（见「兼容性」）`
+const linePrereq = `**前置**：DSH ${realRange}（**已真机验证**；接口契约断言覆盖 ${assertedRange}，见「兼容性」），`
   + 'Node.js ≥ 20、pnpm ≥ 10。'
 
 /**
@@ -416,4 +446,7 @@ if (steps !== 1) {
 }
 writeFileSync(readmePath, rendered, 'utf8')
 
-console.log(`\n✓ 已写回：compat.json（knownGood ${passing.length} 个、lastChecked ${today}）与 README 的验证矩阵`)
+// 报累积数而不是本次通过数：这行日志原先写 `${passing.length}`，于是全量跑完写入了 31 个，
+// 它却报「knownGood 8 个」（那是本次样本的数目）—— 一个会让人误判写入结果的日志，
+// 比没有日志更糟。
+console.log(`\n✓ 已写回：compat.json（knownGood 累积 ${knownGood.length} 个、本次断言 ${passing.length} 个、lastChecked ${today}）与 README 的验证矩阵`)
