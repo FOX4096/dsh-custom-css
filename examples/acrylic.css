@@ -38,15 +38,18 @@ body {
   --dsh-acrylic-tone-b: var(--dsw-static-green-400);
   --dsh-acrylic-tone-c: var(--dsw-static-amber-400);
 
-  /* 玻璃的不透明度：**两档，按"面积"分** ——
-   * 壳（shell）铺满整个视口，浓度高了壁纸就看不见了；
-   * 而输入卡片、菜单这类小面积面板，浓度低了字会糊在背景上。
+  /* 玻璃的不透明度：**按面积分档** —— 面积越大，浓度必须越低。
    *
-   * 曾经还有第三档 "--dsh-acrylic-pane-tint" 给侧栏/右栏那类整列容器用。
-   * 现在它们**完全透明**（把底交给壳那一层）—— 因为一列自画半透明白就等于在壳的玻璃上
-   * 又盖一张白纸，右侧的壁纸颜色会被压到几乎看不见。档位少了，配比也更好懂。 */
-  --dsh-acrylic-shell-tint: 30%;
-  --dsh-acrylic-tint: 72%;
+   * 这条规律是反复调出来的：白玻璃叠在浅色壁纸上，浓度高了**渲染出来就是白的**，
+   * 看起来"根本没做玻璃"（用户反馈过好几次）。所以：
+   *   shell  铺满整个视口 → 必须最淡（0.18），否则整屏一片白
+   *   side   侧栏/右栏一整列 → 0.34（比壳略实，仍透得出壁纸）
+   *   panel  输入卡片、菜单 → 0.62（面积小，要保住文字可读性）
+   *   chip   按钮、模式选择这类小控件 → 0.45（它们本来就该"浮"在玻璃上） */
+  --dsh-acrylic-shell-tint: 18%;
+  --dsh-acrylic-side-tint: 34%;
+  --dsh-acrylic-panel-tint: 62%;
+  --dsh-acrylic-chip-tint: 45%;
 
   /* 模糊强度：DSH 自己的菜单用 blur(40px) saturate(150%)，这里照它的配方 */
   --dsh-acrylic-blur: 40px;
@@ -188,11 +191,11 @@ body::after {
 /* ── §3  侧栏 ────────────────────────────────────────────────────────────
  * 侧栏背后有会话列表，是"有内容可模糊"的地方 —— 玻璃在这里最有价值。
  *
- * ⚠ 浓度**刻意比面板低**（用 --dsh-acrylic-shell-tint 那一档，而不是面板的 72%）：
- * 第一版用了面板档，结果侧栏是一块几乎不透明的白，用户反馈"侧栏没做亚克力"——
+ * ⚠ 浓度用 side 那一档（0.34），**刻意远低于面板档**：
+ * 第一版用了面板档（0.72），结果侧栏是一块几乎不透明的白，用户反馈"侧栏没做亚克力"——
  * 玻璃是加上了，但浓到看不出是玻璃。侧栏只有 280px 宽，透一点不会影响读它自己的文字。 */
 [class*="_sidebarCol"] {
-  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 56%, transparent) !important;
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) var(--dsh-acrylic-side-tint), transparent) !important;
   backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
   /* 右侧一条细描边：让侧栏与主区之间有"一片玻璃的边缘" */
   border-right: 0.5px solid var(--dsw-alias-border-l2);
@@ -224,7 +227,7 @@ body::after {
 /* ── §4  输入卡片：最重要的一块玻璃 ──────────────────────────────────────
  * 它背后是会话内容（会滚动），所以模糊在这里最看得出来。 */
 [data-composer-card="true"] {
-  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-tint), transparent) !important;
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-panel-tint), transparent) !important;
   backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
   border: 0.5px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-xl);
@@ -462,7 +465,42 @@ blockquote {
   100% { background-position: -100% 0; }
 }
 
-/* ── §11  降级：没有模糊也要好看 ────────────────────────────────────────
+/* ── §11  控件与小表面：让它们也"浮"在玻璃上 ─────────────────────────────
+ * 这一节是**补漏补出来的**。做法：写脚本把界面上每个"成块且有背景"的元素量一遍
+ * （面积 ≥100×24、背景不透明、且没有 backdrop-filter），一次列出全部漏网的 ——
+ * 因为逐个拿眼睛找会漏，而用户已经因此反馈过三次（设置顶部块、模式选择块、侧栏按钮）。
+ *
+ * 量出来的漏网名单（全部是 DSH 自己的控件，实测都是纯色）：
+ *   _8HJdBW_themeCube 273×84  设置里"外观"那三个方块（浅色/深色/跟随系统）
+ *   oY77xG_selector   138×36  模式选择（工作区内修改 / 只读 …）
+ *   T1PP_q_selector   110×36  同上，另一处
+ *   VOzbGW_navCell    164×40  设置左侧的导航单元
+ *   hHd-Xa_newSession 252×38  侧栏"新会话"按钮
+ *   geFEbW_entry / zjup-W_entry  对话框里的入口卡片
+ *   _tabHost_6nhg2_162 861×938 右栏整列；_tab_6nhg2_134 右栏标签
+ *
+ * 选择器**刻意用完整的构建哈希类名**。这违反示例文件第 2 条原则，但这里是有意的取舍：
+ * 这些是"具体某个控件"，没有 data-* 钩子可用（实测过），而 `[class*="_cube"]` 这类
+ * 模式会误伤同名片段。代价是 DSH 换版本后它们会失效 —— 但失效是**温和**的：
+ * 只是这些控件回到原本的纯色，不会坏。examples/selectors.mjs 可以重新核对名单。 */
+:is([class*="_themeCube"], [class*="_selector"], [class*="_navCell"],
+    [class*="_newSession"], [class*="_entry"], [class*="_tabHost"], [class*="_tab_6nhg2"]) {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-chip-tint), transparent) !important;
+  backdrop-filter: blur(calc(var(--dsh-acrylic-blur) * 0.6)) saturate(var(--dsh-acrylic-saturate));
+}
+
+/* 右栏整列的容器（861×938）：它是"一整列"，浓了就把壁纸盖住，所以按 side 那一档 */
+[class*="_tabHost"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-side-tint), transparent) !important;
+}
+
+/* 侧栏与顶栏里的文字/图标按钮：这些控件面积小，给一点点底就够，别做成白块 */
+[class*="_newSession"] {
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 55%, transparent);
+}
+
+/* ── §12  降级：没有模糊也要好看 ────────────────────────────────────────
  * backdrop-filter 不可用时（老引擎、或某些远程桌面环境），
  * 把玻璃面换成更实的令牌底色 —— 观感从"磨砂"变成"纯色卡片"，不是坏掉。 */
 @supports not (backdrop-filter: blur(1px)) {
