@@ -33,6 +33,7 @@
   "files": [
     "lib/**/*.js",
     "tests/**",
+    "docs/**/*.md",
     "assets/icon.svg",
     "cordis.patch.yml",
     "compat.json",
