@@ -26,9 +26,9 @@ jobs:
       contents: write # 发布成功后要用同一个 tag 建 Release 并上传附件
       id-token: write # OIDC 凭据：受信发布必需，替代 NPM_TOKEN
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'

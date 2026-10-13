@@ -18,9 +18,9 @@ jobs:
         # plugin 支持 Node ≥ 20（DSH 自身的要求）
         node: ['20', '22']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
 
@@ -36,6 +36,13 @@ jobs:
 
       - name: 浏览器半冒烟测试（含校验器回归）
         run: node tests/loader-smoke.cjs
+
+      # 巡检脚本本身只报告、不改退出码（本地跑一次不该让 shell 红），所以门禁靠 --enforce。
+      # 「一个只打印的输出在流水线里等于不存在」—— 这一条是给它加开关的理由。
+      - name: 令牌与可访问名巡检
+        run: |
+          npm run audit
+          node tests/audit-accessible-names.mjs --enforce
 
       # 换代门禁：断言我们依赖的平台契约（槽位 settings.general.item + dsh.client.inject
       # 的两个 id）在目标 DSH 版本里仍然存在。需要网络访问 npm registry（要拉各版本的包），
