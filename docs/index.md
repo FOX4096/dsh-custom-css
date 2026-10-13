@@ -23,7 +23,8 @@
 | [规则面板](./rule-panel.md) | 点选择器展开的那块：属性字典 112 条、值写错了会怎样、声明模板 |
 | [格式校验](./validation.md) | 状态行那行红字怎么读、变量体检在查什么 |
 | [控件](./controls.md) | 表头那几个按钮与菜单、窄窗口下谁先让位、强调显示 |
-| [`examples/showcase.css`](../examples/showcase.css) | 可直接导入的示例皮肤（只用设计变量） |
+| [`examples/acrylic.css`](../examples/acrylic.css) | 可直接导入的**亚克力皮肤**：渐变壁纸 + 玻璃面板 + 背景模糊 |
+| [`examples/showcase.css`](../examples/showcase.css) | 60 行的最小示例（想学怎么写就看它） |
 
 ## 我想改这个插件
 

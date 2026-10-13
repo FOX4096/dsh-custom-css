@@ -91,7 +91,9 @@ dsh plugin --profile web add dsh-custom-css
 | **排查问题** | [已知坑与已知限制](./docs/known-issues.md) · [兼容性](./docs/compat.md) · [host 侧文件接口](./docs/api-host.md) |
 | **等新功能** | [预览块（规划中）](./docs/preview.md) |
 
-另有可直接导入的示例皮肤：[`examples/showcase.css`](./examples/showcase.css)。
+另有可直接导入的示例：[`examples/acrylic.css`](./examples/acrylic.css) —— 完整的亚克力皮肤（渐变壁纸 + 玻璃面板 + 背景模糊）；
+想学怎么写就看 [`examples/showcase.css`](./examples/showcase.css)（60 行的最小示例）。
+两者都由 [`examples/README.md`](./examples/README.md) 导览。
 
 ## 兼容性
 
@@ -132,7 +134,7 @@ dsh plugin --profile web add dsh-custom-css
 
 - 想改代码：[CONTRIBUTING.md](./CONTRIBUTING.md)（本地跑起来、硬约束、发版流程）
 - 想知道内部怎么转：[开发](./docs/development.md) · [测试与巡检](./docs/testing.md)
-- 想直接看效果：[`examples/showcase.css`](./examples/showcase.css)
+- 想直接看效果：[`examples/acrylic.css`](./examples/acrylic.css)（亚克力皮肤） · [`examples/showcase.css`](./examples/showcase.css)（最小示例）
 - 安全问题：见 [SECURITY.md](./SECURITY.md) 的私密渠道
 
 改动记录见 [CHANGELOG.md](./CHANGELOG.md)。

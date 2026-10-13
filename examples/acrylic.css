@@ -1,0 +1,435 @@
+/* dsh-custom-css 示例皮肤 —— 亚克力（Acrylic）
+ * ══════════════════════════════════════════════════════════════════════════
+ * 怎么用：设置 → 通用 → 自定义 CSS → 「导入」选这个文件。
+ *
+ * 它做什么：给 DSH 铺一层会缓慢漂移的渐变色壁纸，再把**主要表面**做成半透明的
+ * 亚克力材质 —— 半透明底 + 背景模糊 + 0.5px 细描边 + 顶部一道极淡高光。
+ *
+ * 三条与小说法不同的地方，都是实测逼出来的：
+ *
+ *   1) **壁纸必须自己造。** DSH 的 body 与主要容器都是纯白（#fff），消息区没有气泡底色
+ *      —— 也就是说"毛玻璃"原本没有可模糊的东西，模糊了也是白付绘制成本。
+ *      所以先用 body::before 铺一层渐变，玻璃才有意义。
+ *   2) **玻璃面加在"拥有底色的那个元素"上**，不是给祖先加。给祖先加会形成 backdrop root，
+ *      嵌套菜单与 fixed 浮层会跟着受影响（DSH 自己的注释也强调这点）。
+ *      实测层级：frame(grid, 纯白) ⊃ sidebarCol(底色) / centerCol(透明) / rightbarCol /
+ *      overlayLayer(透明) —— 所以大玻璃做在 **frame** 上，而 centerCol 是透明的、
+ *      不能拿它当玻璃面（第一版就是把 frame 设成透明，结果中间直接露出壁纸）。
+ *   3) **覆盖内置必须 !important**（同特异性时谁后插入谁赢，插入时机不受控）；
+ *      而"新增"的属性一律不写。下面每条 !important 都紧跟着一句说明。
+ *
+ * 选择器只用 `data-*` 钩子（DSH 自己也在用它们做查询），**不用构建哈希类名** ——
+ * 那些名字随版本变，写进样式表下次升级就失效。少数几处用 `[class*="_xxx"]` 模式，
+ * 它们对哈希前缀不敏感（`_frame` 匹配的是 `pI_x6G_frame` 的后半段）。
+ * 命中情况由 examples/selectors.mjs 核对，报告见 examples/selectors.report.md。
+ *
+ * 想调浓淡/模糊/圆角：只改下面 §0 的六个 --dsh-acrylic-* 变量。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── §0  参数：改这里就够了 ────────────────────────────────────────────────
+ * ⚠ 这些**必须定义在 body 上，不能放 :root** —— 实测踩到的坑：
+ *   DSH 把全部 --dsw-* 令牌定义在 **body** 上（不是 :root），所以在 `:root` 里写
+ *   `--x: var(--dsw-static-blue-400)` 会解析成空值，接着**整条依赖它的声明被静默丢弃**
+ *   （我的壁纸就是这么消失的，浏览器不报任何错）。
+ *   纯字面量的变量放哪儿都行，但只要引用了 DSH 令牌，就必须落在 body 上。 */
+body {
+  /* 壁纸的三个色相（用 DSH 的静态色令牌，所以深浅主题都成立） */
+  --dsh-acrylic-tone-a: var(--dsw-static-blue-400);
+  --dsh-acrylic-tone-b: var(--dsw-static-green-400);
+  --dsh-acrylic-tone-c: var(--dsw-static-amber-400);
+
+  /* 玻璃的不透明度：三档，按"面积"分 ——
+   * 壳（shell）铺满整个视口、窗格（pane）铺满一整列，浓度高了壁纸就看不见了；
+   * 而输入卡片、菜单这类小面积面板，浓度低了字会糊在背景上。 */
+  --dsh-acrylic-shell-tint: 34%;
+  --dsh-acrylic-pane-tint: 46%;
+  --dsh-acrylic-tint: 72%;
+
+  /* 模糊强度：DSH 自己的菜单用 blur(40px) saturate(150%)，这里照它的配方 */
+  --dsh-acrylic-blur: 40px;
+  --dsh-acrylic-saturate: 150%;
+
+  /* 壁纸漂移周期：越长越省电，48s 足够让人察觉不到"在动"但看久了不腻 */
+  --dsh-acrylic-drift: 48s;
+
+  /* 玻璃面圆角（跟着 DSH 的阶梯走） */
+  --dsh-acrylic-radius: var(--dsw-radius-lg);
+
+  /* 把 body 自己的纯白底交出去，壁纸才有机会露出来（这是壁纸可见的前提） */
+  background-color: transparent;
+}
+
+/* 让"色相"可过渡：不声明 @property 的话，关键帧之间会硬跳。
+   （校验器认得这个块 —— 已实测，不会把样式表标红。） */
+@property --dsh-acrylic-hue-a {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+@property --dsh-acrylic-hue-b {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+/* ── §1  壁纸：一切玻璃的前提 ────────────────────────────────────────────
+ * 用 fixed 伪元素而不是给 body 加背景：这样各面板的 backdrop-filter 才有东西可模糊，
+ * 也不会被面板自己的半透明底"吃掉"。z-index:-1 让它待在所有内容后面。
+ *
+ * ⚠ 这里踩过一个**几何坑**，注释下来免得再犯：第一版写 `inset: -20%`（想给漂移动画留余量），
+ * 于是伪元素比视口大 40%。而 `radial-gradient(82% 50% at 82% 18%)` 的右边缘落在
+ * **元素自身宽度**的 123% 处 —— 元素宽 2679，右边缘就在 3295，而视口只到 1914。
+ * 结果右侧一大片完全没有渐变覆盖，只剩 `transparent`，看起来像"壁纸只铺了左半边"。
+ * 所以：**渐变盒必须与视口同尺寸**，色斑用百分比定位在盒内展开即可。 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    /* 兜底底色：一条缓的对角渐变，保证任何角落都不会是纯白 */
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 18%, transparent) 0%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-b) 13%, transparent) 46%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-c) 18%, transparent) 100%),
+    /* 色相来源：四团光斑（右下也放一团，避免右半边发白），位置错开避免对称感 */
+    radial-gradient(60% 70% at 16% 24%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 62%, transparent) 0%,
+      transparent 100%),
+    radial-gradient(62% 72% at 86% 14%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-b) 52%, transparent) 0%,
+      transparent 100%),
+    radial-gradient(66% 76% at 78% 88%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-c) 46%, transparent) 0%,
+      transparent 100%),
+    radial-gradient(70% 70% at 6% 92%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 38%, transparent) 0%,
+      transparent 100%);
+  /* 主题色本身很淡，再压一层 → 壁纸是"底色上的光斑"，不抢内容 */
+  opacity: 0.55;
+  filter: saturate(1.05);
+}
+
+/* 缓慢漂移：一个关键帧动画，同时驱动两个自定义属性（合成层，不触发布局） */
+@keyframes dsh-acrylic-drift {
+  0% { --dsh-acrylic-hue-a: 0; --dsh-acrylic-hue-b: 0; }
+  50% { --dsh-acrylic-hue-a: 26deg; --dsh-acrylic-hue-b: -22deg; }
+  100% { --dsh-acrylic-hue-a: 0; --dsh-acrylic-hue-b: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body::before {
+    animation: dsh-acrylic-drift var(--dsh-acrylic-drift) ease-in-out infinite;
+  }
+}
+
+/* 壁纸是浅色的，所以深色主题下要压暗：用 DSH 的遮罩令牌叠一层，而不是写死黑色。
+   --dsw-alias-bg-mask-1 在深色主题里会自己变，这里只是"借它当暗化层"。 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--dsw-alias-bg-mask-1);
+  opacity: 0.5;
+}
+
+/* ── §2  壳体：整块 frame 变成一块大玻璃 ────────────────────────────────
+ * 实测的层级（386 宽窗口）：frame(grid, 1914×938, 纯白) ⊃ sidebarCol / centerCol /
+ * rightbarCol / overlayLayer(1914×938, 透明) / handle(8px)。
+ * 也就是说：**只有 frame 与 sidebarCol 拥有底色**，centerCol 是透明的。
+ * 所以玻璃要做在 frame 上 —— 把 frame 设成透明是错的，那样中间会直接露出壁纸、
+ * 一点玻璃都没有（第一版就是这么写错的）。 */
+[class*="_frame"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-shell-tint), transparent) !important;
+  backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
+}
+
+/* 中列（centerCol）自己透明，玻璃由上面的 frame 提供。
+ *
+ * 但**真正挡住壁纸的是会话区的根元素** —— 实测它是 rgb(255,255,255) 的实心白，
+ * 铺满整个中列（1634×938）。只改 frame 是不够的：那只是往白底上又叠了一层半透明，
+ * 壁纸一点也透不上来（第一版就是漏了这一步：玻璃有了，壁纸不见了）。
+ *
+ * 选择器用 `[data-phase]`：那是会话区根元素**自己的**属性（值随状态在 hero/plain 之间变），
+ * 由它祖先的 `data-slot="main"` 锚定。**不要写 `[class*="_root"]`** ——
+ * `_root` 是个通用的局部类名，实测命中 19 个元素（含多个透明的小控件），一刀切会误伤。
+ * 这也正是文档里那条经验：抓类名要连 `-` 一起抓，`_root` 这种太短的片段不能当身份。 */
+[data-slot="main"] [data-phase] {
+  background: transparent !important;
+}
+
+/* 侧栏内部同理：它的根是实心 rgb(249,250,251)。用 data-slot="sidebar" 锚定，
+   后代组合器会穿过 display:contents 的槽位元素。 */
+[data-slot="sidebar"] [class*="_root"] {
+  background: transparent !important;
+}
+
+/* ── §3  侧栏与右栏 ──────────────────────────────────────────────────────
+ * 侧栏背后有会话列表，是"有内容可模糊"的地方 —— 玻璃在这里最有价值。 */
+[class*="_sidebarCol"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) var(--dsh-acrylic-tint), transparent) !important;
+  backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
+  /* 右侧一条细描边：让侧栏与主区之间有"一片玻璃的边缘" */
+  border-right: 0.5px solid var(--dsw-alias-border-l2);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 40%, transparent);
+}
+
+[data-rightbar-col="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) var(--dsh-acrylic-tint), transparent) !important;
+  backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
+  border-left: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* 右栏面板与 dock 窗格：同一套材质。
+ * 浓度用 --dsh-acrylic-pane-tint（比面板淡一档）：它们是**铺满整块**的容器，
+ * 用面板那一档的浓度会把背后的壁纸整块盖掉 —— 实测 72% 时右侧窗格是纯白一片。 */
+[data-sidebar-right-panel],
+[data-dockkit-surface="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-pane-tint), transparent) !important;
+  backdrop-filter: blur(calc(var(--dsh-acrylic-blur) * 0.75)) saturate(var(--dsh-acrylic-saturate));
+}
+
+/* 标签条：更透明，因为它是"玻璃的边" */
+[data-dockkit-strip-chrome="true"],
+[data-dockkit-strip-fill="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 55%, transparent) !important;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+/* ── §4  输入卡片：最重要的一块玻璃 ──────────────────────────────────────
+ * 它背后是会话内容（会滚动），所以模糊在这里最看得出来。 */
+[data-composer-card="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-tint), transparent) !important;
+  backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-xl);
+  /* 玻璃的两条"光"：顶部一道极窄高光 + 一层柔和投影，缺了就像塑料不像玻璃 */
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 70%, transparent),
+    var(--dsw-elevation-soft);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
+}
+
+/* 聚焦时把投影换成品牌色的淡光晕（不改描边颜色，避免与 DSH 的聚焦环打架） */
+[data-composer-card="true"]:focus-within {
+  border-color: var(--dsw-alias-border-l3);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 70%, transparent),
+    var(--dsw-elevation-soft),
+    0 0 0 4px color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+}
+
+/* 输入区自身透明（卡片已经是玻璃了，里面再来一层会糊成一团） */
+[data-composer-input="true"],
+[data-input-scroll="true"],
+[data-composer-seat] {
+  background: transparent !important;
+}
+
+/* 附件 / 指令那一行：给一点极淡的分隔，不要实线 */
+[data-composer-seat] > * + * {
+  border-top-color: var(--dsw-alias-border-l1) !important;
+}
+
+/* ── §5  浮层：对话框 / 菜单 / 面板 ──────────────────────────────────────
+ * 这些是最"该"是玻璃的东西 —— 它们本来就浮在内容之上。 */
+[class*="_dialog"],
+[class*="_menu"],
+[role="dialog"],
+[role="menu"],
+[role="listbox"],
+[class*="_popover"] {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 78%, transparent) !important;
+  backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsh-acrylic-radius);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 65%, transparent),
+    var(--dsw-elevation-prominent);
+}
+
+/* 遮罩：用轻微模糊代替单纯压暗，浮层与背景的层次更清楚。
+   注意别用 `[data-shell-overlay] + *` —— 实测它的下一个兄弟是侧栏拖拽手柄（8px 宽），
+   拿它当"内容层"是错的对象。::backdrop 才是对话框真正的遮罩层。 */
+::backdrop {
+  backdrop-filter: blur(6px);
+}
+
+/* ── §6  滚动条：细、半透明、悬停才亮 ─────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--dsw-alias-border-l4) 80%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: content-box;
+  background-color: color-mix(in srgb, var(--dsw-alias-border-l4) 80%, transparent);
+  transition: background-color 160ms ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--dsw-alias-label-tertiary);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── §7  选中 / 光标 / 焦点 ─────────────────────────────────────────────── */
+::selection {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 26%, transparent);
+}
+/* 焦点环交还 DSH —— 只补 offset，不重写环本身（重写会与全站不一致） */
+:focus-visible {
+  outline-offset: 2px;
+}
+
+/* ── §8  按钮 / 开关 / 滑块 / 输入框：玻璃质感的小件 ─────────────────── */
+/* 按钮：只在悬停时给"玻璃高光"，静态保持 DSH 原样（否则整屏都在发光） */
+button:hover:not(:disabled),
+[role="button"]:hover:not([aria-disabled="true"]) {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 50%, transparent);
+}
+
+/* 输入框 / 文本域：半透明底 + 细描边，聚焦时加重 */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+textarea,
+select {
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 60%, transparent);
+  border-color: var(--dsw-alias-border-l2);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+textarea:focus,
+select:focus {
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 80%, transparent);
+}
+
+/* 滑块：把轨道做成"一道刻痕" */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dsw-alias-border-l3) 70%, transparent);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-elevation-stroke), 0 1px 3px rgb(0 0 0 / 18%);
+}
+
+/* 会话列表行：悬停是一层玻璃高光，选中是更实的玻璃 */
+[class*="_sessionRow"] {
+  border-radius: var(--dsw-radius-sm);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+[class*="_sessionRow"]:hover {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 45%, transparent);
+}
+
+/* ── §9  内容区：代码 / 表格 / 引用 ───────────────────────────────────── */
+/* 代码块：半透明底 + 细描边，与整体玻璃语言一致；等宽数字更整齐 */
+pre,
+code {
+  font-variant-numeric: tabular-nums;
+  font-variant-ligatures: none;
+}
+pre {
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 55%, transparent) !important;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+}
+:not(pre) > code {
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 45%, transparent);
+  border-radius: var(--dsw-radius-xs);
+  padding: 0.1em 0.35em;
+}
+
+/* 表格：横向分隔线换成极细的、半透明的 */
+table {
+  border-color: var(--dsw-alias-border-l1);
+}
+th,
+td {
+  border-color: color-mix(in srgb, var(--dsw-alias-border-l1) 80%, transparent);
+}
+
+/* 引用块：左侧一条品牌色的淡描边 */
+blockquote {
+  border-left: 2px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 30%, transparent);
+  border-radius: 0 var(--dsw-radius-sm) var(--dsw-radius-sm) 0;
+}
+
+/* 工具气泡 / 工具条：同样的材质，但更淡 */
+[class*="_toolCall"],
+[class*="_toolRow"] {
+  backdrop-filter: blur(calc(var(--dsh-acrylic-blur) * 0.5)) saturate(120%);
+  border-radius: var(--dsw-radius-md);
+}
+
+/* ── §10  骨架屏与空状态 ──────────────────────────────────────────────── */
+/* 骨架块：让它也有玻璃的"半透明"感，而不是实心灰 */
+[class*="_skeleton"],
+[class*="_shimmer"] {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--dsw-alias-bg-skeleton) 70%, transparent) 0%,
+    color-mix(in srgb, var(--dsw-alias-border-l1) 60%, transparent) 50%,
+    color-mix(in srgb, var(--dsw-alias-bg-skeleton) 70%, transparent) 100%
+  ) !important;
+  background-size: 200% 100%;
+  border-radius: var(--dsw-radius-sm);
+}
+@media (prefers-reduced-motion: no-preference) {
+  [class*="_skeleton"],
+  [class*="_shimmer"] {
+    animation: dsh-acrylic-shimmer 1.6s ease-in-out infinite;
+  }
+}
+@keyframes dsh-acrylic-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* ── §11  降级：没有模糊也要好看 ────────────────────────────────────────
+ * backdrop-filter 不可用时（老引擎、或某些远程桌面环境），
+ * 把玻璃面换成更实的令牌底色 —— 观感从"磨砂"变成"纯色卡片"，不是坏掉。 */
+@supports not (backdrop-filter: blur(1px)) {
+  [data-composer-card="true"],
+  [class*="_sidebarCol"],
+  [data-rightbar-col="true"],
+  [data-sidebar-right-panel],
+  [data-dockkit-surface="true"],
+  [class*="_dialog"],
+  [class*="_menu"] {
+    background: var(--dsw-alias-bg-layer-1) !important;
+  }
+  body::before {
+    opacity: 0.28;
+  }
+}
+
+/* 滚到底部之外都不动画：这是"省电"的那一半（另一半是漂移周期） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  body::before {
+    animation: none;
+  }
+}

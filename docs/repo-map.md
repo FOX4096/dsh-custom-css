@@ -34,8 +34,9 @@ dsh-custom-css/
 │   ├── ISSUE_TEMPLATE/
 │   └── pull_request_template.md
 ├── examples/
-│   ├── showcase.css        # 可直接导入的示例样式表（只用设计变量，不选哈希类名）
-│   └── README.md           # 用它 + 写自定义样式的三条经验
+│   ├── acrylic.css         # 亚克力皮肤（渐变壁纸 + 玻璃面板 + 背景模糊），导入即用
+│   ├── showcase.css        # 最小示例（只用设计变量，不选哈希类名），用来学怎么写
+│   └── README.md           # 两份示例的导览 + 写自定义样式的经验
 ├── docs/                   # 参考文档（本目录）
 │   ├── index.md            # 文档索引
 │   ├── install.md · getting-started.md
