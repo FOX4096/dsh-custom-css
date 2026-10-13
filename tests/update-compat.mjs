@@ -282,6 +282,61 @@ const table = [
   ...(probeLine === null ? [] : [probeLine]),
 ].join('\n')
 
+/**
+ * README 里三处「支持到哪个 DSH 版本」的说法，以及那颗 DSH 徽章。
+ *
+ * 这三处原本写死成 `0.1.2-rc.1 ~ 0.1.5-rc.1`，而矩阵早就扩到 0.2.1-alpha.2 了 ——
+ * 换而言之**读者看到的是过期了三个月的支持范围**（本机跑的 0.2.0-rc.2 都不在里面）。
+ * 写死的东西会腐烂，所以它们和矩阵一起由这里维护。
+ *
+ * 措辞刻意区分两档证据，因为它们的强度不同：真机跑过的是「runtime verified」，
+ * 只做过接口契约断言的是「contract tested」——把后者说成前者是虚假宣传。
+ */
+// 真机验证过的版本，按版本号升序。`runtimeVerified` 数组本身是「新→旧」的书写顺序，
+// 直接取首尾会得到 `0.1.5 ~ 0.1.2` 这种倒着的范围（第一版就是这么写的）。
+const realSorted = [...realMachine].sort(compareVersions)
+const realRange = realSorted.length > 0
+  ? `\`${realSorted[0]}\` ~ \`${realSorted[realSorted.length - 1]}\``
+  : '（无）'
+// 静态徽章的语法里 `-` 是分段符，正文里的连字符必须写成 `--`；`_` 表示空格。
+// 第一版直接写了 `0.1.5-rc.1_%7E_...`，shields.io 返回 404（实测），
+// 而 `--` 形式的 `0.1.2--0.1.5` 实测渲染为 `0.1.2-0.1.5`。
+const badgeRange = realSorted.length > 0
+  ? `${realSorted[0].replace(/-/g, '--')}_${realSorted[realSorted.length - 1].replace(/-/g, '--')}`
+  : 'unknown'
+const badge = `<a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions">`
+  + `<img alt="支持的 DSH 版本：${realSorted.join(' 与 ')} 已真机验证，接口契约断言覆盖到 ${newest}" `
+  + `src="https://img.shields.io/badge/DSH-${badgeRange}_%28runtime_verified%29-4d6bfe"></a>`
+const lineCompat = `- 兼容：DSH ${realRange} 已真机验证，接口契约断言覆盖到 \`${newest}\`；`
+  + '`npm run compat` 可复跑（见「兼容性」）'
+const linePrereq = `**前置**：DSH ${realRange}（**已真机验证**；接口契约断言覆盖到 \`${newest}\`，见「兼容性」），`
+  + 'Node.js ≥ 20、pnpm ≥ 10。'
+
+/**
+ * 把这三处替换掉。
+ *
+ * 用「行首特征 + 到行尾」的整行替换，而不是替换句子中间那一小段：这三行的后半句各不相同，
+ * 也只差几个字，按小段替换很容易在多行里串味。整行替换的锚点各自唯一。
+ */
+function replaceLines(text, replacements) {
+  const lines = text.split('\n')
+  const seen = new Set()
+  for (let index = 0; index < lines.length; index += 1) {
+    for (const rule of replacements) {
+      if (lines[index].startsWith(rule.startsWith)) {
+        lines[index] = rule.to
+        seen.add(rule.startsWith)
+      }
+    }
+  }
+  return { text: lines.join('\n'), missing: replacements.filter((r) => !seen.has(r.startsWith)) }
+}
+const VERSION_LINES = [
+  { startsWith: '  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh', to: `  ${badge}<br /><br />` },
+  { startsWith: '- 兼容：DSH ', to: lineCompat },
+  { startsWith: '**前置**：DSH ', to: linePrereq },
+]
+
 const readme = readFileSync(readmePath, 'utf8')
 const matrixPattern = /(### 验证矩阵\n\n)(?:\|[^\n]*\n)+(?=\n)/
 if (!matrixPattern.test(readme)) {
@@ -308,7 +363,7 @@ const stamp = `${STAMP_START}（GitHub Actions 每 6 小时检查一次 DSH 是�
  * 错误不会报错、只会让文件慢慢长胖 —— 实测抓到过两次：一次是说明段被重复追加（第一轮之后
  * 锚点不再唯一），一次是每次多留一个空行。两次都不是崩掉的，都是静静长胖的。
  */
-function renderReadme(text) {
+function renderReadme(text, quiet = false) {
   if (!matrixPattern.test(text)) return null
   if (!text.includes(anchor)) return null
   // 删掉本脚本上一次留下的说明行，再插入新的一份：删后插才是幂等的写法
@@ -317,9 +372,20 @@ function renderReadme(text) {
     .filter((line) => !(line.startsWith(STAMP_START) && line.includes(STAMP_END)))
     .join('\n')
   const withMatrix = withoutStamp.replace(matrixPattern, `$1${table}\n`)
+  // 「支持到哪个 DSH 版本」的三处提及，整行替换。
+  //
+  // 锚点找不到时**告警而不是静默跳过**：那说明 README 被改过（措辞变了、那行被挪走），
+  // 而这三处正是读者判断兼容范围的地方。静默不更新等于文档继续过期，而脚本照样打印
+  // 「已写回」—— 那比不写还糟，因为它让人以为已经更新了。
+  const { text: withVersions, missing } = replaceLines(withMatrix, VERSION_LINES)
+  // 只在真正的第一次渲染时告警：不动点自检会再渲染一遍，否则同一句会打印两次。
+  if (missing.length > 0 && !quiet) {
+    console.log(`⚠ README 里有 ${missing.length} 处版本提及没找到锚点，未更新：`)
+    for (const rule of missing) console.log(`    ${rule.startsWith}…`)
+  }
   // 锚点行之后原本是「一个空行 + 段落」，所以先吃掉锚点后面的空行再补回两个 `\n`：
   // 写成不吃掉原有空行的版本，每次运行就多留一个空行（实测 385 → 386 行，每跑一次长一行）。
-  return withMatrix.replace(
+  return withVersions.replace(
     new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\n+'),
     `${anchor}\n\n${stamp}\n\n`,
   )
@@ -339,7 +405,7 @@ if (rendered === null) {
 let settled = rendered
 let steps = 1
 while (steps <= 5) {
-  const next = renderReadme(settled)
+  const next = renderReadme(settled, true)
   if (next === settled) break
   settled = next
   steps += 1

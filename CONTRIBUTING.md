@@ -41,9 +41,11 @@ npm run compat    # 跨版本兼容断言（需要网络：要拉各版本 DSH �
 版本号在 `package.json`，同时更新 `CHANGELOG.md`。发版只需一个 tag：
 
 ```bash
-git tag -a v0.1.4 -m "0.1.4 — …"
+git tag -a vX.Y.Z -m "X.Y.Z — …"
 git push origin main --follow-tags
 ```
+
+（用占位符而不是某个真实版本号：写 `v0.1.4` 这样的例子会让人以为要照着改，而它早就过期了。）
 
 推上去后 `publish.yml` 会跑测试 → 用 **OIDC 受信发布**（带 provenance 签名，不需要任何长期令牌或动态码）→ 自动建 GitHub Release。前置条件只有一条：npmjs.com 上该包的 Settings → Trusted Publisher 已填本仓库与本文件名。
 
