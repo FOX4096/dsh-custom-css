@@ -22,16 +22,16 @@ const source = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8'
  * The module text this suite runs.
  *
  * A few internals are exposed by name through `__probe`: the dropdown placement math, the
- * find bar's scan and its hit markup, the formatter, and the rule-highlight resolver. Each is
- * pure, each decides something a user sees directly, and nothing else about the text changes —
- * the export is additive and the plugin never looks at it. Everything else is asserted through
- * the components, as usual.
+ * find bar's scan and its hit markup, the formatter, the rule-highlight resolver, and the
+ * highlight painter itself. Each decides something a user sees directly, and nothing else
+ * about the text changes — the export is additive and the plugin never looks at it.
+ * Everything else is asserted through the components, as usual.
  */
 const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, liveHighlightBoxes: () => highlightBoxes };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -2901,6 +2901,78 @@ async function main() {
     assert.ok(
       code.includes("window.addEventListener('scroll', repaint, true)"),
       'and the boxes are re-measured on scroll, since position:fixed does not follow the page',
+    );
+  }
+
+  // --- what the highlight painter actually draws ----------------------------
+  // The one piece of this row whose behaviour was only ever verified by eye in a browser —
+  // and it had a bug that only that kind of check could have found (closing the panel emptied
+  // the selector, and the boxes went with it). Driving the painter directly turns "I looked at
+  // it and it seemed right" into something a future change has to keep true.
+  //
+  // The units are the interesting part. `position:fixed` means the box is placed from VIEWPORT
+  // coordinates, so the painter must copy `getBoundingClientRect()` verbatim - not add scroll
+  // offsets, not read `offsetTop`. A box that drifts by the scroll amount looks correct at the
+  // top of the page, which is exactly where a manual check usually happens.
+  {
+    const probe = host.mod.__probe;
+    assert.ok(typeof probe.paintHighlightBoxes === 'function', 'the painter is reachable for testing');
+    assert.ok(typeof probe.clearHighlights === 'function', 'so is the cleanup');
+
+    const elementAt = (rect) => host.document.createElement('div', { rect });
+    const boxes = () => probe.liveHighlightBoxes();
+
+    probe.clearHighlights();
+    assert.strictEqual(boxes().length, 0, 'nothing is painted to start with');
+
+    // ── one match: positioned from the element's own rect ──
+    probe.paintHighlightBoxes([elementAt({ top: 120, left: 40, width: 300, height: 50 })]);
+    assert.strictEqual(boxes().length, 1, 'one element gets one box');
+    assert.strictEqual(boxes()[0].style.top, '120px', 'positioned from the viewport rect, not the document');
+    assert.strictEqual(boxes()[0].style.left, '40px');
+    assert.strictEqual(boxes()[0].style.width, '300px');
+    assert.strictEqual(boxes()[0].style.height, '50px');
+    assert.strictEqual(boxes()[0].dataset.sole, 'true', 'a lone match is marked so it can be outlined harder and left unfilled');
+
+    // ── several matches: one box each, none marked as the only one ──
+    probe.paintHighlightBoxes([
+      elementAt({ top: 10, left: 10, width: 100, height: 20 }),
+      elementAt({ top: 200, left: 30, width: 200, height: 40 }),
+      elementAt({ top: 400, left: 50, width: 300, height: 60 }),
+    ]);
+    assert.strictEqual(boxes().length, 3, 'three elements get three boxes');
+    for (const box of boxes()) {
+      assert.strictEqual(box.dataset.sole, undefined, 'no box claims to be the only match when there are three');
+    }
+    assert.strictEqual(boxes()[1].style.top, '200px', 'each box is placed from its own element');
+
+    // ── shrinking: fewer matches must not leave the old boxes on the page ──
+    probe.paintHighlightBoxes([elementAt({ top: 5, left: 5, width: 5, height: 5 })]);
+    assert.strictEqual(boxes().length, 1, 'a narrower match set takes the extra boxes away');
+    assert.strictEqual(boxes()[0].style.top, '5px', 'and the survivor is re-positioned');
+
+    // ── zero-sized elements are not drawn ──
+    // `display:none` measures 0x0, and a box at the viewport corner is a stray dot that points
+    // at nothing. Measured in the browser: a `button` selector matched 63 elements and drew 61
+    // boxes, and the two it skipped were exactly the hidden ones.
+    probe.paintHighlightBoxes([
+      elementAt({ top: 0, left: 0, width: 0, height: 0 }),
+      elementAt({ top: 60, left: 0, width: 0, height: 30 }),
+      elementAt({ top: 60, left: 0, width: 30, height: 0 }),
+      elementAt({ top: 60, left: 0, width: 30, height: 30 }),
+    ]);
+    assert.strictEqual(boxes().length, 1, 'only the element with a real box is outlined');
+    assert.strictEqual(boxes()[0].style.width, '30px');
+
+    // ── and the cleanup really takes them off the document ──
+    const attached = boxes().length;
+    assert.ok(attached > 0, 'there is something to clean up');
+    probe.clearHighlights();
+    assert.strictEqual(boxes().length, 0, 'cleanup empties the list');
+    assert.strictEqual(
+      host.document.body.children.filter(child => String(child.className).includes('dshCc_hlBox')).length,
+      0,
+      'and removes the nodes from the page rather than only forgetting them',
     );
   }
 
