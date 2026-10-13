@@ -31,7 +31,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, liveHighlightBoxes: () => highlightBoxes };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, liveHighlightBoxes: () => highlightBoxes };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -428,6 +428,17 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
         if (index >= 0) node.children.splice(index, 1);
         return child;
       },
+      // `Node.contains`, which the plugin needs to tell "this matched element is my own chrome"
+      // from "this matched element is page content". Its absence was not a missing convenience:
+      // the plugin filters with `owner.contains(node)`, so an undefined answer read as "no, this
+      // is not mine" for every node, and the filter emptied the result set instead of narrowing
+      // it — which took the pick session down with it.
+      contains(other) {
+        for (let el = other; el !== null && el !== undefined; el = el.parentElement) {
+          if (el === node) return true;
+        }
+        return false;
+      },
       remove() {
         const owner = node.parentElement ?? null;
         const list = owner === null ? styleTags : owner.children;
@@ -486,8 +497,32 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
       // REFUSE a selector (or answer with a count the pool cannot express) says so here.
       // Everything else is answered from the pool by actually matching the selector, so
       // "how many elements does this match" is a real question in this bed.
-      if (typeof dom.probe === 'function') return new Array(dom.probe(selector)).fill(null);
-      return (dom.nodes ?? []).filter(node => matchesSelector(node, selector));
+      if (typeof dom.probe === 'function') {
+        // Real nodes, not `null` placeholders. A browser returns elements, and the plugin now
+        // FILTERS what it gets back — it drops its own chrome from every match set — so a list
+        // of placeholders asked a question the filter could not answer and changed what the
+        // probe-based cases observed. One stand-in element per count keeps the seam's promise
+        // ("the engine answered n") without pretending the answer is empty.
+        const count = dom.probe(selector);
+        return Array.from({ length: count }, (_, index) => ({
+          ...makeElement('div'),
+          standInFor: selector + '#' + index,
+        }));
+      }
+      // The pool, plus whatever has been appended under the body since boot. A real
+      // `querySelectorAll` walks the tree, so elements the plugin appends are findable there —
+      // and "is this element mine?" is a question about exactly those. Searching the pool alone
+      // made that question unanswerable: the plugin's own container was invisible to the stub,
+      // so the code that excludes it looked like it worked while doing nothing.
+      const appended = [];
+      const collect = (node) => {
+        for (const child of node.children ?? []) {
+          appended.push(child);
+          collect(child);
+        }
+      };
+      collect(body);
+      return [...(dom.nodes ?? []), ...appended].filter(node => matchesSelector(node, selector));
     },
     createElement: makeElement,
     getElementById: id => styleTags.find(element => element.id === id) ?? null,
@@ -2985,7 +3020,7 @@ async function main() {
     probe.clearHighlights();
     assert.strictEqual(boxes().length, 0, 'cleanup empties the list');
     assert.strictEqual(
-      host.document.body.children.filter(child => String(child.className).includes('dshCc_hlBox')).length,
+      host.document.querySelector('[data-dshcc-owned]')?.children.filter(child => String(child.className).includes('dshCc_hlBox')).length ?? 0,
       0,
       'and removes the nodes from the page rather than only forgetting them',
     );
@@ -3168,6 +3203,91 @@ async function main() {
       /\.dshCc_menu\{[^}]*width:max-content/.test(sheet),
       'the menu sizes to its content rather than stretching to its container',
     );
+  }
+
+  // --- the plugin's own chrome is never counted as page content -------------
+  // Found in the browser, from one question: with `[class]` in the selector field, the page
+  // answered **336** matches with the highlight off and **653** with it on. The 317 extra were
+  // the plugin's own highlight boxes — `div`s with a class, indistinguishable from page content
+  // to `querySelectorAll`. The count was self-referential, and so was every other count in this
+  // row: the outline's per-rule hit column, the picker's candidate ranking (which decides which
+  // selector wins by uniqueness), and the token sampler.
+  //
+  // The worse half is not a wrong number. Those boxes were siblings of the app's root, and the
+  // picker offers structural paths like `body > div:nth-child(36) > …` — computed from
+  // `siblings.indexOf(node)`. An overlay that shifts that index breaks the selectors its own
+  // plugin hands out.
+  {
+    const probe = host.mod.__probe;
+    const savedNodes = host.dom.nodes;
+    const savedProbe = host.dom.probe;
+    // The page: one element with a class, plus the plugin's own container holding two boxes.
+    host.dom.nodes = [{ selectorSet: new Set(['.page']), childNodes: [], tagName: 'DIV' }];
+    delete host.dom.probe;
+
+    const body = host.document.body;
+    for (const child of [...body.children]) child.remove();
+    const owned = host.document.createElement('div');
+    owned.setAttribute('data-dshcc-owned', '');
+    body.appendChild(owned);
+    const realBox = host.document.createElement('div', { className: 'dshCc_hlBox' });
+    const realPane = host.document.createElement('div', { className: 'dshCc_hlBox' });
+    owned.appendChild(realBox);
+    owned.appendChild(realPane);
+
+    // `resolveSelector` reports what the plugin would act on.
+    const found = probe.resolveSelector('div');
+    assert.ok(
+      found.nodes.every(node => node.getAttribute?.('data-dshcc-owned') === null
+        || node.getAttribute?.('data-dshcc-owned') === undefined),
+      'a match set never contains the plugin\'s own chrome',
+    );
+    assert.ok(
+      !found.nodes.includes(realBox) && !found.nodes.includes(realPane),
+      'and never contains a box it painted',
+    );
+
+    // The count the toggle shows must be re-measured, not read off the resolved selector.
+    //
+    // Measured: with the panel closed the page answered 292 matches for `[class]`; opening the
+    // panel makes it 336, because the panel is 44 more elements with classes — and the toggle
+    // went on showing 292. The page had changed without the selector changing, so a count
+    // computed from the memoised resolution described a state that no longer existed.
+    assert.ok(
+      code.includes('const [highlightCount, setHighlightCount] = React.useState(0)'),
+      'the count is state, so a page that changes under a fixed selector still moves it',
+    );
+    assert.ok(
+      code.includes('setHighlightCount(highlight.invalid === true || highlight.pseudo === true'),
+      'and it is refreshed on every commit rather than only when the selector text changes',
+    );
+    assert.ok(
+      code.includes('highlightCount === 0 ? \'无命中\' : highlightCount + \' 个命中\''),
+      'the toggle renders that count',
+    );
+    assert.ok(
+      !code.includes("highlight.nodes.length + ' 个命中'"),
+      'and does not render a possibly-stale length the resolution happened to carry',
+    );
+
+    // The container is one body child, reused — not one per paint. That is the difference
+    // between a stable `nth-child` offset and one that moves with how many things happen to be
+    // highlighted.
+    assert.ok(typeof probe.paintRoot === 'function', 'the container accessor is reachable for testing');
+    probe.paintRoot();
+    probe.paintRoot();
+    const ownedChildren = body.children.filter(child => child.getAttribute?.('data-dshcc-owned') !== null
+      && child.getAttribute?.('data-dshcc-owned') !== undefined);
+    assert.strictEqual(
+      ownedChildren.length, 1,
+      'the plugin appends exactly one container to the body, no matter how often it paints — got '
+        + ownedChildren.length,
+    );
+
+    // Put the bed back.
+    for (const child of [...body.children]) child.remove();
+    host.dom.nodes = savedNodes;
+    if (savedProbe !== undefined) host.dom.probe = savedProbe;
   }
 
   // --- the row does not overflow a narrow dialog ----------------------------
@@ -3987,8 +4107,21 @@ async function main() {
       computed: { getPropertyValue: name => (name === 'background-color' ? '#101010' : '') },
     },
   });
-  const panel = () => picker.document.body.children.find(child => child.className === 'dshCc_pickPanel');
-  const boxOf = () => picker.document.body.children.find(child => child.className === 'dshCc_pickBox');
+  // The picker's chrome lives inside the plugin's marked container rather than directly under
+  // the body — one extra body child instead of one per overlay, so the app's own root does not
+  // move along the `body > *` axis every time the picker arms. These helpers follow it there.
+  //
+  // `!== null` rather than a truthy test: a bare attribute reads back as the empty string, so
+  // `if (getAttribute(...))` answers "no" for a container that is right there. The plugin made
+  // that mistake once and made one container per call; this is the same comparison.
+  const isOwned = (child) => child.getAttribute?.('data-dshcc-owned') !== null
+    && child.getAttribute?.('data-dshcc-owned') !== undefined;
+  // Takes the harness rather than closing over one: this file boots several, and a helper that
+  // silently reads a different document is worse than no helper.
+  const ownedRoot = (harness = picker) => harness.document.body.children.find(isOwned);
+  const ownedChildren = (harness = picker) => ownedRoot(harness)?.children ?? [];
+  const panel = (harness = picker) => ownedChildren(harness).find(child => child.className === 'dshCc_pickPanel');
+  const boxOf = (harness = picker) => ownedChildren(harness).find(child => child.className === 'dshCc_pickBox');
   const info = () => (panel()?.children ?? [])[0]?.children?.[0]?.textContent ?? '';
   const candidateTexts = () => ((panel()?.children ?? [])[1]?.children ?? []).map(child => child.textContent);
   const tokenTexts = () => ((panel()?.children ?? [])[2]?.children ?? []).map(child => child.textContent);
@@ -4072,7 +4205,7 @@ async function main() {
   );
 
   // Scrolling must move the locked box: it is fixed, so nothing else would.
-  const lockedBox = () => picker.document.body.children.find(child => child.className === 'dshCc_pickBox dshCc_pickLocked');
+  const lockedBox = () => ownedChildren().find(child => child.className === 'dshCc_pickBox dshCc_pickLocked');
   assert.strictEqual(lockedBox().style.top, '40px', 'the locked box starts on the element');
   movingRect.top = -120;
   picker.dispatch('scroll', {});
@@ -4272,7 +4405,7 @@ async function main() {
     },
     dom: { nodes: pickPool },
   });
-  const existingPanel = () => existing.document.body.children.some(child => child.className === 'dshCc_pickPanel');
+  const existingPanel = () => panel(existing) !== undefined;
   hookIndex = 0;
   const existingView = existing.registrations[0].component();
   await existing.runEffects();
@@ -4463,7 +4596,7 @@ async function main() {
     },
   });
   await pickWith(unknown, pickedTarget, () => {
-    const board = unknown.document.body.children.find(child => child.className === 'dshCc_pickPanel');
+    const board = panel(unknown);
     for (const row of (board?.children ?? [])[1]?.children ?? []) unknownLabels.push(row.textContent);
   });
   await settle();
@@ -4508,7 +4641,7 @@ async function main() {
     await harness.runEffects();
     harness.dispatch('pointermove', { clientX: 30, clientY: 50 });
     harness.dispatch('click', { target: pickedTarget, clientX: 30, clientY: 50, preventDefault() {}, stopPropagation() {} });
-    const board = harness.document.body.children.find(child => child.className === 'dshCc_pickPanel');
+    const board = panel(harness);
     const row = (board?.children ?? [])[2];
     return (row?.children ?? []).map(child => child.textContent);
   };
