@@ -285,20 +285,27 @@ body::after {
 }
 
 /* 撤销上面那条对本插件自身界面（`.dshCc_*`）的影响。
+ *
  * 这个插件自带的下拉菜单已经按 DSH 的规格调好了（菜单 16px 圆角、项 12px 圆角、
  * 透明底 + hover 底色），不该被皮肤再糊一层白。
  *
- * 写法上分两步：先"撤销"（把皮肤加的东西去掉），再"按原规格重设"。
- * 第一版把 `border-radius` 也塞进撤销那一步，于是菜单项的 12px 被改成了 16px ——
- * **撤销不是重设**，撤销只该拿掉，不该赋一个新值。 */
-:is(.dshCc_menu, .dshCc_menuItem, .dshCc_menuLabel, .dshCc_selectGroup) {
+ * ⚠ **特异性必须真的赢。** 第一版写成 `:is(.dshCc_menu, .dshCc_menuItem, …)` 是**没用的**：
+ * `:is()` 取参数里最高的特异性，而这里全是单类，整体只有 (0,1,0) —— 与上面的
+ * `[class*="_menu"]`（属性选择器，(0,1,0)）**完全同级**，而后者带 `!important`，所以它赢。
+ * 于是撤消规则形同虚设，菜单项的文本仍带着 78% 白底（实测 `span.dshCc_menuHint`
+ * 的 `backgroundColor` 就是 `color(srgb 1 1 1 / 0.78)`，用户看到的"文本有背景色"）。
+ *
+ * 现在用 `html body :is(…)` 把特异性抬到 (0,2,1)，明确压过那条属性选择器。
+ * 撤销与重设仍然分开：**撤销只该拿掉，不该赋新值** —— 第一版把 `border-radius` 塞进撤销那一步，
+ * 反而把菜单项的 12px 改成了继承来的 16px（项与容器一样圆）。 */
+html body :is(.dshCc_menu, .dshCc_menuItem, .dshCc_menuLabel, .dshCc_menuHint, .dshCc_menuCheck, .dshCc_selectGroup) {
   background-color: transparent !important;
   backdrop-filter: none !important;
   border: none !important;
   box-shadow: none !important;
 }
 /* 按插件自己的规格重设（值取自 lib/client.js 的样式表，不重新发明） */
-:is(.dshCc_menu) {
+html body :is(.dshCc_menu) {
   background-color: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-1)) !important;
   box-shadow: var(--dsw-elevation-prominent) !important;
 }
