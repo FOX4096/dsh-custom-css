@@ -2873,6 +2873,21 @@ async function main() {
       sheet.includes('.dshCc_hlBox[data-sole="true"]{border-width:2px;background:transparent}'),
       'a single match is outlined harder and not filled, so it does not hide what is being styled',
     );
+    // The toggle's label must not be painted in the warm colour.
+    //
+    // Measured in the browser, not guessed: `state-warn-primary` on a 12% wash of itself comes
+    // to 1.96:1 in the light theme, under the 4.5:1 floor for text this size — and faint enough
+    // to be visible as faint in a screenshot. `label-primary` measures 17.22:1 light and
+    // 9.41:1 dark, because being the text colour on a surface is its whole job. The warm colour
+    // still carries the state through the border (4.58:1 against the wash) and the fill.
+    assert.ok(
+      sheet.includes('.dshCc_hlToggle[aria-pressed="true"]{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-label-primary);'),
+      'the pressed label uses the text colour token, not the warm graphic colour',
+    );
+    assert.ok(
+      !sheet.includes('.dshCc_hlToggle[aria-pressed="true"]{border-color:var(--dsw-alias-state-warn-primary);color:var(--dsw-alias-state-warn-primary)'),
+      'and the unreadable warm-on-warm combination cannot come back',
+    );
     // Nothing from DSH's red: its one red means "something failed", and a selector that
     // matches three elements has not failed.
     assert.ok(
