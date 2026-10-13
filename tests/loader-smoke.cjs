@@ -755,7 +755,7 @@ async function main() {
     '.dshCc_select{box-sizing:border-box;',
     '.dshCc_addPropWrap{width:100%;max-width:none}',
     '.dshCc_panel>*{flex:none}',
-    '.dshCc_partName{flex:none;padding:1px 7px;border-radius:6px;background:var(--dsw-alias-markdown-tag);',
+    '.dshCc_partName{flex:none;padding:1px 8px;border-radius:999px;background:var(--dsw-alias-markdown-tag);',
     '.dshCc_select{justify-content:space-between}',
     // The shipped settings-row spec: 36px tall, radius-md (12px), 14px text.
     '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
@@ -2784,6 +2784,50 @@ async function main() {
     assert.ok(
       code.includes("'aria-label': '关闭查找'") && code.includes("'aria-label': '区分大小写'"),
       'so are its close and case buttons',
+    );
+  }
+
+  // --- every corner in the sheet is a ladder step or a capsule --------------
+  // Generalised from a sweep that found five literal radii: 8px and 4px (which happened to
+  // equal `radius-sm` and `radius-xs`, so nothing looked wrong — they would simply have
+  // stopped tracking the scale), 6px twice, 3px and 2px.
+  //
+  // The two that were guesswork are worth naming. `.dshCc_partName` is a `Tag` — its fill is
+  // `--dsw-alias-markdown-tag` — and DSH's Tag is a capsule with `padding: 1px 8px`; ours sat
+  // exactly one step inside it on both counts (`1px 7px`, 6px corner), which reads as "not
+  // quite that component" without anything looking broken. `.dshCc_candidate` already had the
+  // menu row's `6px 8px`, so only its corner was off.
+  //
+  // `999px` is the one literal allowed, because DSH writes capsules that way in its own Tag
+  // and Pill stylesheets rather than through a token.
+  {
+    const sheet = rowSheets[0].textContent;
+    // Decoration blocks carry percentages (`::after{inset:20%;border-radius:50%}`) and are not
+    // corners in the component sense; everything else must resolve through the ladder.
+    const bad = [];
+    for (const rule of sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = rule[1].trim().split('\n').pop().trim();
+      if (selector.startsWith('@')) continue;
+      for (const match of rule[2].matchAll(/border-radius:([^;}]+)/g)) {
+        const value = match[1].trim();
+        if (value.startsWith('var(--dsw-radius-') || value === '999px' || value === '50%' || value.includes('inherit')) continue;
+        bad.push(selector + ' → ' + value);
+      }
+    }
+    assert.deepStrictEqual(
+      bad, [],
+      'every corner resolves through the radius ladder or is a 999px capsule — off-scale: '
+        + JSON.stringify(bad),
+    );
+    assert.ok(
+      sheet.includes('border-radius:var(--dsw-radius-xs)') && sheet.includes('border-radius:var(--dsw-radius-sm)'),
+      'and the two steps the sweep found are actually in use',
+    );
+    // The part label is a Tag: capsule, `1px 8px`, weight 500.
+    assert.ok(
+      sheet.includes('.dshCc_partName{flex:none;padding:1px 8px;border-radius:999px;')
+        && sheet.includes('line-height:16px;font-weight:500;white-space:nowrap}'),
+      'the part label matches DSH\'s Tag box and weight',
     );
   }
 
