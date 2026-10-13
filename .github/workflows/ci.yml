@@ -30,6 +30,8 @@ jobs:
           node --check lib/index.js
           node --check tests/loader-smoke.cjs
           node --check tests/host-api-smoke.mjs
+          node --check tests/audit-docs.mjs
+          node --check tests/update-compat.mjs
 
       - name: host 侧文件接口冒烟测试
         run: node tests/host-api-smoke.mjs
@@ -43,6 +45,13 @@ jobs:
         run: |
           npm run audit
           node tests/audit-accessible-names.mjs --enforce
+
+      # 文档巡检也是双份：链接与孤儿文档靠 npm run audit，而它是**非 enforce** 的
+      # （本地跑不该红），所以这里单独用 --enforce 把 README 里那四处自动维护锚点
+      # 也变成门禁 —— 那些锚点丢了会让 compat:update 每 6 小时打印一次告警而没人看，
+      # 文档就从此悄悄过期。
+      - name: 文档链接与锚点巡检
+        run: node tests/audit-docs.mjs --enforce
 
       # 换代门禁：断言我们依赖的平台契约（槽位 settings.general.item + dsh.client.inject
       # 的两个 id）在目标 DSH 版本里仍然存在。需要网络访问 npm registry（要拉各版本的包），

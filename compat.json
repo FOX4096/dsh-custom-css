@@ -4,6 +4,7 @@
   "slotPackage": "@deepseek-ai/dsh-client-ui-settings-general",
   "injectFrom": "package.json#dsh.client.inject",
   "runtimeVerified": [
+    "0.2.0-rc.2",
     "0.1.5-rc.1",
     "0.1.2-rc.1"
   ],
@@ -44,7 +45,6 @@
     "0.1.7-rc.1",
     "0.1.7-rc.2",
     "0.2.0-rc.1",
-    "0.2.0-rc.2",
     "0.2.1-alpha.1",
     "0.2.1-alpha.2"
   ],
@@ -55,9 +55,11 @@
     "已知失效模式：DSH 换代若把 settings.general.item 改名，行内控件会静默不出现（没有报错）—— compat-matrix 就是为此设的门禁。",
     "0.0.1-rc.x 一代一周下载量约 94 次（≈0.02%），只做接口断言，不做专门的兼容分支。",
     "runtimeVerifiedNotes = 真机验证那一档在 README 表格里的「验证方式」原文。自动写回时从这里取，不自己编 —— 否则「独立 DSH_HOME、三个接口 200、文件落盘」这类具体做法会在第一次自动更新时被压成一句泛话。",
+    "runtimeVerified 的判据是「真机起过该版本的 DSH 并跑通 host 半接口」。0.2.0-rc.2 是当前最新在用版本，所以它是这一档里最有代表性的一个 —— 前面两个是历史锚点。",
     "上次自动核对 2026-10-13：最新已发布版本 0.2.1-alpha.2，本次断言 8 个版本全部通过（由 tests/update-compat.mjs 写入）。knownGood 是累积的：某个版本通过过一次即保留。"
   ],
   "runtimeVerifiedNotes": {
+    "0.2.0-rc.2": "真机运行：本机日常在用的实例（生产 profile `web`，插件以 `link:` 装入并实际渲染设置行）。实测 host 路由 `GET /list`、`GET /read`、`GET /history` 全部 200，返回的正是磁盘上的样式表与历史快照",
     "0.1.5-rc.1": "真机运行（本仓库开发环境）",
     "0.1.2-rc.1": "真机运行：独立 `DSH_HOME` 起实例，`/dsh-custom-css/list`、`/write`、`/read` 全部 200 且文件确实落盘"
   },

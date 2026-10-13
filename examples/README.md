@@ -12,8 +12,8 @@
 
 | 经验 | 原因 |
 | --- | --- |
-| 需要压过内置样式时用 `!important` | 自定义样式与内置样式表特异性相同时，谁后插入谁赢，而插入时机不受你控制（见 README「已知坑」） |
+| 需要压过内置样式时用 `!important` | 自定义样式与内置样式表特异性相同时，谁后插入谁赢，而插入时机不受你控制（见 [`docs/known-issues.md`](../docs/known-issues.md)） |
 | 别长期依赖构建哈希类名（`hHd-Xa_footArea`） | 名字随 DSH 版本变；要用就从 DOM 里现抓，且抓类名的正则**必须包含 `-`** |
 | `:has()` 只写一层 | 嵌套 `:has()` 会让 Chrome 抛 `is not a valid selector`，**整条规则被静默丢弃** |
 
-更多（描述符块、自定义属性动画、host 半需重启等）见仓库根目录的 [README](../README.md#已知坑都是实测踩出来的)。
+更多（描述符块、自定义属性动画、host 半需重启等）见 [`docs/known-issues.md`](../docs/known-issues.md)。
