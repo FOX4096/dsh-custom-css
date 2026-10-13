@@ -22,15 +22,16 @@ const source = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8'
  * The module text this suite runs.
  *
  * A few internals are exposed by name through `__probe`: the dropdown placement math, the
- * find bar's scan and its hit markup, and the formatter. Each is pure, each decides something
- * a user sees directly, and nothing else about the text changes — the export is additive and
- * the plugin never looks at it. Everything else is asserted through the components, as usual.
+ * find bar's scan and its hit markup, the formatter, and the rule-highlight resolver. Each is
+ * pure, each decides something a user sees directly, and nothing else about the text changes —
+ * the export is additive and the plugin never looks at it. Everything else is asserted through
+ * the components, as usual.
  */
 const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -2784,6 +2785,122 @@ async function main() {
     assert.ok(
       code.includes("'aria-label': '关闭查找'") && code.includes("'aria-label': '区分大小写'"),
       'so are its close and case buttons',
+    );
+  }
+
+  // --- the rule-highlight toggle --------------------------------------------
+  // The panel's selector field can outline every element the rule matches. Three states that
+  // must not be collapsed into one another, because the count is exactly the number the user
+  // is reading it to interpret:
+  //
+  //   a selector that matches nothing   → "无命中",   disabled
+  //   text that is not a selector       → "不是选择器", disabled
+  //   a rule against a pseudo-element   → "伪元素",  disabled
+  //
+  // The pseudo case is the one that needed a decision rather than a lookup. `a::before`
+  // matches no element, so reporting "0 matches" is technically true and practically a lie —
+  // it tells the user their selector is wrong when it is merely unoutlineable, and it hides
+  // the useful half of the answer, which is that the host element does match.
+  {
+    const probe = host.mod.__probe;
+    assert.ok(typeof probe.resolveSelector === 'function', 'the resolver is reachable for testing');
+
+    // The harness answers selector queries from a pool, and the pool is empty until a case
+    // fills it — so this block says what the page contains rather than assuming it. `probe` is
+    // the seam the harness documents for exactly this: "a test that needs the engine to REFUSE
+    // a selector (or answer with a count the pool cannot express) says so here".
+    const savedNodes = host.dom.nodes;
+    const savedProbe = host.dom.probe;
+    host.dom.nodes = [{ selectorSet: new Set(['div']), childNodes: [], tagName: 'DIV' }];
+    host.dom.probe = (selector) => {
+      if (selector === '@media (min-width: 600px)') {
+        // What a browser does with an at-rule: a SyntaxError, not an empty list.
+        const error = new Error("Failed to execute 'querySelectorAll'");
+        error.name = 'SyntaxError';
+        throw error;
+      }
+      return selector === 'div' ? 3 : 0;
+    };
+
+    // A real selector, against the page this block just described.
+    const found = probe.resolveSelector('div');
+    assert.ok(Array.isArray(found.nodes), 'a real selector resolves to a node list');
+    assert.strictEqual(found.nodes.length, 3, 'and carries the count the engine answered');
+    assert.strictEqual(found.invalid, undefined, 'without claiming it is invalid');
+    assert.strictEqual(found.pseudo, undefined, 'and without claiming it is a pseudo-element');
+
+    // Whitespace is a field being typed in, not an error. Compared by content rather than with
+    // `deepStrictEqual`: the harness answers with `new Array(n).fill(null)`, which is a
+    // different object from a literal `[]` even at n = 0.
+    const blank = probe.resolveSelector('   ');
+    assert.strictEqual(blank.nodes.length, 0, 'an empty selector matches nothing');
+    assert.strictEqual(blank.invalid, undefined, 'and is not an error');
+    assert.strictEqual(blank.pseudo, undefined, 'and is not a pseudo-element');
+
+    // Not a selector at all. `@media` is an at-rule; the engine throws on it, and reporting
+    // "0 matches" for it would tell the user their syntax is fine.
+    const atRule = probe.resolveSelector('@media (min-width: 600px)');
+    assert.strictEqual(atRule.invalid, true, 'an at-rule is reported as invalid, not as zero matches');
+    assert.strictEqual(atRule.nodes, undefined, 'and carries no node list to be misread as a count');
+
+    // Pseudo-elements: both spellings, and every name that takes one.
+    for (const selector of ['a::before', 'a:before', '.x::after', '.x:after', 'li::marker', 'p::first-line']) {
+      const result = probe.resolveSelector(selector);
+      assert.strictEqual(result.pseudo, true, 'a pseudo-element is its own case: ' + selector);
+      assert.strictEqual(result.invalid, undefined, 'and is not reported as invalid: ' + selector);
+    }
+    // The pseudo check must not swallow the pseudo-*classes* that do match real elements.
+    for (const selector of ['a:hover', '.x:not(.y)', 'div:first-child', 'input:focus']) {
+      const result = probe.resolveSelector(selector);
+      assert.strictEqual(result.pseudo, undefined, 'a pseudo-class still resolves normally: ' + selector);
+    }
+
+    host.dom.nodes = savedNodes;
+    host.dom.probe = savedProbe;
+  }
+
+  // --- the highlight toggle's markup and lifecycle --------------------------
+  {
+    const sheet = rowSheets[0].textContent;
+    // The box: the picker's own recipe (fixed, top of the stack, clicks pass through) on the
+    // warn step rather than the brand colour, so the two can be told apart when both are up.
+    assert.ok(
+      sheet.includes('.dshCc_hlBox{position:fixed;z-index:2147483000;pointer-events:none;')
+        && sheet.includes('border:1px solid var(--dsw-alias-state-warn-primary)'),
+      'the highlight box is the picker box on the warn step',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_hlBox[data-sole="true"]{border-width:2px;background:transparent}'),
+      'a single match is outlined harder and not filled, so it does not hide what is being styled',
+    );
+    // Nothing from DSH's red: its one red means "something failed", and a selector that
+    // matches three elements has not failed.
+    assert.ok(
+      !sheet.includes('.dshCc_hlBox') || !/dshCc_hlBox\{[^}]*state-error/.test(sheet),
+      'the highlight is not painted in the error colour',
+    );
+    // The toggle's own box is DSH's Tag recipe — measured at 21px — rather than a fresh
+    // invented height sitting next to the conflict button that was fixed for exactly that.
+    assert.ok(
+      sheet.includes('.dshCc_hlToggle{appearance:none;flex:none;display:inline-flex;align-items:center;gap:5px;padding:1px 8px;')
+        && sheet.includes('font-size:11px;line-height:17px;cursor:pointer;white-space:nowrap}'),
+      'the toggle uses the Tag recipe rather than a height this row invented',
+    );
+    // Lifecycle, asserted in the source: the boxes must outlive the panel and must not outlive
+    // the row. Both halves matter — the first is the feature, the second is the reason it is
+    // safe to leave them on the page at all.
+    assert.ok(
+      code.includes('React.useEffect(() => clearHighlights, [])'),
+      'the row clears its highlights when it goes away, so none are left with no control to remove them',
+    );
+    assert.ok(
+      code.includes('const highlightSelector = highlightOn ? rememberedSelector.current : draftSelector;'),
+      'the highlight reads the REMEMBERED selector while it is on — asserting the name alone was '
+        + 'satisfied by a leftover declaration of it that nothing used, so this asserts the wiring',
+    );
+    assert.ok(
+      code.includes("window.addEventListener('scroll', repaint, true)"),
+      'and the boxes are re-measured on scroll, since position:fixed does not follow the page',
     );
   }
 
