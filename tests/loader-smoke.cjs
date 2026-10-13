@@ -2787,6 +2787,38 @@ async function main() {
     );
   }
 
+  // --- the sheet menu is as wide as its content, not a made-up number --------
+  // `min-width:218px` used to stand here, and it was pure excess: measured, the menu was
+  // 218px while everything in it needed 106px (`custom.css` is 62px, `＋ 新建…` is 82px),
+  // and nothing was truncated — so the extra 112px was blank.
+  //
+  // 218px was invented by this row. DSH's menu list is `min-width:144px`. This keeps the
+  // intent but anchors it to something real: `100%` resolves against `.dshCc_picker`, the
+  // positioned wrapper whose right edge the menu already aligns to, so the menu opens at
+  // least as wide as its trigger and grows only when a sheet name asks it to.
+  //
+  // Verified in the browser: short name → 121px (= the trigger), long name → 282px with no
+  // truncation, right edges aligned in both cases, capped at 360px.
+  {
+    const sheet = rowSheets[0].textContent;
+    assert.ok(
+      sheet.includes('.dshCc_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:100%;width:max-content;max-width:360px;'),
+      'the sheet menu is sized from its trigger and its own content',
+    );
+    for (const banned of ['min-width:218px', '.dshCc_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:2']) {
+      assert.ok(
+        !sheet.includes(banned),
+        'no invented width comes back to the menu (found ' + banned + ')',
+      );
+    }
+    // `max-content` is load-bearing: without it the menu is a block child of the wrapper and
+    // stretches to the wrapper's width, which would undo the whole point.
+    assert.ok(
+      /\.dshCc_menu\{[^}]*width:max-content/.test(sheet),
+      'the menu sizes to its content rather than stretching to its container',
+    );
+  }
+
   // --- menu cells keep DSH's menu metrics ----------------------------------
   // Taken from `Menu.module.css` (`.item` 34px / `6px 8px` / `gap: 6px` / 13px over 20px,
   // `.check` in label-primary, `.danger:hover` on the danger hover fill). Ours used to be
