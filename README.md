@@ -252,9 +252,11 @@ profile bundle "…" declares no dsh.bundle in its package.json
 | --- | --- | --- |
 | `0.1.5-rc.1` | 真机运行（本仓库开发环境） | 通过 |
 | `0.1.2-rc.1` | 真机运行：独立 `DSH_HOME` 起实例，`/dsh-custom-css/list`、`/write`、`/read` 全部 200 且文件确实落盘 | 通过 |
-| `0.1.1-rc.2` / `0.1.0-rc.7` / `0.0.1-rc.5` | 接口契约断言（`npm run compat` 解包该版本的 settings 包，核对槽位与 id） | 通过 |
+| `0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` / `0.2.0-rc.2` / `0.2.1-alpha.1` / `0.2.1-alpha.2` | 接口契约断言（`npm run compat` 解包该版本的 settings 包，核对槽位与 id） | 通过 |
 
 `npm run compat` 需要网络（要拉各版本的包），所以本地 `npm test` 保持离线可跑；CI 里单跑一档。
+
+上表由 `npm run compat:update` 自动维护（GitHub Actions 每 6 小时检查一次 DSH 是否更新，有新版本就重新断言并提交这一节）。**上次核对：2026-10-13，当时最新已发布版本 `0.2.1-alpha.2`。**
 
 **两种失效模式的判别**：槽位若被 DSH 改名，行内控件会**静默不出现**（没有报错）—— 这正是 `npm run compat` 要提前挡住的事；而 bundle 里若硬 require 了平台包（如 `@deepseek-ai/dsh-client-runtime/client`），加载时会抛 `client-modules: require("…") missed the module table`（见下文「已知坑」）。
 

@@ -103,9 +103,19 @@ console.log(`inject ids  : ${injectIds.join(', ') || '(无)'}`)
 console.log(`探测版本    : ${versions.join(', ')}\n`)
 
 let failures = 0
+let unavailable = 0
 for (const version of versions) {
   const slotOk = slotPresent(version)
   const missing = injectIds.filter((id) => !idPresent(id, version))
+  // A version that was never published is not a compatibility failure — it is a version that
+  // cannot be asked about. Counting it as a failure sends the reader looking for a break that
+  // did not happen: `0.1.6-rc.1` never reached the registry, and the run below it reported
+  // "DSH 大概率换代了" for a release that does not exist.
+  if (slotOk === null && missing.length === injectIds.length) {
+    unavailable++
+    console.log(`· ${version.padEnd(12)} 未发布到 registry —— 无从断言，跳过`)
+    continue
+  }
   const ok = slotOk === true && missing.length === 0
   if (!ok) failures++
   const slotText = slotOk === null ? '包不在 registry' : slotOk ? '在' : '❌ 已不存在'
@@ -122,4 +132,5 @@ if (failures) {
   )
   process.exit(1)
 }
-console.log(`\n✓ ${versions.length} 个版本的平台接口全部对得上（槽位存在、inject id 齐全）`)
+const skipped = unavailable ? `，跳过 ${unavailable} 个未发布的版本` : ''
+console.log(`\n✓ ${versions.length - unavailable} 个版本的平台接口全部对得上（槽位存在、inject id 齐全）${skipped}`)

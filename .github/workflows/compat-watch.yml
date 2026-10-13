@@ -1,0 +1,85 @@
+name: DSH 换代检查
+
+# 自动检查 DSH 是否更新 → 断言本扩展还能不能跑 → 通过则更新文档里的版本适配情况。
+#
+# 三步（全在 tests/update-compat.mjs 里）：
+#   1. 发现：GitHub releases（含预发布，比 npm 的 latest 更早看到信号）+ npm registry 取并集
+#   2. 断言：对最近一批版本逐个跑接口契约检查（槽位 settings.general.item + 声明的 inject id）
+#   3. 写回：compat.json 的 knownGood / lastChecked 与 README 的验证矩阵
+#
+# 为什么断言走 npm 而不是直接查 GitHub：contract 检查需要**解包那个版本的包**看槽位还在不在，
+# 而包只在 npm 上。GitHub 的价值是更早发现版本号本身（预发布）；两路都试，报告里会注明用了哪一路。
+#
+# 为什么失败时不改写文档：契约对不上意味着插件需要人工处理（改 slot、加回退），
+# 这时候把「通过」写进文档是最坏的结果 —— 所以脚本在任何版本失败时直接退出，零写入。
+
+on:
+  schedule:
+    # 每 6 小时一次。DSH 换代不是分钟级事件，没必要更频繁；顺便省 GitHub 的 API 配额。
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dsh-compat-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # 这个 job 会把结果提交回 main，所以 checkout 必须留着凭据
+          persist-credentials: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: 换代检查并写回文档
+        id: compat
+        run: |
+          set -o pipefail
+          npm run compat:update 2>&1 | tee compat.log
+
+      - name: 报告结果
+        if: always()
+        run: |
+          {
+            echo '## DSH 换代检查'
+            echo ''
+            echo '```'
+            # 去掉 ANSI 颜色码，否则 Actions 的摘要里是一堆转义
+            sed -r 's/\x1b\[[0-9;]*m//g' compat.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 提交文档更新
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "DSH 没有新版本，文档无需改动"
+            exit 0
+          fi
+
+          echo "── 改动 ──"
+          git diff --stat
+
+          git config user.name "dsh-compat-bot"
+          git config user.email "dsh-compat-bot@users.noreply.github.com"
+          git add compat.json README.md
+
+          # 提交信息里带上这批新版本身份，让人一眼看出这次更新是为了适配什么
+          NEWEST="$(node -p "require('./compat.json').lastCheckedNewest")"
+          COUNT="$(node -p "require('./compat.json').knownGood.length")"
+          if git diff --cached --quiet; then
+            echo "只有工作区改动，没有暂存内容 —— 不动"
+            exit 0
+          fi
+          git commit -m "docs(compat): 自动更新 DSH 版本适配矩阵（最新 ${NEWEST}，已断言 ${COUNT} 个版本）"
+          git pull --rebase --autostash origin main
+          git push origin HEAD:main
+          echo "已提交并推送"
