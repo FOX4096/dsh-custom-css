@@ -312,7 +312,7 @@ dsh-custom-css/
 │   ├── icon.svg            # 图标（矢量，README 顶部用的就是它）
 │   ├── icon-512.png        # 同一图标 512px，带透明通道，可用于仓库头像
 │   ├── social-preview.svg  # 社交预览卡（1280×640）源文件
-│   └── social-preview.png  # 同上，位图版
+│   └── social-preview.png  # 同上，位图版（GitHub 社交预览与引用都取这张）
 ├── compat.json             # 跨版本兼容契约（槽位 / inject id / 已验证版本）
 ├── naming.md               # 见 docs/naming.md
 ├── .editorconfig
@@ -322,6 +322,15 @@ dsh-custom-css/
 ├── CHANGELOG.md
 └── README.md
 ```
+
+社交卡（`assets/social-preview.*`）的版本标签由 `npm run compat:update` 维护，但**位图要手工重新出** ——
+出位图需要浏览器渲染，而那个脚本必须保持只依赖网络与 npm（它同时跑在 CI 里）：
+
+```
+打开 assets/social-preview.svg → 对 <svg> 元素截图 1280×640 → 存回 assets/social-preview.png
+```
+
+（SVG 改动后脚本会打印提醒。实测这个做法出的位图 541 KB，而早先那份是 1.03 MB。）
 
 ## 已知限制
 

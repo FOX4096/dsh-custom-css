@@ -41,13 +41,15 @@
     </g>
   </g>
 
-  <!-- 文案 -->
+  <!-- 文案。右下角的版本号与 compat.json 同步（由 tests/update-compat.mjs 写回）：
+       写 `DSH <最低断言过的版本>+` 而不是某个具体新版 —— 这个数字不该手工维护。 -->
   <g font-family="Segoe UI, Microsoft YaHei, Hiragino Sans GB, sans-serif">
     <text x="372" y="298" font-size="72" font-weight="700" fill="#ffffff" letter-spacing="-1">dsh-custom-css</text>
     <rect x="374" y="322" width="132" height="7" rx="3.5" fill="#ffffff" fill-opacity="0.42"/>
     <text x="374" y="392" font-size="34" font-weight="600" fill="#eaf2f7" fill-opacity="0.95">设置行里的自定义 CSS 编辑器</text>
     <text x="374" y="446" font-size="24" fill="#d3e3ec" fill-opacity="0.82">写完即生效 · 样式表就是磁盘上的 .css 文件</text>
-    <text x="374" y="492" font-size="22" fill="#c3d7e3" fill-opacity="0.62">即时生效 · DevTools 风格编辑器 · 键入补全 · 规则面板 · 格式校验</text>
-    <text x="1196" y="574" font-size="20" fill="#ffffff" fill-opacity="0.5" text-anchor="end">DSH 0.1.5-rc.1+ · MIT</text>
+    <text x="374" y="483" font-size="22" fill="#c3d7e3" fill-opacity="0.62">即时生效 · DevTools 编辑器 · 键入补全 · 格式校验 · 撤销重做</text>
+    <text x="374" y="515" font-size="22" fill="#c3d7e3" fill-opacity="0.62">元素拾取器 · 属性字典 · 历史版本 · 查找替换 · 规则大纲 · 多文件管理</text>
+    <text x="1196" y="574" font-size="20" fill="#ffffff" fill-opacity="0.5" text-anchor="end">DSH 0.0.1-rc.1+ · MIT</text>
   </g>
 </svg>

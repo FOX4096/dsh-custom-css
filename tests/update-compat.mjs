@@ -30,6 +30,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkgPath = join(root, 'package.json')
 const contractPath = join(root, 'compat.json')
 const readmePath = join(root, 'README.md')
+const socialCardPath = join(root, 'assets', 'social-preview.svg')
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
 const contract = JSON.parse(readFileSync(contractPath, 'utf8'))
 
@@ -386,6 +387,22 @@ const stamp = `${STAMP_START}（GitHub Actions 每 6 小时检查一次 DSH 是�
   + `**上次核对：${today}，当时最新已发布版本 \`${newest}\`。**`
 
 /**
+ * social-preview.svg 右下角那行版本标签。
+ *
+ * 卡片上写着 `DSH 0.1.5-rc.1+ · MIT`，而契约断言早就覆盖到 0.2.1-alpha.2 —— 与 README
+ * 同一类过期，而且是**对外展示最显眼的一处**（GitHub 的社交卡）。
+ *
+ * 写「最低断言过的版本 + `+`」而不是某个具体新版：这样它只在真的提高了支持下界时才变，
+ * 不会每次 DSH 发版就跟着改，样式上也就没有「这个数字到底算什么」的歧义。
+ */
+function renderSocialCard(text) {
+  const wanted = `DSH ${knownGood[0]}+ · MIT`
+  const pattern = /DSH [0-9][^<]*· MIT/
+  if (!pattern.test(text)) return null
+  return text.replace(pattern, wanted)
+}
+
+/**
  * README 的写回，纯函数：同样的输入永远得到同样的输出。
  *
  * 做成纯函数是为了能在写盘前**自检幂等**（见下面）。这一步不是洁癖：这个脚本每 6 小时被
@@ -446,7 +463,35 @@ if (steps !== 1) {
 }
 writeFileSync(readmePath, rendered, 'utf8')
 
+// social-preview.svg：同一个自检，只是它只有一处替换，一步不到位就说明正则有歧义。
+const currentCard = readFileSync(socialCardPath, 'utf8')
+const renderedCard = renderSocialCard(currentCard)
+if (renderedCard === null) {
+  console.log('⚠ social-preview.svg 里找不到版本标签（`DSH … · MIT`）—— 未更新')
+}
+else if (renderSocialCard(renderedCard) !== renderedCard) {
+  console.log('✗ 自检失败：social-preview.svg 的版本标签写回不幂等 —— 不写盘')
+  process.exit(1)
+}
+else {
+  writeFileSync(socialCardPath, renderedCard, 'utf8')
+}
+
 // 报累积数而不是本次通过数：这行日志原先写 `${passing.length}`，于是全量跑完写入了 31 个，
 // 它却报「knownGood 8 个」（那是本次样本的数目）—— 一个会让人误判写入结果的日志，
 // 比没有日志更糟。
-console.log(`\n✓ 已写回：compat.json（knownGood 累积 ${knownGood.length} 个、本次断言 ${passing.length} 个、lastChecked ${today}）与 README 的验证矩阵`)
+console.log(`\n✓ 已写回：compat.json（knownGood 累积 ${knownGood.length} 个、本次断言 ${passing.length} 个、lastChecked ${today}）、`)
+console.log(`  README 的验证矩阵与版本提及、social-preview.svg 的版本标签`)
+
+/*
+ * 社交卡是 PNG 交付的（GitHub 的社交预览与 README 引用都取位图），SVG 改了之后位图要重新出：
+ *
+ *   node dev/ego.mjs            # 起开发实例（或直接用任意浏览器）
+ *   打开 assets/social-preview.svg → 元素截图 1280×640 → 存回 assets/social-preview.png
+ *
+ * 之所以不在这里自动做：出位图需要浏览器渲染，而本脚本同时跑在 CI 与本地、必须保持
+ * 只依赖网络与 npm。所以这一步留给人工，并在 README 里写明。
+ */
+if (renderedCard !== null && renderedCard !== currentCard) {
+  console.log('⚠ assets/social-preview.svg 已改动 —— 请按上方注释重新生成 assets/social-preview.png')
+}
