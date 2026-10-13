@@ -55,8 +55,10 @@ body {
   /* 壁纸漂移周期：越长越省电，48s 足够让人察觉不到"在动"但看久了不腻 */
   --dsh-acrylic-drift: 48s;
 
-  /* 玻璃面圆角（跟着 DSH 的阶梯走） */
-  --dsh-acrylic-radius: var(--dsw-radius-lg);
+  /* 这里**故意没有"圆角"这个参数**：DSH 的对话框、菜单、卡片各有自己的圆角规格，
+   * 皮肤只换材质（底色 / 模糊 / 描边 / 阴影），不动它的几何。
+   * 第一版有个 --dsh-acrylic-radius 统一设 16px，结果是对话框被改小、菜单项的 12px 被改成
+   * 16px（项与容器一样圆）—— 那正是"下拉列表样式不对"的一半原因。 */
 
   /* 把 body 自己的纯白底交出去，壁纸才有机会露出来（这是壁纸可见的前提） */
   background-color: transparent;
@@ -183,10 +185,14 @@ body::after {
   background: transparent !important;
 }
 
-/* ── §3  侧栏与右栏 ──────────────────────────────────────────────────────
- * 侧栏背后有会话列表，是"有内容可模糊"的地方 —— 玻璃在这里最有价值。 */
+/* ── §3  侧栏 ────────────────────────────────────────────────────────────
+ * 侧栏背后有会话列表，是"有内容可模糊"的地方 —— 玻璃在这里最有价值。
+ *
+ * ⚠ 浓度**刻意比面板低**（用 --dsh-acrylic-shell-tint 那一档，而不是面板的 72%）：
+ * 第一版用了面板档，结果侧栏是一块几乎不透明的白，用户反馈"侧栏没做亚克力"——
+ * 玻璃是加上了，但浓到看不出是玻璃。侧栏只有 280px 宽，透一点不会影响读它自己的文字。 */
 [class*="_sidebarCol"] {
-  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) var(--dsh-acrylic-tint), transparent) !important;
+  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) 56%, transparent) !important;
   backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
   /* 右侧一条细描边：让侧栏与主区之间有"一片玻璃的边缘" */
   border-right: 0.5px solid var(--dsw-alias-border-l2);
@@ -251,7 +257,19 @@ body::after {
 }
 
 /* ── §5  浮层：对话框 / 菜单 / 面板 ──────────────────────────────────────
- * 这些是最"该"是玻璃的东西 —— 它们本来就浮在内容之上。 */
+ * 这些是最"该"是玻璃的东西 —— 它们本来就浮在内容之上。
+ *
+ * ⚠ **必须把自己插件的元素排除掉。** `[class*="_menu"]` 会连 `dshCc_menu` 一起命中
+ * （`_menu` 这个片段两边都有），于是这一行自带的下拉菜单被刷上白底，每一个菜单项都变成
+ * 一个白色胶囊 —— 用户一眼就看出"下拉列表样式不对"。
+ * 实测：菜单项本该是 `rgba(0,0,0,0)`，被这条规则改成了 `color(srgb 1 1 1 / 0.78)`。
+ *
+ * 排除方式用**更高的特异性覆盖**而不是靠类名规则 —— 与其猜"DSH 的哈希类一定以下划线开头"，
+ * 不如明确声明"我自己的元素不受这条规则影响"。这样 DSH 换命名习惯也不会破。
+ *
+ * ⚠ **不设 `border-radius`。** 第一版统一给了 16px，结果是：对话框该圆的地方被改小、
+ * 菜单项的 12px 被改成 16px（项与容器一样圆）。DSH 的对话框与菜单**各有自己的圆角**，
+ * 皮肤只该换材质（底色/模糊/描边/阴影），不该动它的几何。 */
 [class*="_dialog"],
 [class*="_menu"],
 [role="dialog"],
@@ -261,10 +279,28 @@ body::after {
   background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) 78%, transparent) !important;
   backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
   border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: var(--dsh-acrylic-radius);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 65%, transparent),
     var(--dsw-elevation-prominent);
+}
+
+/* 撤销上面那条对本插件自身界面（`.dshCc_*`）的影响。
+ * 这个插件自带的下拉菜单已经按 DSH 的规格调好了（菜单 16px 圆角、项 12px 圆角、
+ * 透明底 + hover 底色），不该被皮肤再糊一层白。
+ *
+ * 写法上分两步：先"撤销"（把皮肤加的东西去掉），再"按原规格重设"。
+ * 第一版把 `border-radius` 也塞进撤销那一步，于是菜单项的 12px 被改成了 16px ——
+ * **撤销不是重设**，撤销只该拿掉，不该赋一个新值。 */
+:is(.dshCc_menu, .dshCc_menuItem, .dshCc_menuLabel, .dshCc_selectGroup) {
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+/* 按插件自己的规格重设（值取自 lib/client.js 的样式表，不重新发明） */
+:is(.dshCc_menu) {
+  background-color: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-1)) !important;
+  box-shadow: var(--dsw-elevation-prominent) !important;
 }
 
 /* 遮罩：用轻微模糊代替单纯压暗，浮层与背景的层次更清楚。
