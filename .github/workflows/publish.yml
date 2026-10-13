@@ -122,15 +122,50 @@ jobs:
       # 把刚发布到 npm 的那个 tarball 附到 Release 上：registry 与 Release 页
       # 指向同一个产物（字节一致），下载与校验都不用再去 registry 找。
       #
-      # 从 registry 取、而不是就地 `npm pack`：两者本该一致，但 `npm pack` 会带上
-      # 工作区的 .npmignore/files 解析差异，而这里要的是「registry 上那一个的副本」——
-      # 从 registry 下载就天然保证了这一点。
+      # 这一步踩过两次坑，都在"publish 刚返回、registry 还没跟上"这个窗口里：
+      #
+      # ① 原先写的是 `npm pack "dsh-custom-css@$VERSION"` —— 它走**版本索引**解析，
+      #    而索引那时还没更新，于是「No matching version found for dsh-custom-css@0.2.1」。
+      # ② 改成按规范 URL 直接取之后，第一次重试参数太乐观（3 次 × 5 秒 = 15 秒）。
+      #    实测 0.2.1 的 tarball 在约 **4 分钟**后才可取（连续 404 了 4 次，第 5 次 200）。
+      #
+      # 所以现在：拉长到 6 次、间隔翻倍，并且**区分 404 与其他错误** —— 404 是"还没到"，
+      # 值得等；401/403/5xx 之类等下去没有意义，直接失败。
       - name: 附上 npm tarball（取自 registry）
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          PKG="$(node -p "require('./package.json').name")"
           VERSION="$(node -p "require('./package.json').version")"
-          npm pack "dsh-custom-css@$VERSION"
-          gh release upload "$GITHUB_REF_NAME" dsh-custom-css-*.tgz --clobber
+          FILE="$(node -p "require('./package.json').name.split('/').pop()")-$VERSION.tgz"
+          URL="https://registry.npmjs.org/$PKG/-/$FILE"
+          echo "取 $URL"
+
+          fetch_status() {
+            curl -sSL -o "$FILE" -w '%{http_code}' "$URL" || echo '000'
+          }
+
+          DELAY=10
+          for attempt in 1 2 3 4 5 6; do
+            STATUS="$(fetch_status)"
+            if [ "$STATUS" = "200" ]; then
+              echo "第 $attempt 次取到（HTTP 200）"
+              break
+            fi
+            if [ "$STATUS" != "404" ]; then
+              echo "取 tarball 失败：HTTP $STATUS（不是传播延迟，直接失败）" >&2
+              exit 1
+            fi
+            if [ "$attempt" = "6" ]; then
+              echo "取不到 tarball（6 次都是 404）: $URL" >&2
+              exit 1
+            fi
+            echo "第 $attempt 次 404（tarball 还没传播到），等 ${DELAY} 秒"
+            sleep "$DELAY"
+            DELAY=$((DELAY * 2))
+          done
+
+          ls -l "$FILE"
+          gh release upload "$GITHUB_REF_NAME" "$FILE" --clobber
