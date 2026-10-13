@@ -762,7 +762,7 @@ async function main() {
     'border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform);',
     // The text fields' last layout declaration: the shared box rule carries height, stroke,
     // fill and type; each of the three keeps only what its own container needs.
-    '.dshCc_propText{flex:1;min-width:0;max-width:100%;font-family:var(--dshCc-mono)}',
+    '.dshCc_propText{flex:1;min-width:0;max-width:100%;font-family:var(--ds-font-family-code)}',
   ]) {
     assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
   }
@@ -2784,6 +2784,65 @@ async function main() {
     assert.ok(
       code.includes("'aria-label': '关闭查找'") && code.includes("'aria-label': '区分大小写'"),
       'so are its close and case buttons',
+    );
+  }
+
+  // --- monospace text uses DSH's code font, not a stack of our own ----------
+  // Found by measuring: DSH resolves `--ds-font-family-code` to
+  //   "SF Mono","JetBrains Mono","Fira Code",Consolas,…,"PingFang SC","Microsoft YaHei"
+  // while this row carried its own stack beginning `ui-monospace,SFMono-Regular,…`. A
+  // generic `ui-monospace` wins every race it enters, so none of the design faces DSH names
+  // were ever selected — the code in this editor and the code everywhere else in the app
+  // were being drawn in different typefaces. That is the plainest possible reading of
+  // "elements don't match DSH", and a token audit cannot see it: the value was fine, it was
+  // simply the wrong font stack.
+  {
+    const sheet = rowSheets[0].textContent;
+    assert.ok(
+      sheet.includes('var(--ds-font-family-code)'),
+      'monospace text takes DSH\'s code font token',
+    );
+    // Scoped to the stylesheet, not to the whole source: the property editor offers
+    // `ui-monospace` as a *hint string* for the `font-family` field, which is text the user
+    // sees, not a font this row chooses. Scanning the whole file flagged that hint.
+    assert.ok(
+      !sheet.includes('ui-monospace') && !sheet.includes('--dshCc-mono'),
+      'and no private font stack is left behind in the stylesheet for it to fall back to',
+    );
+    // The editor's line height is a different matter and stays literal: the JS that anchors
+    // the completion list computes with the same number, so the two have to agree.
+    assert.ok(
+      sheet.includes('--dshCc-line:19px'),
+      'the editor line metric stays in step with the JS that reads it',
+    );
+    assert.ok(
+      code.includes('LINE_HEIGHT'),
+      'and that JS constant still exists to be kept in step with',
+    );
+  }
+
+  // --- the completion popup is the third floating surface -------------------
+  // It shares the menus' material and, measured, its geometry maths agrees with its CSS:
+  // one row renders 34px tall, which is 1 × 26 + 8 — the formula in the layout code. That
+  // agreement is what the flip direction depends on, so it is asserted rather than assumed.
+  {
+    const sheet = rowSheets[0].textContent;
+    assert.ok(
+      sheet.includes('.dshCc_suggest{position:absolute;z-index:120;min-width:164px;max-width:280px;box-sizing:border-box;')
+        && sheet.includes('padding:4px;display:flex;flex-direction:column;border:0;border-radius:var(--dsw-radius-lg);'),
+      'the completion popup pads like the menus rather than the 2px it used to carry',
+    );
+    assert.ok(
+      code.includes('found.items.length * 26 + 8'),
+      'and its anchor maths still matches the row height and the popup padding',
+    );
+    // Deliberate differences, asserted so they read as decisions rather than as leftover
+    // inconsistencies: a compact row, and a width tied to the caret rather than to a
+    // container edge.
+    assert.ok(
+      sheet.includes('.dshCc_suggestItem{') && sheet.includes('min-height:26px;padding:3px 7px;')
+        && sheet.includes('border-radius:var(--dsw-radius-sm)'),
+      'the popup keeps its compact 26px row on radius-sm, which is what an autocomplete wants',
     );
   }
 
