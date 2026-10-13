@@ -31,7 +31,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, liveHighlightBoxes: () => highlightBoxes };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -372,6 +372,20 @@ function nameOfRequest(url, init) {
   return null;
 }
 
+/**
+ * Boot one client module into a fake page.
+ *
+ * `supports` is the `CSS.supports` the sandbox gets, and `undefined` is a **meaningful**
+ * configuration rather than a missing one: the plugin's own `supported()` answers `true` when
+ * the engine cannot be asked, which is the right behaviour for a browser without the API. A
+ * boot that wants to observe "this value was rejected" has to supply a stub — and a boot that
+ * does not want that should leave it alone.
+ *
+ * Writing a general-purpose stub for the value-field assertions was attempted and abandoned:
+ * it rejected `space-between` and `var(--dsw-…)`, and re-implementing a CSS engine inside a
+ * test bed is the wrong shape of solution. Those assertions are scoped to the half that needs
+ * no engine, and the rest of that behaviour is verified in the browser.
+ */
 async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
   const styleTags = [];
   const storage = new Map(stored);
@@ -1075,12 +1089,28 @@ async function main() {
   // Panel dropdowns are own-element menus — a native <select> popup cannot be
   // styled — so the harness reads each Dropdown element by its props instead.
   const dropdowns = [];
+  /**
+   * Is this node one of the panel's value fields?
+   *
+   * They are `PropValueInput` elements rather than raw `<input>`s — the field owns the "is this
+   * valid CSS" judgement, and it can only own that as a component. So recognising them means
+   * looking at props, never at `className`: the class is applied on the inside, and the harness
+   * does not expand function components, so it never reaches `renderedClasses` either.
+   *
+   * One predicate rather than four copies — there were four places looking for the old class,
+   * and a rule that has to be remembered in four places is a rule that gets forgotten in one.
+   */
+  const isValueField = (node) => node !== null && typeof node === 'object'
+    && node.type !== 'input'
+    && typeof node.props?.property === 'string'
+    && node.props.value !== undefined;
+
   /** Text fields of the open rule's panel, in render order. */
   const collectPropTexts = (node) => {
     const found = [];
     (function walk(current) {
       if (current === null || typeof current !== 'object') return;
-      if (String(current.props?.className ?? '').includes('dshCc_propText')) found.push(current);
+      if (isValueField(current)) found.push(current);
       for (const child of current.children ?? []) walk(child);
     })(node);
     return found;
@@ -1113,7 +1143,28 @@ async function main() {
   collectDropdowns(panelRoot(panelView));
   const propertyDropdowns = dropdowns.filter(item => item.props.ariaLabel !== '添加属性');
   assert.strictEqual(propertyDropdowns.length, 2, 'only declared enum properties get a dropdown');
-  assert.ok(renderedClasses.includes('dshCc_propText'), 'a non-enum declaration gets a value field');
+  // The value fields are `PropValueInput` elements rather than raw `<input>`s: the field owns
+  // the "is this valid CSS" judgement, and it can only own that as a component. So the
+  // assertion looks for the component by the prop that identifies it, not by class name —
+  // `renderedClasses` collects when `createElement` runs, and the harness does not expand
+  // function components, so a className set inside one never reaches that list.
+  const valueFields = [];
+  (function walk(current) {
+    if (current === null || typeof current !== 'object') return;
+    const props = current.props ?? {};
+    if (current.type !== 'input' && typeof props.property === 'string' && props.value !== undefined) {
+      valueFields.push(current);
+    }
+    for (const child of current.children ?? []) walk(child);
+  })(panelRoot(panelView));
+  assert.ok(
+    valueFields.length > 0,
+    'a non-enum declaration gets a value field — found ' + valueFields.length,
+  );
+  assert.ok(
+    valueFields.every(field => field.props['aria-label'] !== undefined),
+    'and every value field is named',
+  );
 
   // The add-property control sits below the declarations grid: after reading the
   // summary of what the rule declares, that is where the next action belongs.
@@ -1160,7 +1211,9 @@ async function main() {
   const freeInputs = [];
   const collectInputs = (node) => {
     if (node === null || typeof node !== 'object') return;
-    if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_propText')) {
+    // The value field is `PropValueInput` now, so it is recognised by its props rather than by
+    // a className it only applies on the inside (see the note above).
+    if (node.type !== 'input' && typeof node.props?.property === 'string' && node.props.value !== undefined) {
       freeInputs.push(node);
     }
     for (const child of node.children ?? []) collectInputs(child);
@@ -1173,6 +1226,44 @@ async function main() {
     '0 / 8px / auto',
     'the dictionary hint becomes the placeholder',
   );
+
+  // The value field carries the "is this valid CSS" judgement, and it is a *deferred* one.
+  // Half-typed values are invalid by definition — measured with `CSS.supports`: `re`, `rgb(`,
+  // `calc(` and a bare `8` are all rejected — so a live check would mark the field wrong on
+  // nearly every keystroke and hold it there until the value happened to become legal. The
+  // verdict is taken on blur instead, which is what the platform does too (`:user-invalid`
+  // exists for exactly this reason).
+  //
+  // What is asserted here is the half that does NOT need a CSS engine, because the harness has
+  // none and inventing one in the bed broke unrelated tests (the first attempt rejected
+  // `space-between` and `var(--dsw-…)`). So: how the field *renders* a verdict it has been
+  // given, and the one value rule the plugin owns rather than delegating — emptiness.
+  assert.strictEqual(
+    marginInput.props['aria-invalid'], undefined,
+    'a field nobody has finished with is not marked invalid',
+  );
+
+  // What is NOT asserted here, and why.
+  //
+  // The rest of this behaviour is "render the field with a verdict already decided" — the
+  // attribute and the tooltip that explains it. Reaching that frame in this bed means seeding
+  // the component's two hook slots, and an attempt at it (`hookSlots = [null, verdict]`) broke
+  // an unrelated assertion further down: `hookSlots` is shared by every render in the boot, so
+  // replacing it clobbered the slot the panel's `openIndex` lives in and the panel stopped
+  // opening. A test that reaches its subject by corrupting another one's state is not worth
+  // having, so this half is verified in the browser instead — where the field is the real
+  // component, the engine is real, and the rendered attribute can simply be read.
+  //
+  // Emptiness, though, is the one value rule the plugin owns rather than delegating to the
+  // engine, so it is asked directly. It has to own it: measured, `CSS.supports` answers false
+  // for the empty string for every property — `color`, `gap`, `width` — so a field would go
+  // red the moment it was cleared.
+  const { valueInvalid } = host.mod.__probe;
+  assert.strictEqual(typeof valueInvalid, 'function', 'the emptiness rule is reachable for testing');
+  assert.strictEqual(valueInvalid('color', ''), false, 'an empty field is not an invalid one');
+  assert.strictEqual(valueInvalid('color', '   '), false, 'and neither is whitespace');
+  assert.strictEqual(valueInvalid('margin-top', ''), false, 'for a free property too');
+  assert.strictEqual(valueInvalid('color', 'red'), false, 'a value the engine takes is fine');
 
   const displayDropdown = propertyDropdowns.find(item => item.props.ariaLabel === '显示');
   assert.ok(displayDropdown !== undefined, 'the display dropdown renders');
@@ -1578,7 +1669,7 @@ async function main() {
   const partInputs = [];
   const collectPartInputs = (node) => {
     if (node === null || typeof node !== 'object') return;
-    if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_propText')) {
+    if (isValueField(node)) {
       partInputs.push(node);
     }
     for (const child of node.children ?? []) collectPartInputs(child);
@@ -1752,7 +1843,7 @@ async function main() {
   const braceFields = [];
   (function collectBraceFields(node) {
     if (node === null || typeof node !== 'object') return;
-    if (String(node.props?.className ?? '').includes('dshCc_propText')) braceFields.push(node);
+    if (isValueField(node)) braceFields.push(node);
     for (const child of node.children ?? []) collectBraceFields(child);
   })(bracePanel);
   assert.deepStrictEqual(
@@ -2305,7 +2396,7 @@ async function main() {
   const uriInputs = [];
   (function collectUriInputs(node) {
     if (node === null || typeof node !== 'object') return;
-    if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_propText')) uriInputs.push(node);
+    if (isValueField(node)) uriInputs.push(node);
     for (const child of node.children ?? []) collectUriInputs(child);
   })(uriPanel);
   const uriField = uriInputs.find(input => input.props['aria-label'] === '背景图');
@@ -3353,12 +3444,37 @@ async function main() {
       !sheet.includes('.dshCc_menuCheck{flex:none;color:var(--dsw-alias-brand-primary)}'),
       'the selected check is not painted in the brand colour',
     );
-    // The sticky heading's background is a hook, not a live rule: nothing in this row sets
-    // `data-stuck` yet. It is kept because the day one is wired up, the alternative is
-    // inventing a second look for it.
+    // The sticky heading's fill is now a live rule rather than a hook nobody set. It matters
+    // more than it sounds: the add-property menu is ~4000px of content in a 260px scrolling
+    // box across ten groups, so a heading does sit over the rows below it — measured, and the
+    // fill appears there (`rgba(248,249,250,.94)` at 4px from the list's top edge).
     assert.ok(
       sheet.includes('.dshCc_selectGroup[data-stuck]{background:var(--dsw-alias-menu-group-header-fill)}'),
-      'the sticky group heading has its fill ready for the day an observer sets data-stuck',
+      'the sticky group heading has its fill rule',
+    );
+    assert.ok(
+      sheet.includes('.dshCc_selectGroup{position:sticky;top:0;'),
+      'and it is the sticky positioning that gives the fill something to do',
+    );
+    // The attribute comes from an IntersectionObserver rooted on the list, the way DSH does it,
+    // and not from a scroll handler: the callback fires exactly when a heading crosses the
+    // list's top edge. Guarded on the API existing — without it the heading stays plain sticky,
+    // which is the correct degradation.
+    assert.ok(
+      code.includes("typeof IntersectionObserver !== 'function'"),
+      'the observer is optional rather than assumed',
+    );
+    assert.ok(
+      code.includes("entry.target.setAttribute('data-stuck', '')"),
+      'and something actually sets the attribute',
+    );
+    assert.ok(
+      code.includes("root: menu, rootMargin: '0px 0px -90% 0px'"),
+      'rooted on the list itself, so only the top contact counts — a heading on its way out does not flip it',
+    );
+    assert.ok(
+      code.includes("heading.removeAttribute('data-stuck')"),
+      'and closing the menu leaves no heading carrying a stale attribute',
     );
   }
 
