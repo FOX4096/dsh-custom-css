@@ -13,7 +13,11 @@
 
 ## 方式一：从 npm 安装（推荐）
 
-**前置**：DSH `0.1.2-rc.1` ~ `0.2.0-rc.2`（**已真机验证**；接口契约断言覆盖到 `0.2.1-alpha.2`，见 [兼容性](./compat.md)），Node.js ≥ 20、pnpm ≥ 10。
+**前置**：DSH [`0.1.2-rc.1` ~ `0.2.0-rc.2` 已真机验证](../README.md#兼容性)（断言覆盖到 `0.2.1-alpha.2`），Node.js ≥ 20、pnpm ≥ 10。
+
+> 范围**故意不在这里复写**：它写在那张自动维护的验证矩阵里（README 的「兼容性」一节），
+> 由 `npm run compat:update` 每 6 小时核对一次。抄一份到这里就会各自过期 ——
+> 本节第一条链接指向的就是那份权威数据。
 
 ```bash
 # 1) 把插件装进 profile（dsh plugin 会把参数转发给 profile 目录里的 pnpm）
@@ -81,8 +85,11 @@ profile bundle "…" declares no dsh.bundle in its package.json
 
 ## 换版本
 
-- **升级 / 降级到某个具体版本**：把 `add` 换成 `dsh plugin --profile web add dsh-custom-css@0.2.2`，
+- **升级 / 降级到某个具体版本**：把 `add` 换成 `dsh plugin --profile web add dsh-custom-css@X.Y.Z`，
   然后重启。
+
+  （示例用占位符而不是某个真实版本号 —— 写具体版本会让人以为要照着改，而它迟早过期。
+  当前版本见 README 顶部那颗 npm 徽章，或 [releases 页](https://github.com/FOX4096/dsh-custom-css/releases)。）
 - **跟 main 分支**：用方式二（`add github:…`），之后 `dsh plugin --profile web update` 拉最新。
 - 换完**一定要重启** —— 进程内的模块缓存是旧的那份。
 

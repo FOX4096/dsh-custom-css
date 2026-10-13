@@ -143,10 +143,47 @@ for (const name of readdirSync(docsDir).filter((entry) => DOC_EXT.test(entry))) 
 	}
 }
 
+// ── ④ 别把「版本范围」抄进 docs/ ─────────────────────────────────────────
+//
+// 为什么禁：DSH 的版本范围（「已真机验证 0.1.2-rc.1 ~ 0.2.0-rc.2」这类）由
+// `npm run compat:update` 每 6 小时写回 **README 的验证矩阵** —— 那是唯一的事实来源。
+// 抄一份到 docs/ 里就会各自过期，而且**没有任何东西会提醒**：脚本只改 README。
+// 与其给每篇文档都加一套锚点，不如禁止抄写，让范围只存在一处。
+//
+// 这条守卫是拆文档时发现的：`docs/install.md` 真的抄了一份，而且刚抄完就已经和 README
+// 用的是同一个值 —— 也就是说它不会在第一次发版时暴露，而是在第二次之后悄悄不一致。
+const VERSION_RANGE = /0\.\d+\.\d+(?:-[a-z]+\.\d+)?\s*(?:~|至|到)\s*0\.\d+\.\d+(?:-[a-z]+\.\d+)?/;
+for (const file of files) {
+	const relative = path.relative(REPO, file);
+	// README 就是那个事实来源，跳过
+	if (relative === 'README.md') continue;
+	const lines = readFileSync(file, 'utf8').split('\n');
+	lines.forEach((line, index) => {
+		if (VERSION_RANGE.test(line)) {
+			problems.push(`${relative}:${index + 1}: 抄了 DSH 版本范围 —— 它只在 README 的验证矩阵里维护，这里请改为链接过去`);
+		}
+	});
+}
+
+// ── ⑤ 示例命令别用真实版本号 ─────────────────────────────────────────────
+//
+// `add dsh-custom-css@0.2.2` 这种示例会随着每次发版变得过时，读者会以为要照着改。
+// 用 `@X.Y.Z` 占位符。（同类问题在 CONTRIBUTING.md 里也修过一次。）
+for (const file of files) {
+	const relative = path.relative(REPO, file);
+	const lines = readFileSync(file, 'utf8').split('\n');
+	lines.forEach((line, index) => {
+		const match = /dsh-custom-css@(\d+\.\d+\.\d+)/.exec(line);
+		if (match !== null && !line.includes('github:')) {
+			problems.push(`${relative}:${index + 1}: 命令示例里写死了插件版本 ${match[1]} —— 请用 @X.Y.Z 占位符`);
+		}
+	});
+}
+
 // ── 报告 ─────────────────────────────────────────────────────────────────
 console.log(`══ 文档巡检（${files.length} 个 markdown 文件）══`);
 if (problems.length === 0) {
-	console.log('  ✓ 链接完整、README 锚点齐全、没有孤儿文档');
+	console.log('  ✓ 链接完整、README 锚点齐全、没有孤儿文档、没有抄来的版本范围');
 }
 else {
 	for (const problem of problems) console.log(`  ✗ ${problem}`);
