@@ -38,11 +38,14 @@ body {
   --dsh-acrylic-tone-b: var(--dsw-static-green-400);
   --dsh-acrylic-tone-c: var(--dsw-static-amber-400);
 
-  /* 玻璃的不透明度：三档，按"面积"分 ——
-   * 壳（shell）铺满整个视口、窗格（pane）铺满一整列，浓度高了壁纸就看不见了；
-   * 而输入卡片、菜单这类小面积面板，浓度低了字会糊在背景上。 */
-  --dsh-acrylic-shell-tint: 34%;
-  --dsh-acrylic-pane-tint: 46%;
+  /* 玻璃的不透明度：**两档，按"面积"分** ——
+   * 壳（shell）铺满整个视口，浓度高了壁纸就看不见了；
+   * 而输入卡片、菜单这类小面积面板，浓度低了字会糊在背景上。
+   *
+   * 曾经还有第三档 "--dsh-acrylic-pane-tint" 给侧栏/右栏那类整列容器用。
+   * 现在它们**完全透明**（把底交给壳那一层）—— 因为一列自画半透明白就等于在壳的玻璃上
+   * 又盖一张白纸，右侧的壁纸颜色会被压到几乎看不见。档位少了，配比也更好懂。 */
+  --dsh-acrylic-shell-tint: 30%;
   --dsh-acrylic-tint: 72%;
 
   /* 模糊强度：DSH 自己的菜单用 blur(40px) saturate(150%)，这里照它的配方 */
@@ -76,11 +79,17 @@ body {
  * 用 fixed 伪元素而不是给 body 加背景：这样各面板的 backdrop-filter 才有东西可模糊，
  * 也不会被面板自己的半透明底"吃掉"。z-index:-1 让它待在所有内容后面。
  *
- * ⚠ 这里踩过一个**几何坑**，注释下来免得再犯：第一版写 `inset: -20%`（想给漂移动画留余量），
- * 于是伪元素比视口大 40%。而 `radial-gradient(82% 50% at 82% 18%)` 的右边缘落在
- * **元素自身宽度**的 123% 处 —— 元素宽 2679，右边缘就在 3295，而视口只到 1914。
- * 结果右侧一大片完全没有渐变覆盖，只剩 `transparent`，看起来像"壁纸只铺了左半边"。
- * 所以：**渐变盒必须与视口同尺寸**，色斑用百分比定位在盒内展开即可。 */
+ * ⚠ 两个踩过的坑，注释下来免得再犯：
+ *
+ * 1) **渐变盒必须与视口同尺寸。** 第一版写 `inset: -20%`（想给漂移动画留余量），
+ *    于是伪元素比视口大 40%。而 `radial-gradient(82% 50% at 82% 18%)` 的右边缘落在
+ *    **元素自身宽度**的 123% 处 —— 元素宽 2679，右边缘在 3295，而视口只到 1914。
+ *    结果右侧一大片完全没有渐变覆盖，只剩 `transparent`，看起来像"壁纸只铺了左半边"。
+ *
+ * 2) **两侧的色斑要等重。** 修好几何之后用户仍然反馈"渐变只有一半"——
+ *    量出来左半彩度 14.3、右半 6.7：左侧两团浓（62% / 38%），右侧两团淡（52% / 46%），
+ *    再加上右侧那片窗格自己还有一层半透明白，右半边就成了"极淡的暖白"。
+ *    现在四个象限各一团、浓度都在 46–56%，并让琥珀色一直铺到右边缘。 */
 body::before {
   content: '';
   position: fixed;
@@ -88,27 +97,35 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    /* 兜底底色：一条缓的对角渐变，保证任何角落都不会是纯白 */
-    linear-gradient(135deg,
-      color-mix(in srgb, var(--dsh-acrylic-tone-a) 18%, transparent) 0%,
-      color-mix(in srgb, var(--dsh-acrylic-tone-b) 13%, transparent) 46%,
-      color-mix(in srgb, var(--dsh-acrylic-tone-c) 18%, transparent) 100%),
-    /* 色相来源：四团光斑（右下也放一团，避免右半边发白），位置错开避免对称感 */
-    radial-gradient(60% 70% at 16% 24%,
-      color-mix(in srgb, var(--dsh-acrylic-tone-a) 62%, transparent) 0%,
+    /* 兜底底色：**染色主要由它承担**（一条缓的对角渐变，天然均匀，不会一边浓一边淡）。
+     * 这是"左右不均衡"最终的解法 —— 与其让四团色斑互相配平（它们的颜色感知强度不同，
+     * 蓝在浅底上比绿/琥珀显色得多，怎么调都差一截），不如让均匀的那层负责整体色调，
+     * 色斑只做局部偏移。 */
+    linear-gradient(118deg,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 40%, transparent) 0%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-b) 24%, transparent) 40%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-c) 22%, transparent) 78%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 28%, transparent) 100%),
+    /* 色相来源：四个象限各一团，只做"这是哪儿"的局部差异，浓度刻意压低 */
+    radial-gradient(58% 66% at 14% 22%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 48%, transparent) 0%,
       transparent 100%),
-    radial-gradient(62% 72% at 86% 14%,
-      color-mix(in srgb, var(--dsh-acrylic-tone-b) 52%, transparent) 0%,
+    radial-gradient(58% 66% at 88% 20%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-b) 30%, transparent) 0%,
       transparent 100%),
-    radial-gradient(66% 76% at 78% 88%,
-      color-mix(in srgb, var(--dsh-acrylic-tone-c) 46%, transparent) 0%,
+    radial-gradient(60% 68% at 82% 86%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-c) 28%, transparent) 0%,
       transparent 100%),
-    radial-gradient(70% 70% at 6% 92%,
-      color-mix(in srgb, var(--dsh-acrylic-tone-a) 38%, transparent) 0%,
+    radial-gradient(62% 64% at 10% 88%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-a) 40%, transparent) 0%,
+      transparent 100%),
+    /* 中带一条很淡的桥，避免左右两半在视觉上"断开" */
+    radial-gradient(90% 46% at 52% 52%,
+      color-mix(in srgb, var(--dsh-acrylic-tone-b) 18%, transparent) 0%,
       transparent 100%);
   /* 主题色本身很淡，再压一层 → 壁纸是"底色上的光斑"，不抢内容 */
-  opacity: 0.55;
-  filter: saturate(1.05);
+  opacity: 0.62;
+  filter: saturate(1.08);
 }
 
 /* 缓慢漂移：一个关键帧动画，同时驱动两个自定义属性（合成层，不触发布局） */
@@ -176,19 +193,19 @@ body::after {
   box-shadow: inset -1px 0 0 color-mix(in srgb, var(--dsw-alias-bg-layer-1) 40%, transparent);
 }
 
-[data-rightbar-col="true"] {
-  background: color-mix(in srgb, var(--dsw-alias-bg-module-platform) var(--dsh-acrylic-tint), transparent) !important;
-  backdrop-filter: blur(var(--dsh-acrylic-blur)) saturate(var(--dsh-acrylic-saturate));
-  border-left: 0.5px solid var(--dsw-alias-border-l2);
-}
-
-/* 右栏面板与 dock 窗格：同一套材质。
- * 浓度用 --dsh-acrylic-pane-tint（比面板淡一档）：它们是**铺满整块**的容器，
- * 用面板那一档的浓度会把背后的壁纸整块盖掉 —— 实测 72% 时右侧窗格是纯白一片。 */
+/* 右栏面板与 dock 窗格：**不给它们自己的底**。
+ *
+ * 这是"右侧像蒙了一层白"的根因 —— 它们是**铺满整整一列**的容器（实测 861×938），
+ * 自己再画一层半透明白，就等于在 frame 的玻璃上又盖了一张白纸：右侧的壁纸颜色被
+ * 压到几乎看不见（实测同一列：盖着时 rgb(247,245,233) 彩度 14，去掉后 rgb(225,214,165) 彩度 60）。
+ *
+ * 所以让它们完全透明、把底交给底下那层 frame —— 全屏同一层玻璃，左右才是一体的。
+ * （它们仍可用 border 之类的"边"来与主区区分，见下面侧栏那条右描边。） */
+[data-dockkit-surface="true"],
 [data-sidebar-right-panel],
-[data-dockkit-surface="true"] {
-  background: color-mix(in srgb, var(--dsw-alias-bg-layer-1) var(--dsh-acrylic-pane-tint), transparent) !important;
-  backdrop-filter: blur(calc(var(--dsh-acrylic-blur) * 0.75)) saturate(var(--dsh-acrylic-saturate));
+[data-rightbar-col="true"] {
+  background: transparent !important;
+  backdrop-filter: none !important;
 }
 
 /* 标签条：更透明，因为它是"玻璃的边" */
