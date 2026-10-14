@@ -64,11 +64,49 @@ const DEFAULT_PORT = 3081;
  */
 const LIVE_PORT = 3080;
 
-/** dsh 的启动脚本。优先用 dsh 自己包里的 bin.js，找不到再回退到 PATH 上的 dsh。 */
-const DSH_BIN = path.join(
-	process.env.APPDATA ?? path.join(process.env.USERPROFILE ?? '', 'AppData', 'Roaming'),
-	'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js',
-);
+/**
+ * dsh 的启动脚本。
+ *
+ * 默认用全局那份（`%APPDATA%\npm\node_modules\@deepseek-ai\dsh\lib\bin.js`）——
+ * 但 **dev 与真机共用同一份二进制**，于是「升级 dev」就等于「升级真机」，
+ * 而真机上跑着用户正在用的实例。要单独给 dev 换版本，有两个办法：
+ *
+ *   `npm run dev:alpha`   —— 用 `dev/dsh-alpha/` 下那份独立安装（见下）
+ *   `$env:DSH_DEV_BIN`    —— 指向任意一份 dsh 的 `lib/bin.js`
+ *
+ * 独立安装这样建（**不动全局**，因此生产实例的版本与进程都不受影响）：
+ *
+ *     npm i --prefix dev/dsh-alpha @deepseek-ai/dsh@alpha
+ *
+ * 它落在 `dev/` 下，而整个 dev/ 都在 .gitignore 里，不会污染仓库。
+ */
+const ALPHA_BIN = path.join(REPO, 'dev', 'dsh-alpha', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+
+/**
+ * 解析本次要用的 dsh 启动脚本。
+ *
+ * 优先 `--alpha`（命令行开关优先于环境变量，因为它更显眼），
+ * 然后 `DSH_DEV_BIN`，最后回退到全局安装。
+ *
+ * @param argv - 传给脚本的参数，用来找 `--alpha`。
+ * @returns 启动脚本的绝对路径。
+ */
+function resolveDshBin(argv) {
+	if (argv.includes('--alpha')) {
+		if (!existsSync(ALPHA_BIN)) {
+			throw new Error(`--alpha 指定的独立安装不存在：${ALPHA_BIN}\n`
+				+ '先建它：npm i --prefix dev/dsh-alpha @deepseek-ai/dsh@alpha');
+		}
+		return ALPHA_BIN;
+	}
+	if (process.env.DSH_DEV_BIN && process.env.DSH_DEV_BIN.trim() !== '') return process.env.DSH_DEV_BIN;
+	return path.join(
+		process.env.APPDATA ?? path.join(process.env.USERPROFILE ?? '', 'AppData', 'Roaming'),
+		'npm', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js',
+	);
+}
+
+const DSH_BIN = resolveDshBin(process.argv.slice(2));
 
 const STATE_DIR = path.join(REPO, 'dev', 'state');
 const STATE_FILE = path.join(STATE_DIR, 'instance.json');
