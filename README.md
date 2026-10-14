@@ -117,7 +117,7 @@ dsh plugin --profile web add dsh-custom-css
 
 `npm run compat` 需要网络（要拉各版本的包），所以本地 `npm test` 保持离线可跑；CI 里单跑一档。
 
-上表由 `npm run compat:update` 自动维护（GitHub Actions 每 6 小时检查一次 DSH 是否更新，有新版本就重新断言并提交这一节）。**上次核对：2026-10-13，当时最新已发布版本 `0.2.1-alpha.2`。**
+上表由 `npm run compat:update` 自动维护（GitHub Actions 每 6 小时检查一次 DSH 是否更新，有新版本就重新断言并提交这一节）。**上次核对：2026-10-14，当时最新已发布版本 `0.2.1-alpha.2`。**
 
 > **换代时的两种失效模式怎么判别**（症状完全不同）：见 [兼容性](./docs/compat.md#两种失效模式的判别)。
 
