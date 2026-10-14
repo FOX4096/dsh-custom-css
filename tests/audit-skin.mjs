@@ -39,6 +39,15 @@ const KNOWN_TOKENS = new Set([
 	'--dsw-static-blue-400',
 	'--dsw-static-green-400',
 	'--dsw-static-amber-400',
+	// §6d 的注释引用了扩展"文件改动卡片"绑的静态色（皮肤正是把这组实心色换掉）
+	'--dsw-static-neutral-50',
+	'--dsw-static-neutral-100',
+	'--dsw-static-neutral-850',
+	// §6d 用到的交互色（换掉 `--changes-hover`）、§6e 的边框色
+	'--dsw-alias-interactive-bg-hover',
+	'--dsw-alias-border-l4',
+	'--dsw-alias-label-tertiary',
+	'--dsw-alias-state-business-primary',
 	// 描边与文字
 	'--dsw-alias-border-l1',
 	'--dsw-alias-border-l2',

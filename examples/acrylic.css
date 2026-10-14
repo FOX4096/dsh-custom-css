@@ -521,6 +521,56 @@ code {
   font-variant-ligatures: none;
 }
 
+/* ── §6d  文件卡片改亚克力（用户指定的第 ① 处）──────────────────────────
+ * 用户："1 改成亚克力"（指「已编辑 restore_validated.js」那张卡片）。
+ *
+ * 实测结构（`hz8-rW_*` 家族，一个"文件改动卡片"扩展）：
+ *
+ *   .hz8-rW_card    920×62   bg=白 30%  r=16px        ← 卡片本体已经是半透明
+ *   .hz8-rW_header  918×60   bg=rgb(245,245,245)      ← 里面的头部**不透明**
+ *
+ * 那个不透明的白来自**扩展自己定义的两个令牌**，绑在 DSH 的"静态色"上
+ * （静态色不随主题、也不随皮肤走 —— 今天已经踩过三次同类问题）：
+ *
+ *   .hz8-rW_card { --changes-fill: var(--dsw-static-neutral-50);  --changes-hover: var(--dsw-static-neutral-100) }
+ *   body[data-ds-dark-theme] .hz8-rW_card { --changes-fill: var(--dsw-static-neutral-850); … }
+ *   .hz8-rW_header { background: var(--changes-fill) }
+ *
+ * 修法：**改令牌，不改元素** —— 在卡片作用域里重赋值，头部、以及卡片里其它用
+ * 同一令牌的地方（`.hz8-rW_tile` 等）会一起变。用实测确认过的**完整类名**
+ * `hz8-rW_card`，而不是 `[class*="hz8"]` 这种片段（片段会打到内部元素，今天栽过 5 次）。
+ *
+ * 顺带确认：头部的 `border-radius: 0` **不用管** —— 卡片自身 `overflow: hidden`
+ * + 16px 圆角，头部有底也戳不出圆角（实测 918×60 完全落在卡片内）。 */
+[class~="hz8-rW_card"] {
+  --changes-fill:
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
+               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
+  --changes-hover: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* ── §6e  代码内容的底改成不透明（用户指定的第 ② 处）──────────────────────
+ * 用户："2 改成不透明的"（指那块代码内容）。
+ *
+ * 代码块现在的底是**白 30%**（`--dsw-alias-markdown-code-block` 走的是"层"档），
+ * 太透 —— 底下的正文会透上来，跟代码的文字叠在一起。
+ *
+ * 这里把**代码相关的那几个令牌**提高不透明度。理由是**可读性**：
+ * 代码是要逐行读的东西，而它里面是深色文字压在浅底上（实测 `rgb(15,17,21)`），
+ * 所以把底做实不会撞色，只会让代码清楚。
+ *
+ * ⚠ 严格只动"代码"这一族令牌，**不动**其它表面 —— 今天已经因为"一次改一大片"
+ * 返工过四轮（最后整份还原），所以这次限定在用户指出的两处。 */
+body,
+body[data-ds-dark-theme] {
+  --dsw-alias-markdown-code-block:
+    light-dark(color-mix(in srgb, #ffffff 92%, transparent),
+               color-mix(in srgb, #1c1f24 92%, transparent));
+  --dsw-alias-markdown-code-block-banner:
+    light-dark(color-mix(in srgb, #ffffff 88%, transparent),
+               color-mix(in srgb, #24282e 88%, transparent));
+}
+
 /* ── §7  终端：盖一层浅色底，因为它的主题改不了 ──────────────────────────
  * 现象：皮肤装上后右侧终端**变成纯黑**（用户一眼看出"之前不是白的吗"）。
  *
