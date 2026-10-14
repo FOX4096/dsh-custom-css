@@ -241,21 +241,17 @@ body {
  * （实测 `dshCc_btn` 被加过模糊），所以这里**统一撤销整个 `.dshCc_` 子树**。
  * 插件自己的样式表已经把界面调到与 DSH 一致，皮肤不该再糊一层。
  *
- * ⚠ 特异性必须真的赢：`:is(.dshCc_menu…)` 全是单类，整体只有 (0,1,0)，与
+ * ⚠ 特异性必须真的赢：`:is(.dshCc_…)` 全是单类，整体只有 (0,1,0)，与
  * `[class*="_dialog"]` 同级；用 `html body :is(…)` 抬到 (0,2,1)。
  * ⚠ **撤销 ≠ 重设**：撤销只该拿掉，不该赋新值（第一版把圆角塞进撤销那步，
  * 反而把菜单项的 12px 改成了继承来的 16px）。 */
-html body [class*="dshCc_"] {
+/* `:is(A, A *)` 一条覆盖"元素本身 + 它的整个子树"，比写两条规则更清楚，
+   也少一条重复的片段选择器（这个数字由 tests/audit-skin.mjs 盯着）。 */
+html body :is([class*="dshCc_"], [class*="dshCc_"] *) {
   backdrop-filter: none !important;
   border-width: 0 !important;
   border-style: none !important;
   box-shadow: none !important;
-}
-/* 兜底：子树里**类名不含前缀**的元素（如某些哈希型子类）也要清干净描边。 */
-html body [class*="dshCc_"] * {
-  border-width: 0 !important;
-  border-style: none !important;
-  backdrop-filter: none !important;
 }
 
 /* ── §6  修掉"渐隐层"：它不该渐隐到颜色，而该渐隐到透明 ──────────────────
@@ -274,8 +270,21 @@ html body [class*="dshCc_"] * {
  *     Chrome 里直接可用；不支持 mask 的环境会退化成"没有淡出"，但**也不会留下白带**）。
  *
  * 这样会话列表滚到底部时，最后几行文字是自然消失的，不会出现一条色带。
- * 选择器用 `[class*="_fade"]`，与 DSH 自己的命名一致 —— 它给这类层都用 `_fade` 后缀。 */
-[class*="_fade"] {
+ *
+ * ⚠ **选择器必须排除"已经有方向遮罩"的那些。** DSH 里 `fade` 家族不止一个：
+ *
+ *     x_fade          background:linear-gradient(transparent, <侧栏底色>)   ← 需要修的就是它
+ *     x_fadeTop       mask-image:linear-gradient(#0000 0, #000 24px 100%)    ← 顶部渐隐，已有方向
+ *     x_fadeBottom    mask-image:linear-gradient(#000 0 calc(100% - 24px), #0000 100%)
+ *     _rail-fade-in / _success-fade                                          ← 动画，不是渐隐层
+ *
+ * 而 `[class*="_fade"]` 会把 `_fadeTop` / `_fadeBottom` **一起命中** —— 我原来那条
+ * `mask-image` 又带 `!important`，等于把它们的**方向遮反**（顶部渐隐被改成底部淡出）。
+ * 实测那一版在页面上暂时没炸，只因为当前 DOM 里只有 `_fade` 一个 —— 属于"潜伏的错"。
+ *
+ * 所以排除掉带方向的后缀与动画类，只留"无方向的渐隐层"（实测这个边界对
+ * `_fade` / `x_fadeTop` / `y_fadeBottom` / `_rail-fade-in` / `fade-in` 的判断全部正确）。 */
+[class*="_fade"]:not([class*="_fadeTop"]):not([class*="_fadeBottom"]):not([class*="-fade-"]) {
   background-image: none !important;
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
   mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);

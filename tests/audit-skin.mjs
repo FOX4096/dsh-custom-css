@@ -86,22 +86,37 @@ for (const [re, message] of LINT) {
 }
 
 /** ③ 静态：统计规模，作为"是不是又走回逐元素覆盖"的信号。 */
+// 只数**正向**的片段选择器，且**只数真正的规则行**。三个坑都踩过，都记在这里：
+//   ① 用先行断言写正则 —— 匹配到空串，把总数数成 0，守卫"永远通过"，**比没有守卫更糟**；
+//   ② 把 `:not([class*=…])` 算进来 —— 那是"收窄"，越多说明选择器越谨慎，
+//      与"覆盖面变大"正好相反；
+//   ③ 把**注释里提到的**选择器算进来 —— 这个文件里到处在解释"当初写错过什么"，
+//      于是注释里的反面教材全被计入，数字虚高一倍（实测 15 vs 真正的 8）。
+// 所以先剥掉注释，再统计；其余用最简单的"数出现次数再相减"。
+const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
+const allFragments = (code.match(/\[class\*=/g) || []).length;
+const excludeFragments = (code.match(/:not\(\[class\*=/g) || []).length;
+const positiveFragments = allFragments - excludeFragments;
 const stat = {
 	行数: css.split('\n').length,
 	important: (css.match(/!important/g) || []).length,
 	backdropFilter: (css.match(/^\s*backdrop-filter\s*:/gm) || []).length,
-	类选择器: (css.match(/\[class\*=/g) || []).length,
+	正向片段选择器: positiveFragments,
+	排除片段: excludeFragments,
 	令牌引用: referenced.length,
 };
 
 // 上一版逐元素覆盖时：533 行 / 9 处 backdrop-filter / 几十处 [class*=]。
-// 现在的设计是"改令牌"，所以 [class*=] 只应出现在两处：
-//   §4 容器内部根的豁免（4 条） + §5 浮层（6 条） + 插件菜单的撤销（2 条）
-// 合起来约 12 条。设 16 作为上限：留一点余量，但再多一个"逐元素覆盖"块就会顶破。
-const CLASS_SELECTOR_BUDGET = 16;
-if (stat.类选择器 > CLASS_SELECTOR_BUDGET) {
-	problems.push(`[class*=] 用了 ${stat.类选择器} 处（上限 ${CLASS_SELECTOR_BUDGET}）—— 这个数字变大通常意味着`
-		+ `又回到"逐元素覆盖"，而那正是会漏、会叠的做法（实测一个按钮里叠过四层）。优先改令牌。`);
+// 现在的设计是"改令牌"，正向片段选择器应该保持个位数：
+//   §4 容器内部根的豁免（4） + §5 浮层（2） + §5b 插件子树（2，含一条后代）
+//   + §6 渐隐层（1）≈ 9 条
+// 设 12 作为上限。排除项（`:not([class*=…])`）单独统计、**不计入**上限 ——
+// 它们是"收窄"，越多说明选择器越谨慎。这个区分很重要：把两者混在一起数，
+// 会让"加排除项"看起来像"加覆盖"，而那是完全相反的两件事。
+const CLASS_SELECTOR_BUDGET = 12;
+if (stat.正向片段选择器 > CLASS_SELECTOR_BUDGET) {
+	problems.push(`正向片段选择器用了 ${stat.正向片段选择器} 处（上限 ${CLASS_SELECTOR_BUDGET}）—— 这个数字变大`
+		+ `通常意味着又回到"逐元素覆盖"，而那正是会漏、会叠的做法（实测一个按钮里叠过四层）。优先改令牌。`);
 }
 // !important 的合法用途只有三类，每处都在样式表里写明了原因：
 //   ① 压过 xterm 的**内联**样式（§8 终端底色）—— 3 处；
