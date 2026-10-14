@@ -39,6 +39,10 @@ const KNOWN_TOKENS = new Set([
 	'--dsw-static-blue-400',
 	'--dsw-static-green-400',
 	'--dsw-static-amber-400',
+	// 扩展的"文件改动卡片"绑的就是这两个静态色（皮肤把它换掉，注释里引用了原值）
+	'--dsw-static-neutral-50',
+	'--dsw-static-neutral-100',
+	'--dsw-static-neutral-850',
 	// 描边与文字
 	'--dsw-alias-border-l1',
 	'--dsw-alias-border-l2',

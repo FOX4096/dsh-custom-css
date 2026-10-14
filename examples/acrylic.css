@@ -79,6 +79,10 @@ body[data-ds-dark-theme] {
    * （layer-1/2 是 `#fff`、layer-3 仍是 `#fff`，但深色下分别是 `#1b1b1c` / `#232326` / `#2b2b2e`）。 */
   --dsh-acrylic-layer-2-alpha: 42%;
   --dsh-acrylic-layer-3-alpha: 54%;
+  /* 代码区**单独一档，比层实得多**：代码块里是深色文字压在浅底上，
+   * 底太透的话底下的正文会"透上来"和代码叠在一起 —— 实测用户看到的就是
+   * 代码面板与身后正文的文字互相穿透。代码是"要读的东西"，可读性优先于通透感。 */
+  --dsh-acrylic-code-alpha: 62%;
   /* 侧栏要比壳体**实一档**：两者用同一个令牌时，深色下它们颜色完全相同，
    * 侧栏就没有了区分度（实测 frame 与 sidebarCol 都是 rgba(18,16,26,0.19)）。 */
   --dsh-acrylic-sidebar-alpha: 30%;
@@ -240,14 +244,18 @@ body[data-ds-dark-theme] {
    * 深色原值也查过了（DSH 用 `body[data-ds-dark-theme]` 分别覆盖成
    * `--dsw-static-neutral-800` / `-bluish-850` 之类），这里统一换成皮肤的两套值。 */
   --dsw-alias-markdown-inline-code:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
-               color-mix(in srgb, #292d33 var(--dsh-acrylic-chip-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-code-alpha), transparent),
+               color-mix(in srgb, #292d33 var(--dsh-acrylic-code-alpha), transparent));
   --dsw-alias-markdown-code-block:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
-               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-code-alpha), transparent),
+               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-code-alpha), transparent));
   --dsw-alias-markdown-code-block-banner:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
-               color-mix(in srgb, #24282e var(--dsh-acrylic-chip-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff calc(var(--dsh-acrylic-code-alpha) - 6%), transparent),
+               color-mix(in srgb, #24282e calc(var(--dsh-acrylic-code-alpha) - 6%), transparent));
+  /* 代码块里"未选中的片段"：原先没覆盖（还是 DSH 的实心 #f1f3f5） */
+  --dsw-alias-markdown-code-segment-unselected:
+    light-dark(color-mix(in srgb, #ffffff calc(var(--dsh-acrylic-code-alpha) - 12%), transparent),
+               color-mix(in srgb, #24282e calc(var(--dsh-acrylic-code-alpha) - 12%), transparent));
   --dsw-alias-markdown-tag:
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
                color-mix(in srgb, #24282e var(--dsh-acrylic-chip-alpha), transparent));
@@ -483,6 +491,33 @@ html body [class*="V1MMBW_panelToggle"]:hover,
 html body [class*="V1MMBW_panelClose"]:hover,
 html body [class*="V1MMBW_panelTpl"]:hover {
   background-color: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* ── §6d  "已编辑 xxx.js" 文件卡片：把实心白头部改成亚克力 ────────────────
+ * 用户报："把文件卡片弄成亚克力的"。
+ *
+ * 实测结构（`hz8-rW_*` 家族，另一个扩展的"文件改动卡片"）：
+ *
+ *   .hz8-rW_card    920×62   bg=白 30%  r=16px  overflow=hiden  ← 卡片本体已是半透明
+ *   .hz8-rW_header  918×60   bg=rgb(250,250,250)  r=0px        ← 里面的头部是**实心白**
+ *
+ * 实心白来自**扩展自己定义的两个令牌**，绑在 DSH 的"静态色"上（不随主题、也不随皮肤走）：
+ *
+ *   .hz8-rW_card { --changes-fill: var(--dsw-static-neutral-50);  --changes-hover: var(--dsw-static-neutral-100) }
+ *   body[data-ds-dark-theme] .hz8-rW_card { --changes-fill: var(--dsw-static-neutral-850); --changes-hover: …-800 }
+ *   .hz8-rW_header { background: var(--changes-fill) }
+ *
+ * 所以修法和 §6b/§6c 一样：**改令牌，不改元素** —— 只要把这两个令牌在卡片作用域里
+ * 重新赋值，头部、以及卡片里其它用同一令牌的地方（`.hz8-rW_tile` 等）会一起变。
+ *
+ * 顺带说明：头部的 `border-radius: 0` **不用管** —— 卡片自身有 `overflow: hidden` +
+ * 16px 圆角，头部有底也不会戳出圆角（实测量到它 918×60 完全落在卡片内）。
+ * 真正难看的只有那个实心白。 */
+[class*="hz8-rW_card"] {
+  --changes-fill:
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
+               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
+  --changes-hover: var(--dsw-alias-interactive-bg-hover);
 }
 * {
   scrollbar-width: thin;
