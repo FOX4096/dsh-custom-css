@@ -227,6 +227,37 @@ body[data-ds-dark-theme] {
   --dsw-alias-bg-document-preview:
     light-dark(color-mix(in srgb, #ebeef2 var(--dsh-acrylic-chip-alpha), transparent),
                color-mix(in srgb, #1a1d21 var(--dsh-acrylic-chip-alpha), transparent));
+
+  /* ---- 内容类表面：行内代码、代码块、标签 ----
+   *
+   * ⚠ 这一组是**用户报"卡片上的文本背景太白、太突兀"后补的**。
+   * 根因：`--dsw-alias-markdown-inline-code` 这类令牌**默认是实心近白**
+   * （实测浅色下 `#fafafa`、`alpha: 1`），而我的皮肤只改了"层"那一族令牌，
+   * 没覆盖这一组 —— 于是行内代码在透明界面里像一块**贴上去的白纸**
+   * （实测 155 个近白元素里绝大多数是它）。
+   *
+   * 修法：映射到皮肤自己的骨架（同样按"面积/密度"分档），而不是保留 DSH 的实心色。
+   * 深色原值也查过了（DSH 用 `body[data-ds-dark-theme]` 分别覆盖成
+   * `--dsw-static-neutral-800` / `-bluish-850` 之类），这里统一换成皮肤的两套值。 */
+  --dsw-alias-markdown-inline-code:
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
+               color-mix(in srgb, #292d33 var(--dsh-acrylic-chip-alpha), transparent));
+  --dsw-alias-markdown-code-block:
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
+               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
+  --dsw-alias-markdown-code-block-banner:
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
+               color-mix(in srgb, #24282e var(--dsh-acrylic-chip-alpha), transparent));
+  --dsw-alias-markdown-tag:
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
+               color-mix(in srgb, #24282e var(--dsh-acrylic-chip-alpha), transparent));
+  /* 代码差异块的底色（原来是很实的绿/红），降到与层同档 */
+  --dsw-alias-code-diff-added:
+    light-dark(color-mix(in srgb, #22c55e 12%, transparent),
+               color-mix(in srgb, #22c55e 16%, transparent));
+  --dsw-alias-code-diff-deleted:
+    light-dark(color-mix(in srgb, #ec1313 10%, transparent),
+               color-mix(in srgb, #ec1313 14%, transparent));
 }
 
 /* 注意这里**没有**动下面这些令牌 —— 它们承担"有内容的颜色"，透明化会砸掉语义：
