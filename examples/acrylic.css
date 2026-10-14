@@ -340,11 +340,23 @@ code {
  *
  * 用 `!important` 是必要的：要压过 xterm 的**内联样式**。这是整个皮肤里唯一
  * 必须跟第三方内联样式抢优先级的地方，所以注释写清楚原因。
- * 也不做"完全透明"—— 终端是等宽文本，需要稳定底色才看得清。 */
+ * 也不做"完全透明"—— 终端是等宽文本，需要稳定底色才看得清。
+ *
+ * ⚠ **浓度必须跟着主题走，不能写死白色。** 第一版就是写死 `#ffffff`，
+ * 结果**深色模式下终端也变成白底**（用户立刻看出来了）。
+ * 用 `light-dark()` 给两套值，而且它们各自的理由不同：
+ *   · 浅色 → 接近白的底。字是浅灰 `rgb(115,117,118)`，压浅底可读；
+ *     不盖的话会露出 xterm 的黑底，浅色界面里一块黑很突兀。
+ *   · 深色 → 接近 DSH 深色底（`--dsw-alias-bg-base` 在深色下是 `#151517`）的底。
+ *     终端**本来就是深色主题**（黑底浅灰字），深色模式下它是顺理成章的，
+ *     只要让这层底与界面同色系，而不是纯黑或纯白。 */
 .xterm-viewport,
 .xterm-scrollable-element,
 .xterm-screen {
-  background-color: color-mix(in srgb, #ffffff 92%, transparent) !important;
+  background-color: light-dark(
+    color-mix(in srgb, #ffffff 92%, transparent),
+    color-mix(in srgb, #151517 92%, transparent)
+  ) !important;
 }
 
 /* ── §9  降级 ────────────────────────────────────────────────────────────
