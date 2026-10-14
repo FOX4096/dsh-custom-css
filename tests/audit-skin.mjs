@@ -103,8 +103,17 @@ if (stat.类选择器 > CLASS_SELECTOR_BUDGET) {
 	problems.push(`[class*=] 用了 ${stat.类选择器} 处（上限 ${CLASS_SELECTOR_BUDGET}）—— 这个数字变大通常意味着`
 		+ `又回到"逐元素覆盖"，而那正是会漏、会叠的做法（实测一个按钮里叠过四层）。优先改令牌。`);
 }
-if (stat.important > 12) {
-	problems.push(`!important 用了 ${stat.important} 处 —— 偏多，检查是否又在跟 DSH 抢优先级。`);
+// !important 的合法用途只有三类，每处都在样式表里写明了原因：
+//   ① 压过 xterm 的**内联**样式（§8 终端底色）—— 3 处；
+//   ② 撤销皮肤自己误加到插件界面上的东西（§5b）—— 6 处；
+//   ③ 动效降级（§9）—— 3 处；
+//   ④ 容器内部根的透明豁免（§4）—— 2 处。
+// 上一版"逐元素覆盖"时这个数字会随控件数量一路涨；现在它应当稳定在 14 上下。
+// 设 18 作为上限：留一点余量，但再多一个"跟 DSH 抢优先级"的块就会顶破。
+const IMPORTANT_BUDGET = 18;
+if (stat.important > IMPORTANT_BUDGET) {
+	problems.push(`!important 用了 ${stat.important} 处（上限 ${IMPORTANT_BUDGET}）—— 偏多，`
+		+ `检查是否又在跟 DSH 抢优先级（合法用途只有上面注释里的四类）。`);
 }
 
 /** 动态部分：读浏览器导出的快照。 */
