@@ -33,16 +33,45 @@ const css = readFileSync(skinPath, 'utf8');
 const problems = [];
 const notes = [];
 
-/** ① 静态：皮肤引用的令牌白名单 —— 这些是 DSH 真实存在的（都已核对过引用数）。 */
+/** ① 静态：皮肤引用的令牌白名单 —— 这些是 DSH 真实存在的（都在真实 DOM 上核对过）。 */
 const KNOWN_TOKENS = new Set([
+	// 色相来源（静态色，给图标用的固定色）
 	'--dsw-static-blue-400',
 	'--dsw-static-green-400',
 	'--dsw-static-amber-400',
+	// 描边与文字
+	'--dsw-alias-border-l1',
 	'--dsw-alias-border-l2',
+	'--dsw-alias-border-l3',
 	'--dsw-alias-border-l4',
+	'--dsw-alias-label-primary',
 	'--dsw-alias-label-tertiary',
+	// 状态与交互
 	'--dsw-alias-state-business-primary',
+	'--dsw-alias-interactive-bg-hover',
+	// 阴影
 	'--dsw-elevation-prominent',
+	'--dsw-elevation-soft',
+	// 圆角阶梯（§6b 映射给 --dsl-g-radius-*）
+	'--dsw-radius-sm',
+	'--dsw-radius-md',
+	'--dsw-radius-lg',
+	// 字体阶梯（§6b 映射给 --dsl-g-font-*）
+	'--dsw-font-xl-24-font-weight',
+	'--dsw-font-xl-24-font-size',
+	'--dsw-font-xl-24-line-height',
+	'--dsw-font-xl-24-font-family',
+	'--dsw-font-base-16-font-size',
+	'--dsw-font-base-16-line-height',
+	'--dsw-font-base-16-font-family',
+	'--dsw-font-xs-13-font-weight',
+	'--dsw-font-xs-13-font-size',
+	'--dsw-font-xs-13-line-height',
+	'--dsw-font-xs-13-font-family',
+	'--dsw-font-xxs-12-font-size',
+	'--dsw-font-xxs-12-line-height',
+	'--dsw-font-xxs-12-font-family',
+	'--dsw-font-markdown-code-block-font-family',
 	// 被重新赋值的那批（都在 DSH 的 CSS 里以 var() 出现，引用数见注释）
 	'--dsw-alias-bg-base', // 31
 	'--dsw-alias-bg-layer-1', // 60

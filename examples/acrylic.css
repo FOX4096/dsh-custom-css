@@ -74,6 +74,11 @@ body[data-ds-dark-theme] {
   --dsh-acrylic-layer-alpha: 30%;
   --dsh-acrylic-input-alpha: 46%;
   --dsh-acrylic-chip-alpha: 34%;
+  /* 层的第二、三级**逐级变实**：`.dsh-genui` 这类扩展用 layer-1 画面板、layer-2 画面板里的
+   * 卡片，两级同值时层次就消失了。DSH 自己的浅色值也是逐级变的
+   * （layer-1/2 是 `#fff`、layer-3 仍是 `#fff`，但深色下分别是 `#1b1b1c` / `#232326` / `#2b2b2e`）。 */
+  --dsh-acrylic-layer-2-alpha: 42%;
+  --dsh-acrylic-layer-3-alpha: 54%;
   /* 侧栏要比壳体**实一档**：两者用同一个令牌时，深色下它们颜色完全相同，
    * 侧栏就没有了区分度（实测 frame 与 sidebarCol 都是 rgba(18,16,26,0.19)）。 */
   --dsh-acrylic-sidebar-alpha: 30%;
@@ -182,16 +187,20 @@ body[data-ds-dark-theme] {
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-base-alpha), transparent),
                color-mix(in srgb, #16181c var(--dsh-acrylic-base-alpha), transparent));
 
-  /* 层：卡片、菜单、对话框、标签条 */
+  /* 层：卡片、菜单、对话框、标签条。
+   * ⚠ **三层的浓度必须彼此区分**，否则"面板里套卡片"的层次会被抹平 ——
+   * 实测 `dsh-genui` 就是靠 `--dsw-alias-bg-layer-1`（面板）⊃ `--dsw-alias-bg-layer-2`（卡片）
+   * 建立层次的：我第一版把三层写成同一个值，结果 GenUI 面板与它里面的候选卡片
+   * **渲染成完全一样**，看起来像贴在同一张纸上。 */
   --dsw-alias-bg-layer-1:
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
                color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
   --dsw-alias-bg-layer-2:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
-               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-2-alpha), transparent),
+               color-mix(in srgb, #262a31 var(--dsh-acrylic-layer-2-alpha), transparent));
   --dsw-alias-bg-layer-3:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
-               color-mix(in srgb, #20242a var(--dsh-acrylic-layer-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-3-alpha), transparent),
+               color-mix(in srgb, #30353d var(--dsh-acrylic-layer-3-alpha), transparent));
 
   /* 模块底：铺满一整列，比层再淡一点 */
   --dsw-alias-bg-module-platform:
@@ -333,8 +342,41 @@ html body :is([class*="dshCc_"], [class*="dshCc_"] *) {
   mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
 }
 
-/* ── §7  滚动条 / 选中 / 焦点 ────────────────────────────────────────────
- * 这三处与"表面透明"无关，是纯增量的小改动，保留下来。 */
+/* ── §6b  （已撤销）曾在此给扩展补 --dsl-g-* 变量 ──────────────────────
+ * 我一度认为 `dsh-genui` 引用的 30 个 `--dsl-g-*` 在本环境里全都没有定义，
+ * 于是给它们补了一套映射到 DSH 阶梯的值。**那个判断是错的。**
+ *
+ * 错在哪：我是用 `getComputedStyle(document.body)` 去读的，而 genui 把这些变量
+ * 定义在 **`.panel` 作用域**内（`body[data-ds-dark-theme] .panel` 里还有深色变体）——
+ * 在 body 上当然读不到。它自己定义得很完整，而且带**自己的设计尺度**：
+ * 字号 13.5px / 12.5px / 14.5px，圆角 6px / 8px / 12px，间距 4 / 8 / 12 / 16px，
+ * 连 tint 类变量都是"百分比"而不是颜色值。
+ *
+ * 所以补那套不仅多余，还会**覆盖扩展刻意的紧凑尺度**（我给的 12px 间距 + 16px 圆角
+ * 比它自己的 12px + 6px 松）。适配第三方扩展的正确姿势是**先读它的定义**，
+ * 不要假定"没定义" —— 作用域内的定义在祖先元素上读不到，这是那次误判的机制。
+ *
+ * 这条教训与前面几次是同一类：**先量、再改**。这次量错了对象（量了 body 而不是 .panel）。
+ */
+/* ── §6c  `dsh-genui` 里三处写死白色的悬停 ───────────────────────────────
+ * genui 自己有两套悬停实现：八条用 `var(--dsl-g-hover)`（补上 §6b 后就能用），
+ * 但另外三条**把颜色写死了白色**：
+ *
+ *     .V1MMBW_panelToggle:hover { background: rgba(255, 255, 255, 0.04) }
+ *     .V1MMBW_panelClose:hover  { background: rgba(255, 255, 255, 0.08) }
+ *     .V1MMBW_panelTpl:hover    { background: rgba(255, 255, 255, 0.08) }
+ *
+ * 浅色模式下那是"白叠白"—— 悬停**完全没有反馈**（实测那三个元素的悬停底色与静止时一样）。
+ * 这里把它们改成 DSH 自己的交互色，于是跟着主题走。
+ *
+ * ⚠ 特异性：genui 用的是单类 (0,1,0)，这里加 `html body` 抬到 (0,1,2) 稳赢，
+ * 而且要写在皮肤里（皮肤后注入）。用 `!important` 也行，但那会盖掉扩展将来
+ * 自己改回令牌的可能 —— 抬特异性更温和。 */
+html body [class*="V1MMBW_panelToggle"]:hover,
+html body [class*="V1MMBW_panelClose"]:hover,
+html body [class*="V1MMBW_panelTpl"]:hover {
+  background-color: var(--dsw-alias-interactive-bg-hover);
+}
 * {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--dsw-alias-border-l4) 80%, transparent) transparent;
@@ -372,7 +414,7 @@ code {
   font-variant-ligatures: none;
 }
 
-/* ── §8  终端：盖一层浅色底，因为它的主题改不了 ──────────────────────────
+/* ── §7  终端：盖一层浅色底，因为它的主题改不了 ──────────────────────────
  * 现象：皮肤装上后右侧终端**变成纯黑**（用户一眼看出"之前不是白的吗"）。
  *
  * 根因分两步，都是实测出来的：
@@ -413,7 +455,7 @@ code {
   ) !important;
 }
 
-/* ── §9  降级 ────────────────────────────────────────────────────────────
+/* ── §8  降级 ────────────────────────────────────────────────────────────
  * `light-dark()` 或 `color-mix()` 不可用时（很老的引擎），令牌会解析失败 ——
  * 那时界面保持 DSH 原本的纯色，**不会坏**，只是没有亚克力效果。
  * 这是有意的：宁可退成原样，也不要退成"半坏的透明"。 */
