@@ -377,6 +377,48 @@ body[data-ds-dark-theme] {
   background-color: transparent !important;
 }
 
+/* ── §4d  侧栏右面板：内部容器给个不透明底（**只有全屏时**）─────────────────
+ * 用户："改成内部容器不透明白色得了"、"能不能我没有全屏还是透明的，只改CSS行不行"。
+ *
+ * 全屏面板（`dsh-workbench` 的终端等）铺满整个视口，但它自己链路上每一层
+ * 都是透明的 —— 底下的聊天界面会透上来。**给内部的 tabHost 一个不透明底**
+ * 就挡住了；而**侧栏（push）状态下保持透明**，因为那时没有东西要盖。
+ *
+ * ## 怎么用纯 CSS 区分全屏 / push
+ *
+ * 实测 `.P3OORG_panel` 是 `._tabHost_…` 的**祖先**（链路：
+ * `_tabHost_ → _tabCell_ → _tabLayout_ → _surface_ → P3OORG_panelBody → P3OORG_panel`），
+ * 而 `data-sidebar-right-panel` 属性就在 `P3OORG_panel` 上
+ * （全屏 `fullscreen`、侧栏 `push`）。所以用 `:has()` 把它串起来即可 ——
+ * **不需要 JS，也不需要在那两个元素之间加任何标记**。
+ *
+ * ⚠ 这里 `:has()` 是安全的：它是**结构性**判断（tabHost 是不是在这个面板里），
+ * 而 §4d 早先那版翻车是因为拿 `:has()` 去**追一个会变的属性**
+ * （`:has(.P3OORG_panel[fullscreen])` 在收起时不会重新求值）。这一版把属性
+ * **写在同一个复合选择器里**，属性一变整条规则就重新匹配，不存在那个问题。
+ *
+ * ⚠ `:not(._float_…)` 是 DSH 自己的写法：浮动布局下 tabHost 有另一种外观，
+ * 不该被覆盖。`,` 后面那个 `_emptyTabHost_` 是空状态变体。
+ *
+ * ⚠ 用**精确类名**而不是片段 —— 片段会打到 `_tabHostHeader` / `_tabHostBody`
+ * 等子层，那正是今天栽过多次的"命中太宽"。
+ *
+ * ⚠ 深色模式用 DSH 的主题属性明确覆盖，不能只靠 `light-dark()`：
+ * 用户点名过"深色模式别漏"。 */
+.P3OORG_panel:has(._tabHost_6nhg2_162) ._tabHost_6nhg2_162:not(._float_6nhg2_156),
+.P3OORG_panel:has(._emptyTabHost_6nhg2_143) ._emptyTabHost_6nhg2_143 {
+  background: #ffffff;
+}
+body[data-ds-dark-theme] .P3OORG_panel:has(._tabHost_6nhg2_162) ._tabHost_6nhg2_162:not(._float_6nhg2_156),
+body[data-ds-dark-theme] .P3OORG_panel:has(._emptyTabHost_6nhg2_143) ._emptyTabHost_6nhg2_143 {
+  background: #16181c;
+}
+/* 侧栏（未全屏）状态：撤掉，保持透明 */
+.P3OORG_panel[data-sidebar-right-panel='push']:has(._tabHost_6nhg2_162) ._tabHost_6nhg2_162:not(._float_6nhg2_156),
+.P3OORG_panel[data-sidebar-right-panel='push']:has(._emptyTabHost_6nhg2_143) ._emptyTabHost_6nhg2_143 {
+  background: transparent;
+}
+
 /* ── §5  浮层：唯一允许有"模糊"的地方 ────────────────────────────────────
  * 对话框与菜单浮在**内容之上**，背后是文字，纯透明会看不清 —— 所以给它们一层薄雾。
  *
