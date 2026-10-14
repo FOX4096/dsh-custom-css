@@ -799,6 +799,60 @@ code {
   backdrop-filter: blur(30px) saturate(var(--dsh-acrylic-saturate));
 }
 
+/* ── §6k  所有面板型覆盖层：设置、远程访问、任务面板、抽屉、弹窗… ──────────
+ * 用户："把所有的覆盖层也检查一遍比如设置面板，这种的要模糊"。
+ *
+ * ## 怎么找齐的
+ *
+ * 没有靠"一个个点开" —— 那样既慢又会打乱用户的会话。改为**从样式表里枚举**：
+ * 扫全部 CSS 规则，筛出选择器含 overlay / modal / dialog / sheet / portal /
+ * popover / drawer / panel，**有 z-index、有底色**的那些 —— 得到 **31 个**。
+ *
+ * ## 再按"是不是面板"分两类
+ *
+ * **要模糊的（面板）**：有底、有 z-index、是一个**内容容器**。就是下面这一批。
+ *
+ * **不要模糊的（遮罩/背板）**：`bg-mask-1` / `bg-mask-drop` / `rgba(0,0,0,.45)`
+ * 这类**全屏暗化层** —— 它们的功能是"把背后的东西压暗"，糊了只会让整屏发虚，
+ * 而且它们**没有自己的边界**（全屏），加模糊就是缩小版的"糊成散光"。
+ * 例：`_7D6uKa_modalBackdrop`、`dsh-music-picker-overlay`、`lc-modal-backdrop`、
+ * `dsh-sh__modal-overlay`、`dsh-sh__drawer`、`_7rgC5q_backdrop`。
+ *
+ * ## 已经自带模糊的（不动它们）
+ *
+ * `JObwrW_panel`、`bRhRbq_panel`、`_7yHdaG_panel::before`、`Nqubda_panel::before`
+ * —— 它们读 `--dsw-menu-backdrop-filter`，本来就是 DSH 的毛玻璃。
+ *
+ * ## 实测
+ *
+ * 打开**设置面板**那一个（`.`VOzbGW_panel`，800×800，白 42%）实测量过：
+ * 它的祖先链是 `VOzbGW_overlay → BODY → HTML`，**没有 isolate / transform / filter**
+ * —— 所以模糊**真的渲染**（截图确认：面板背后的正文被糊掉、不可辨认）。
+ * 这与命令面板不同（那个是合成层问题，见 §6j）。
+ *
+ * ⚠ 全部用**完整类名**。这一批有 20 多个，正是最容易滑向片段选择器的地方 ——
+ * 而片段会打到 `panelTitle` / `panelClose` 这类内部元素（§6j 刚栽过）。
+ * 用完整类名的代价是 DSH 换版本会失效，但失效是**温和**的（少一处模糊，不会坏界面）。 */
+.VOzbGW_panel,
+.fThDlq_panel,
+._dialog_o6lrb_33,
+.JqwYuG_panel,
+._367UGW_taskPanel,
+._367UGW_dialogCard,
+._6TTfZq_panel,
+.d2hvtW_jobsDrawer,
+.lyqg2a_panel,
+.nUhMVa_opPanel,
+._7rgC5q_dialog,
+._7rgC5q_popover,
+.dsh-music-panel,
+.dsh-music-lyric-panel,
+._44HXVa_overlay,
+.l5v9sv_editorOfficeOverlay,
+.tQSFJa_onboardingOverlay {
+  backdrop-filter: blur(30px) saturate(var(--dsh-acrylic-saturate));
+}
+
 /* ── §7  终端：盖一层浅色底，因为它的主题改不了 ──────────────────────────
  * 现象：皮肤装上后右侧终端**变成纯黑**（用户一眼看出"之前不是白的吗"）。
  *
