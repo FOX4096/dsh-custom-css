@@ -43,6 +43,9 @@ const KNOWN_TOKENS = new Set([
 	'--dsw-static-neutral-50',
 	'--dsw-static-neutral-100',
 	'--dsw-static-neutral-850',
+	// §6f：代码预览卡自己的默认底色（实测它挂在 `.hz8-rW_card` 上、值 #2C2C2E，
+	// 但真正生效的是 `--dsw-alias-bg-layer-1` —— 皮肤把后者透明化了）
+	'--dsw-hovercard-bg',
 	// §6d 用到的交互色（换掉 `--changes-hover`）、§6e 的边框色
 	'--dsw-alias-interactive-bg-hover',
 	'--dsw-alias-border-l4',
