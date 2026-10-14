@@ -36,3 +36,6 @@ temp/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 交接文档：只留本地，不提交/不上传
+docs/handover.md

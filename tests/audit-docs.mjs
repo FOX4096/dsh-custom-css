@@ -13,6 +13,7 @@
  *   node tests/audit-docs.mjs --enforce    有问题时退出码 1
  */
 
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -134,9 +135,21 @@ for (const [label, predicate] of ANCHORS) {
 }
 
 // ── ③ 每篇 docs 都要被链到 ───────────────────────────────────────────────
+//
+// ⚠ 只检查**被 git 跟踪**的文档。仓库里允许存在「只留本地、不提交」的笔记
+// （例如 `docs/handover.md` 这种交接文档，已在 .gitignore 里）——
+// 那些本来就没人链接，报成孤儿文档只会让门槛失去意义。
 const docsDir = path.join(REPO, 'docs');
 const allText = files.map((file) => readFileSync(file, 'utf8')).join('\n');
+const tracked = new Set(
+	execFileSync('git', ['ls-files', 'docs'], { cwd: REPO, encoding: 'utf8' })
+		.split('\n')
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.map((line) => path.basename(line)),
+);
 for (const name of readdirSync(docsDir).filter((entry) => DOC_EXT.test(entry))) {
+	if (!tracked.has(name)) continue;
 	// 只要别处提到过这个文件名就算被链到（README 与 docs/index.md 都会链）
 	if (!allText.includes(name)) {
 		problems.push(`docs/${name}: 没有任何文档链接到它（孤儿文档）`);
