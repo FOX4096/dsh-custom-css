@@ -377,48 +377,44 @@ body[data-ds-dark-theme] {
   background-color: transparent !important;
 }
 
-/* ── §4b  毛玻璃：只给"下面会有内容滚过去"的表面 ────────────────────────
- * 用户原话："我的意思就是把那些**会移动导致下面会有文本**的毛玻璃"。
+/* ── §4b  毛玻璃：只给"真正有底的表面"，且只给内容会从底下经过的那些 ────────
+ * 用户两次纠正我，两次都是同一个根因：
  *
- * ## 上一版错在哪
+ *   第一次："不行了糊成散光了" —— 我按结构层级给四层元素通糊，静态区域也糊了。
+ *   第二次："怎么是外面糊里面透明？" —— 我把 blur 加在了 `centerCol` 这类
+ *   **全透明的列容器**上，而真正有底的 `frame` 反而没加。
  *
- * 我按**结构层级**给四层元素统一加了 blur（`[data-slot="root"] > * > * …`），
- * 理由是"背景完全透明的元素不会产生可见图层"。结果**整屏都糊了**，用户的原话是
- * "糊成散光了" —— 因为静态区域（聊天正文、壁纸、各列容器）也各糊了一层，
- * 它们背后本来没有移动内容，糊了只让整幅画面发虚。
+ * 所以判据是**两条同时成立**：
+ *   ① 这个元素**自己拥有底色**（`getComputedStyle(el).backgroundColor` 不是透明）；
+ *   ② 内容会从它底下经过（侧栏列表、对话滚动、浮层下方）。
+ * 两条都满足才加。**"在哪一层"完全不是判据** —— 这是我两次搞错的共同点。
  *
- * ## 正确的判据
+ * ## 只用实测确认过的具体类名，不再用片段猜
  *
- * **模糊只有在"背后有东西会动"时才有意义** —— 也就是内容会从它底下滚过去的表面。
- * 静止的表面（正文、壁纸、卡片里的一段文字）背后没有东西经过，加 blur 只是把画面搞虚。
+ * 前几版用 `[class*="_frame"]`、`[class*="_tabHost"]` 这类**片段**去匹配，结果反复命中
+ * 同名的内部容器（`EvIC1a_frame`、`_tabHostBody`、`eGxaPq_frame`…），于是我又去堆
+ * `:not()` —— 那是打补丁，加一个漏一个。现在改成**逐个列出实测有底的那几个**：
  *
- * 所以只认这五类：
+ *   `pI_x6G_frame`          1914×938  白 14%  ← 整屏外壳，唯一的大表面
+ *   `pI_x6G_sidebarCol`      280×938  灰 30%
+ *   `_tabHost_6nhg2_162`     861×938  白 14%  （右栏本体；`_tabHostBody` 是透明的，不加）
+ *   `uV2eYG_card`            输入卡片   白 46%
  *
- *   ① 侧栏 / 右栏 —— 会话列表、标签会从它内部滚过去；
- *   ② 输入卡片与它上方的面板座 —— 对话内容会滚到它底下；
- *   ③ 顶部标签条 / 头部 —— 内容滚到它底下时贴边经过；
- *   ④ 浮层（对话框 / 菜单）—— 它们悬在会滚动的正文之上，这一类的模糊最明显；
- *   ⑤ 终端 —— 它内部自己滚。
+ * 代价：这些是**构建哈希类名**，DSH 换版本会失效 —— 但失效是**温和**的
+ * （毛玻璃消失，界面不至于坏）。这与 §5 里同样的取舍一致。
  *
- * 这五类的**面积与采样量**都与上一版不同：实测元素数从 16 降到个位数，帧耗时更省。
- * 半径仍分两档（§1 的 `--dsh-acrylic-blur-shell` / `--dsh-acrylic-blur-panel`）。
- *
- * ⚠ 仍然遵守"容器本体才加、内部一律不加"：这些选择器都是**列/卡片/浮层本体**，
- * 不递归到后代 —— 前面已经踩过 5 次"命中太宽"，不再重复。
+ * 浮层与终端单独列，它们的有底是无条件的：对话框/菜单/GenUI 面板悬在正文上，
+ * 终端内部自己滚。
  */
-/* ①②③：会从底下经过内容的容器 —— 侧栏/右栏、对话列、输入卡片、标签条 */
-[class*="_sidebarCol"],
-[class*="_rightbarCol"],
-[class*="_centerCol"],
-[data-composer-card="true"],
-[data-composer-seat],
-[class*="_tabHost"],
-[class*="_tabStrip"],
-[class*="_stripChrome"] {
+/* ① 有底的壳体表面 + 内容会从底下经过 */
+[class*="pI_x6G_frame"],
+[class*="pI_x6G_sidebarCol"],
+[class*="_tabHost_6nhg2"],
+[data-composer-card="true"] {
   backdrop-filter: blur(var(--dsh-acrylic-blur-shell)) saturate(var(--dsh-acrylic-saturate));
 }
 
-/* ④：浮层 —— 悬在会滚动的正文之上，这一类的模糊最容易看出来 */
+/* ② 浮层 —— 悬在会滚动的正文之上，这一类模糊最容易看出来 */
 [class*="_dialog"],
 [class*="_menu-"],
 [data-genui-panel="true"],
@@ -426,15 +422,15 @@ body[data-ds-dark-theme] {
   backdrop-filter: blur(var(--dsh-acrylic-blur-panel)) saturate(var(--dsh-acrylic-saturate));
 }
 
-/* ⑤：终端 —— 它内部自己滚动 */
+/* ③ 终端 —— 它内部自己滚动 */
 .xterm-viewport,
 .xterm-scrollable-element {
   backdrop-filter: blur(var(--dsh-acrylic-blur-panel)) saturate(var(--dsh-acrylic-saturate));
 }
 
-/* ⚠ 这里**故意不给**这些加：`_frame`（整屏外壳）、正文与壁纸、卡片里的一段文字、
- * 以及所有静态的徽章/标签。它们背后没有移动内容，糊了只会整屏发虚 ——
- * 那正是用户报的"散光"。
+/* ⚠ **故意不加**的（都实测过，全都是透明的，加了就是"外面糊里面透明"）：
+ *   `centerCol` / `rightbarCol` / `composerSeat` / `tabHostBody`
+ *   `tabStrip` / `stripChrome` / 正文 / 壁纸 / 内容盒子（callout）/ 静态徽章
  */
 /* ── §5  浮层的描边与阴影（模糊已由 §4b 统一负责）────────────────────────
  * 对话框与菜单浮在**内容之上**，背后是文字，纯透明会看不清 —— 所以给它们
