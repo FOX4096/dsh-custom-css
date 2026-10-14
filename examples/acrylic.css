@@ -36,12 +36,34 @@
 /* ── §1  参数 ────────────────────────────────────────────────────────────
  * ⚠ 必须定义在 **body** 上，不能放 `:root`：DSH 把全部 `--dsw-*` 令牌定义在 body 上，
  * 在 `:root` 里写 `--x: var(--dsw-…)` 会解析成空值，然后**整条依赖它的声明被静默丢弃**
- * （不报错，只是不生效）。纯字面量的变量放哪儿都行，引用令牌的必须落在 body。 */
-body {
-  /* 壁纸的三个色相 */
-  --dsh-acrylic-tone-a: var(--dsw-static-blue-400);
-  --dsh-acrylic-tone-b: var(--dsw-static-green-400);
-  --dsh-acrylic-tone-c: var(--dsw-static-amber-400);
+ * （不报错，只是不生效）。纯字面量的变量放哪儿都行，引用令牌的必须落在 body。
+ *
+ * ⚠⚠ **选择器必须写成 `body, body[data-ds-dark-theme]`，不能只写 `body`。**
+ * DSH 的深色令牌是定义在 `body[data-ds-dark-theme]{…}` 上的，特异性 **(0,1,1)**；
+ * 只写 `body`（(0,0,1)）在**浅色下赢、深色下输** —— 于是 §3 里那两套 `light-dark()` 值
+ * 在深色下完全不生效（实测输入卡片的令牌仍是 DSH 的 `#2c2c2e`，不是我的）。
+ * 把两个选择器并列后特异性打平为 (0,1,1)，再靠"皮肤后注入"取胜。
+ * 这是唯一一处需要跟 DSH 的**令牌定义**比特异性的地方。 */
+body,
+body[data-ds-dark-theme] {
+  /* 壁纸的三个色相 —— **必须跟着主题走**。
+   *
+   * ⚠ 第一版直接用 `--dsw-static-blue-400`（`rgb(96,165,250)` 这种**亮**色）。
+   * 在**深色模式**下，亮色相叠在深底上只会变成一片**灰雾**：既不像有颜色的材质，
+   * 又明显发灰（用户一眼就看出来"很多问题"）。原因是那个令牌是"静态色"，
+   * 它**不随主题变**——它就是给图标用的固定色。
+   *
+   * 所以用 `light-dark()` 配两套：浅色用原来的亮色相；深色用**更深、更饱和**的色，
+   * 这样叠在深底上呈现的是"颜色的深浅"而不是"灰色的雾"。 */
+  --dsh-acrylic-tone-a: light-dark(var(--dsw-static-blue-400), #1e4fa8);
+  --dsh-acrylic-tone-b: light-dark(var(--dsw-static-green-400), #17663c);
+  --dsh-acrylic-tone-c: light-dark(var(--dsw-static-amber-400), #9a5a08);
+
+  /* 壁纸层的整体不透明度。**不能用 `light-dark()`** —— 它只能用于**颜色**类属性，
+   * 而 `opacity` 取的是 `<number>`：实测写 `opacity: var(--x)`（那个变量是 light-dark(...)）
+   * 会整条声明被判非法、回落到初始值 **1**，于是壁纸变成完全不透明（比不调更糟）。
+   * 所以深色那一档用 DSH 自己的深色钩子单独覆盖，见 §2 末尾。 */
+  --dsh-acrylic-wallpaper-opacity: 0.62;
 
   /* 每个表面的"剩下多少白"。数值越小越透。按面积分：
    *   壳（base）铺满视口 → 最淡
@@ -52,6 +74,9 @@ body {
   --dsh-acrylic-layer-alpha: 30%;
   --dsh-acrylic-input-alpha: 46%;
   --dsh-acrylic-chip-alpha: 34%;
+  /* 侧栏要比壳体**实一档**：两者用同一个令牌时，深色下它们颜色完全相同，
+   * 侧栏就没有了区分度（实测 frame 与 sidebarCol 都是 rgba(18,16,26,0.19)）。 */
+  --dsh-acrylic-sidebar-alpha: 30%;
 
   /* 壁纸漂移周期：越长越省电 */
   --dsh-acrylic-drift: 48s;
@@ -95,8 +120,17 @@ body::before {
     /* 中带一条很淡的桥，避免左右两半在视觉上"断开" */
     radial-gradient(90% 46% at 52% 52%,
       color-mix(in srgb, var(--dsh-acrylic-tone-b) 18%, transparent) 0%, transparent 100%);
-  opacity: 0.62;
+  /* 浓度跟着主题走（见 §1 的说明：深色下必须更低，否则糊成一片灰罩） */
+  opacity: var(--dsh-acrylic-wallpaper-opacity);
   filter: saturate(1.08);
+}
+
+/* 深色模式：DSH 会在 `body` 上加 `data-ds-dark-theme` 属性（它自己的令牌定义里就是这么写的：
+ * `body[data-ds-dark-theme]{--dsw-specific-input-major: …}`）。
+ * 用这个钩子比 `@media (prefers-color-scheme)` 可靠 —— 它反映的是**应用内**的主题选择，
+ * 而不是操作系统偏好；用户把 DSH 设成深色而系统是浅色时，媒体查询会判错。 */
+body[data-ds-dark-theme]::before {
+  opacity: 0.5;
 }
 
 /* 让"色相"可过渡（不声明 @property 的话关键帧之间会硬跳）。
@@ -133,9 +167,16 @@ body {
  * 而且**不需要知道任何组件叫什么**，因此不会漏、不会叠。
  *
  * 颜色用 `light-dark()` 一次写两套主题（实测 DSH 的 `color-scheme` 会跟着主题走，
- * `light-dark()` 在其中正常解析）。DSH 的令牌值是运行时用 JS 设的、不在 CSS 里，
- * 所以我拿不到它的深色原值，只能自己给一对 —— 两个值都取 DSH 浅色/深色的近似。 */
-body {
+ * `light-dark()` 在其中正常解析）。
+ *
+ * ⚠⚠ **这里的选择器同样必须是 `body, body[data-ds-dark-theme]`。**
+ * DSH 的深色令牌定义在 `body[data-ds-dark-theme]{…}`（特异性 (0,1,1)）上，
+ * 只写 `body`（(0,0,1)）会**在深色下被 DSH 压过去** —— 那意味着下面这一整块
+ * `light-dark(…)` 的深色那一半形同不存在：实测输入卡片的令牌仍是 DSH 的 `#2c2c2e`
+ * 而不是我给的半透明色。这类"浅色下看起来对、深色下悄悄不生效"的错最难发现，
+ * 因为浅色模式一切正常。 */
+body,
+body[data-ds-dark-theme] {
   /* 最底层：body、frame、tabHost、dockScrim 等 31 处用它 */
   --dsw-alias-bg-base:
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-base-alpha), transparent),
@@ -152,13 +193,15 @@ body {
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
                color-mix(in srgb, #20242a var(--dsh-acrylic-layer-alpha), transparent));
 
-  /* 模块底 / 侧栏 —— 铺满一整列，比层再淡一点 */
+  /* 模块底：铺满一整列，比层再淡一点 */
   --dsw-alias-bg-module-platform:
     light-dark(color-mix(in srgb, #f5f6f7 var(--dsh-acrylic-chip-alpha), transparent),
                color-mix(in srgb, #1a1d21 var(--dsh-acrylic-chip-alpha), transparent));
+  /* 侧栏：**用单独一档、比壳体实**。两者同值时深色下颜色完全相同，
+     侧栏就失去了区分度（实测 frame 与 sidebarCol 都是 rgba(18,16,26,0.19)）。 */
   --dsw-specific-sidebar-fill:
-    light-dark(color-mix(in srgb, #f9fafb var(--dsh-acrylic-chip-alpha), transparent),
-               color-mix(in srgb, #1a1d21 var(--dsh-acrylic-chip-alpha), transparent));
+    light-dark(color-mix(in srgb, #f9fafb var(--dsh-acrylic-sidebar-alpha), transparent),
+               color-mix(in srgb, #24272d var(--dsh-acrylic-sidebar-alpha), transparent));
 
   /* 输入相关：字最密，留最多白 */
   --dsw-specific-input-major:
