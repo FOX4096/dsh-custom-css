@@ -86,10 +86,15 @@ body[data-ds-dark-theme] {
   /* 壁纸漂移周期：越长越省电 */
   --dsh-acrylic-drift: 48s;
 
-  /* 这里**故意没有"模糊"和"圆角"参数**：
-   *   · 不模糊 —— 上一版给几十个元素加 backdrop-filter，嵌起来就是一团糊；
-   *     而且实测"透视壁纸"本身已经足够，模糊只在浮层上需要（见 §4）。
-   *   · 不设圆角 —— DSH 的对话框、菜单、卡片各有自己的圆角规格，皮肤不动几何。 */
+  /* 毛玻璃的饱和度提升。
+   * ⚠ 这个参数是用户要求"给输入框做毛玻璃"时新加的 —— 不是全站模糊，
+   * 目前只有 §6g 的文本输入框在用（一处、一个元素）。其余地方仍然保持"不模糊"：
+   * 上一版给几十个元素加 backdrop-filter，嵌起来就是一团糊，用户的原话是"糊成散光了"，
+   * 最后整份还原。所以**默认不模糊，要模糊就一处一处指名加**。 */
+  --dsh-acrylic-saturate: 150%;
+
+  /* 这里**故意没有"圆角"参数**：
+   *   DSH 的对话框、菜单、卡片各有自己的圆角规格，皮肤不动几何。 */
 }
 
 /* ── §2  唯一的颜色层：壁纸 ──────────────────────────────────────────────
@@ -242,12 +247,22 @@ body[data-ds-dark-theme] {
   --dsw-alias-markdown-inline-code:
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
                color-mix(in srgb, #292d33 var(--dsh-acrylic-chip-alpha), transparent));
+  /* 代码块与它的 banner —— 用户先后两次反馈后的取值：
+   *   ① 原样（DSH 实心 `#f9fafb`）→ "卡片上的文本背景太白、太突兀"；
+   *   ② 改到"层"档（白 30%）→ "2 改成不透明的"；
+   *   ③ 改到 92% → "这个卡片没那么透明了"；
+   *   ④ 最终定 **75%**（用户原话："透一点，但别像原来那么透"）。
+   *
+   * 为什么不跟其它表面共用 `--dsh-acrylic-layer-alpha`：代码是要**逐行读**的东西，
+   * 底下的正文透上来会跟代码文字叠在一起（实测代码里是深色文字 `rgb(15,17,21)`）。
+   * 75% 是"读得清"与"看得出背后有壁纸"之间的平衡点，单独一档、不随全局调。
+   * banner 比内容区低 3%，保持它与内容之间原来的分层关系。 */
   --dsw-alias-markdown-code-block:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-layer-alpha), transparent),
-               color-mix(in srgb, #1c1f24 var(--dsh-acrylic-layer-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff 75%, transparent),
+               color-mix(in srgb, #1c1f24 75%, transparent));
   --dsw-alias-markdown-code-block-banner:
-    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
-               color-mix(in srgb, #24282e var(--dsh-acrylic-chip-alpha), transparent));
+    light-dark(color-mix(in srgb, #ffffff 72%, transparent),
+               color-mix(in srgb, #24282e 72%, transparent));
   --dsw-alias-markdown-tag:
     light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
                color-mix(in srgb, #24282e var(--dsh-acrylic-chip-alpha), transparent));
@@ -549,28 +564,6 @@ code {
   --changes-hover: var(--dsw-alias-interactive-bg-hover);
 }
 
-/* ── §6e  代码内容的底改成不透明（用户指定的第 ② 处）──────────────────────
- * 用户："2 改成不透明的"（指那块代码内容）。
- *
- * 代码块现在的底是**白 30%**（`--dsw-alias-markdown-code-block` 走的是"层"档），
- * 太透 —— 底下的正文会透上来，跟代码的文字叠在一起。
- *
- * 这里把**代码相关的那几个令牌**提高不透明度。理由是**可读性**：
- * 代码是要逐行读的东西，而它里面是深色文字压在浅底上（实测 `rgb(15,17,21)`），
- * 所以把底做实不会撞色，只会让代码清楚。
- *
- * ⚠ 严格只动"代码"这一族令牌，**不动**其它表面 —— 今天已经因为"一次改一大片"
- * 返工过四轮（最后整份还原），所以这次限定在用户指出的两处。 */
-body,
-body[data-ds-dark-theme] {
-  --dsw-alias-markdown-code-block:
-    light-dark(color-mix(in srgb, #ffffff 92%, transparent),
-               color-mix(in srgb, #1c1f24 92%, transparent));
-  --dsw-alias-markdown-code-block-banner:
-    light-dark(color-mix(in srgb, #ffffff 88%, transparent),
-               color-mix(in srgb, #24282e 88%, transparent));
-}
-
 /* ── §6f  代码预览悬浮卡：给它一层实底（用户指定的第 ② 处，真正的那个）────
  * 用户澄清："代码预览还是透明的不行，这个出现的条件是鼠标悬浮才显示"。
  *
@@ -594,13 +587,56 @@ body[data-ds-dark-theme] {
  * 那个令牌是全局的，改了会影响一大片（今天已经因为"一次改一大片"返工过四轮）。
  * 用实测确认的**完整类名** `_preview_38jqx_52`（不是片段，片段会打到内部元素）。
  *
- * 92% 而不是 100%：既保证代码读得清（代码里是深色文字压在浅底上），
- * 又保留一丝通透感，与整体的亚克力语言一致。 */
+ * 85% 而不是 100%：既保证代码读得清（代码里是深色文字压在浅底上），
+ * 又保留一丝通透感，与整体的亚克力语言一致。
+ * 比正文代码块的 75% 更实一点 —— 这块是"悬浮起来逐行读"的地方，
+ * 而且它下面就是正文，透太多会撞字。 */
 [class~="_preview_38jqx_52"] {
   background: light-dark(
-    color-mix(in srgb, #ffffff 92%, transparent),
-    color-mix(in srgb, #1c1f24 92%, transparent)
+    color-mix(in srgb, #ffffff 85%, transparent),
+    color-mix(in srgb, #1c1f24 85%, transparent)
   );
+}
+
+/* ── §6g  文本输入框的毛玻璃（用户指定的第 ① 处）──────────────────────────
+ * 用户："需要改的有文本输入框，上面的音乐播放器还有dsh自带的几个控件
+ * 还有刚刚的代码预览块，你可以先实现文本输入框的，我确认没问题之后把其他的改了"。
+ *
+ * ## 为什么只加在 `.uV2eYG_card` 这一个元素上
+ *
+ * 实测输入卡片那一带的层级（从上到下）：
+ *
+ *   uV2eYG_input   透明
+ *   uV2eYG_grow    透明
+ *   uV2eYG_scroll  透明
+ *   uV2eYG_card    白 46%  r=28px   ← **只有这一个有底**
+ *   uV2eYG_root    透明
+ *   composerStack  透明
+ *
+ * `backdrop-filter` 要加在**拥有底色的那个元素**上 —— 加在透明的包装层上
+ * 就是"外面糊、里面透明"（这个错我今天犯过，用户当场指出）。
+ *
+ * ## 为什么它确实需要毛玻璃
+ *
+ * `wSkVaW_composerSeat` 实测是 **`position: sticky; z-index: 7`**，
+ * 它位于滚动容器**内部** —— 也就是正文会**从它底下滚过去**。
+ * 这正是"会移动导致下面有文本"的场景，所以模糊有意义（不是给静态区域白加）。
+ *
+ * ## 验证方式（不是看截图猜）
+ *
+ * 背后是平滑壁纸时，20px 模糊**肉眼看不出差别** —— 所以我在卡片背后临时插了一条
+ * 高对比黑白竖纹（`repeating-linear-gradient(90deg,#000 0 6px,#fff 6px 12px)`）：
+ *
+ *   有 blur  → 竖纹被糊成一片平滑的灰（截图确认）
+ *   无 blur  → 竖纹清晰可见
+ *
+ * 这条"造高对比背景来验证模糊"的办法值得留给以后 —— 它把"看起来没变化"
+ * 和"真的没生效"区分开了（今天就吃过一次亏：`frame` 的 blur 写了但从未生效）。
+ *
+ * ⚠ 半径取 20px 而不是更大：这个元素在滚动时会跟随重绘，半径越大采样越贵；
+ * 而它面积只有 952×98，20px 已经足够把背面内容糊干净。 */
+[data-composer-card="true"] {
+  backdrop-filter: blur(20px) saturate(var(--dsh-acrylic-saturate));
 }
 
 /* ── §7  终端：盖一层浅色底，因为它的主题改不了 ──────────────────────────
