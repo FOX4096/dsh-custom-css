@@ -418,14 +418,32 @@ body[data-ds-dark-theme] {
  * ⚠ 特异性必须真的赢：`:is(.dshCc_…)` 全是单类，整体只有 (0,1,0)，与
  * `[class*="_dialog"]` 同级；用 `html body :is(…)` 抬到 (0,2,1)。
  * ⚠ **撤销 ≠ 重设**：撤销只该拿掉，不该赋新值（第一版把圆角塞进撤销那步，
- * 反而把菜单项的 12px 改成了继承来的 16px）。 */
-/* `:is(A, A *)` 一条覆盖"元素本身 + 它的整个子树"，比写两条规则更清楚，
-   也少一条重复的片段选择器（这个数字由 tests/audit-skin.mjs 盯着）。 */
+ * 反而把菜单项的 12px 改成了继承来的 16px）。
+ *
+ * ⚠⚠ **这里曾经误伤插件自己的毛玻璃**（用户要求"把输入框附近的元素列出来"时发现的）：
+ * `backdrop-filter: none !important` 是"一律关掉"，而插件**自己有三个玻璃表面**
+ * 特意用了 DSH 的毛玻璃令牌：
+ *
+ *   `.dshCc_menu`        lib/client.js:143   `backdrop-filter: var(--dsw-menu-backdrop-filter)`
+ *   `.dshCc_suggest`     lib/client.js:326   同上（自动补全浮层）
+ *   `.dshCc_selectMenu`  lib/client.js:401   同上（选择器下拉）
+ *
+ * 插件源码的注释正好在说这件事："a 58%-opaque fill **with no blur** lets the page
+ * scroll **through** them rather than **behind** them" —— 它知道背景填充是 58% 半透明，
+ * 所以特意配了模糊。**是我的皮肤把它抹掉了**，于是它们退化成"半透明但没模糊"。
+ *
+ * 修法：把"一律关掉"改成"**只关插件自己没打算模糊的部分**" —— 用 `:not()` 精确放行
+ * 那三个玻璃表面。放行后它们吃的是**插件自己样式表里的**值（仍是令牌驱动），
+ * 皮肤不参与，所以不需要 `!important` 去抢。 */
 html body :is([class*="dshCc_"], [class*="dshCc_"] *) {
-  backdrop-filter: none !important;
   border-width: 0 !important;
   border-style: none !important;
   box-shadow: none !important;
+}
+/* 撤销皮肤可能糊到插件元素上的模糊 —— 但**放行插件自己定义的毛玻璃表面**。
+ * 只列这三个：它们带着 `backdrop-filter: var(--dsw-menu-backdrop-filter)` 是有意的。 */
+html body :is([class*="dshCc_"], [class*="dshCc_"] *):not(.dshCc_menu):not(.dshCc_suggest):not(.dshCc_selectMenu) {
+  backdrop-filter: none !important;
 }
 
 /* ── §6  修掉"渐隐层"：它不该渐隐到颜色，而该渐隐到透明 ──────────────────
