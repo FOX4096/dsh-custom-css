@@ -144,8 +144,11 @@ const excludeFragments = (code.match(/:not\(\[class\*=/g) || []).length;
 const positiveFragments = allFragments - excludeFragments;
 const stat = {
 	行数: css.split('\n').length,
-	important: (css.match(/!important/g) || []).length,
-	backdropFilter: (css.match(/^\s*backdrop-filter\s*:/gm) || []).length,
+	// ⚠ 同样要用剥掉注释的 `code`，不能数 `css` —— 这个文件里到处在解释
+	// "当初为什么写了强声明"，注释里的字面量会把数字抬高（实测 19 vs 真正的 11）。
+	// 这正是上面第 ③ 条踩过的同一个坑，只是当初只给选择器统计做了剥离。
+	important: (code.match(/!important/g) || []).length,
+	backdropFilter: (code.match(/^\s*backdrop-filter\s*:/gm) || []).length,
 	正向片段选择器: positiveFragments,
 	排除片段: excludeFragments,
 	令牌引用: referenced.length,
