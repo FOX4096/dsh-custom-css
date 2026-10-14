@@ -206,16 +206,22 @@ body {
 /* ── §5  浮层：唯一允许有"模糊"的地方 ────────────────────────────────────
  * 对话框与菜单浮在**内容之上**，背后是文字，纯透明会看不清 —— 所以给它们一层薄雾。
  *
- * ⚠ 这里必须排除"锚点"与"触发片"：它们是浮层的**祖先**，会连带被匹配到。
- * 实测误伤过三个：
- *   span._root_4ub78_1.<hash>_menuAnchor 108×30 「标准模式」→ 被加了 1px 描边
- *   span._root_4ub78_1.<hash>_menuAnchor  45×26            → 被加了 1px 描边
- *   button.dshCc_menuBtn                 104×36 「更多操作」→ 被加了 1px 描边
- * 前两个是 DSH 的模式选择触发片，第三个是插件的下拉触发器 —— 它们只需要自己原本的样子。
+ * ⚠ 两条踩过的坑，都是"命中太宽"：
+ *
+ * ① 必须排除**锚点**：它们是浮层的祖先，会连带被匹配到。实测误伤过
+ *    `_root_4ub78_1.<hash>_menuAnchor`（「标准模式」触发片）与插件的 `dshCc_menuBtn`。
+ *
+ * ② **类名片段后面要跟 `-`，否则会命中所有后代。**
+ *    原来写 `[class*="_menu"]`，它命中了 `dshCc_menu` **以及它里面的每一个 span** ——
+ *    `dshCc_menuLabel`、`dshCc_menuHint` 都不在 `:not()` 名单里，于是**每个文本元素
+ *    都被加上了 0.5px 描边**。用户看到的就是"下拉的文本还有描边框"。
+ *    改成 `[class*="_menu-"]` 这种**带分隔符**的片段后只命中真正的容器类（DSH 的哈希类名形如
+ *    `_menu_1a2b3`、`_menuAnchor_1a2b3`），插件那套 `dshCc_menuLabel` 不再被匹配。
+ *    这与文档里那条经验一致：**抓类名要连分隔符一起抓**，短片段不能当身份。
  *
  * 用长写法设描边（`border-width/style/color`），不是 `border` 简写 —— 见文件头原则 3。 */
-[class*="_dialog"]:not([class*="_menuAnchor"]),
-[class*="_menu"]:not([class*="_menuAnchor"]):not([class*="_menuBtn"]):not([class*="_menuItem"]),
+[class*="_dialog"],
+[class*="_menu-"],
 [role="dialog"],
 [role="menu"],
 [role="listbox"] {
@@ -228,17 +234,55 @@ body {
     var(--dsw-elevation-prominent);
 }
 
-/* 插件自己的下拉菜单已经按 DSH 规格调好了，别被上面那条糊一层。
+/* ── §5b  本插件的元素：一律不参与上面的浮层样式 ─────────────────────────
+ * 即便收紧了 `_menu-`，`[class*="_dialog"]` 与 `[role="…"]` 仍可能命中插件的元素
+ * （实测 `dshCc_btn` 被加过模糊），所以这里**统一撤销整个 `.dshCc_` 子树**。
+ * 插件自己的样式表已经把界面调到与 DSH 一致，皮肤不该再糊一层。
+ *
  * ⚠ 特异性必须真的赢：`:is(.dshCc_menu…)` 全是单类，整体只有 (0,1,0)，与
- * `[class*="_menu"]` 同级；用 `html body :is(…)` 抬到 (0,2,1)。
- * 而且**撤销 ≠ 重设**：撤销只该拿掉，不该赋新值（第一版把圆角塞进撤销那步，
+ * `[class*="_dialog"]` 同级；用 `html body :is(…)` 抬到 (0,2,1)。
+ * ⚠ **撤销 ≠ 重设**：撤销只该拿掉，不该赋新值（第一版把圆角塞进撤销那步，
  * 反而把菜单项的 12px 改成了继承来的 16px）。 */
-html body :is(.dshCc_menu, .dshCc_menuItem, .dshCc_menuLabel, .dshCc_menuHint, .dshCc_menuCheck) {
+html body [class*="dshCc_"] {
   backdrop-filter: none !important;
+  border-width: 0 !important;
+  border-style: none !important;
   box-shadow: none !important;
 }
+/* 兜底：子树里**类名不含前缀**的元素（如某些哈希型子类）也要清干净描边。 */
+html body [class*="dshCc_"] * {
+  border-width: 0 !important;
+  border-style: none !important;
+  backdrop-filter: none !important;
+}
 
-/* ── §5  滚动条 / 选中 / 焦点 ────────────────────────────────────────────
+/* ── §6  隐藏「工作步骤展示」那一行 ──────────────────────────────────────
+ * 用户要求把设置里那一行去掉。
+ *
+ * ⚠ 它**没有任何可用来定位的属性** —— 实测那一行是
+ *   `div._2XZxNq_row`（554×77，"工作步骤展示 / 选择希望看到多少工具调用细节"）
+ * 而这种行在同一页有**两个**（另一个是"性能与用量"），它们字面上共用同一个类名、
+ * 都没有 `data-*`。所以只能按**结构位置**定位。
+ *
+ * ⚠⚠ 这里连着踩了两次"选择器命中太宽"，都记下来：
+ *
+ *   1) 先写 `[data-slot="settings.section"] > :nth-child(6)` —— 用 `>`（直接子）**不命中**：
+ *      那一行的父元素是 `[data-slot="settings.general.item"]`，而槽位在**再上一层**。
+ *   2) 去掉 `>` 改成后代组合器 —— 一下子命中 **5 个**元素：插件自己的
+ *      `.dshCc_gutterLine`、`.dshCc_tokProp`、`.dshCc_menuItem` 也都是"某个父元素的第 6 个孩子"。
+ *
+ * 教训与 §5 完全一样：**结构选择器必须同时限定"是什么"**，否则会命中无关的深层元素。
+ * 最终这条同时要求：在设置槽位内 + 类名是设置行（`[class*="_row"]`）+ 是该父元素的第 6 个孩子，
+ * 实测命中**恰好 1 个**，就是"工作步骤展示"；"性能与用量"（第 9 个）不受影响。
+ *
+ * 代价说清楚：DSH 若在这行前面增删设置项，`nth-child` 会指偏 —— 那样这一行会重新出现
+ * （**不会**误删别的行：仍然要求 `[class*="_row"]`，只会指向另一行设置项）。
+ * 校验方式：改完打开设置，确认"工作步骤展示"不见了、而"性能与用量"还在。 */
+[data-slot="settings.general.item"] > [class*="_row"]:nth-child(6) {
+  display: none !important;
+}
+
+/* ── §7  滚动条 / 选中 / 焦点 ────────────────────────────────────────────
  * 这三处与"表面透明"无关，是纯增量的小改动，保留下来。 */
 * {
   scrollbar-width: thin;
@@ -277,7 +321,7 @@ code {
   font-variant-ligatures: none;
 }
 
-/* ── §6  降级 ────────────────────────────────────────────────────────────
+/* ── §8  降级 ────────────────────────────────────────────────────────────
  * `light-dark()` 或 `color-mix()` 不可用时（很老的引擎），令牌会解析失败 ——
  * 那时界面保持 DSH 原本的纯色，**不会坏**，只是没有亚克力效果。
  * 这是有意的：宁可退成原样，也不要退成"半坏的透明"。 */
