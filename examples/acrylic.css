@@ -428,6 +428,37 @@ body[data-ds-dark-theme] {
   backdrop-filter: blur(var(--dsh-acrylic-blur-panel)) saturate(var(--dsh-acrylic-saturate));
 }
 
+/* ④ **输入区那一带的所有表面** —— 用**槽位**圈范围，不再猜层级。
+ *
+ * 用户报："输入文本框和上面的音乐，还有上面的任务什么的，也没有做透明。
+ * 反正就是那一块的，全都做成毛玻璃。"
+ *
+ * 实测那一带有 6 个有底却没毛玻璃的元素（`.dsh-music-bar` 音乐播放器、
+ * `.cm-footer-stack` 成本卡片、`.cm-simple-summary`、`.cm-btn`、
+ * `.nArs4W_bottomPanel`、`.nArs4W_tabBar`），它们分别挂在
+ * `conversation.input.dock` / `sidebar.footer.action` / `conversation.session.header.actions`
+ * 这些**槽位**下。
+ *
+ * ⚠ 这里**不能用 `> *` 取直接子元素** —— 实测槽位元素是 `display: contents`，
+ * 它的"直接子元素"往往是插件放的一层**透明 wrap**（`dsh-music-bar-wrap`），
+ * 真正有底的 `.dsh-music-bar` 在再下一层，于是加不上。这是我第 5 次在"选哪一层"上出错。
+ *
+ * 改成**用槽位圈范围、后代全都要**：槽位是**明确的语义范围**（DSH 自己声明的地点），
+ * 不是猜类名 —— 所以这个范围内"全都要"是安全的：
+ *   · 有底的表面 → 得到毛玻璃（这正是我们要的）；
+ *   · 透明的元素 → `backdrop-filter` 不产生可见图层（实测过），无害；
+ *   · 新装的扩展只要挂在同一槽位 → 自动获得毛玻璃，不用我再去补。
+ *
+ * 这比"逐个点名扩展的哈希类"稳得多，也是这一版唯一一处**有意**用后代选择器的地方。 */
+[data-slot="conversation.input.dock"] *,
+[data-slot="conversation.composer.dock"] *,
+[data-slot="sidebar.footer.action"] *,
+[data-slot="conversation.session.header.actions"] *,
+[class*="nArs4W_bottomPanel"],
+[class*="nArs4W_tabBar"] {
+  backdrop-filter: blur(var(--dsh-acrylic-blur-chip)) saturate(var(--dsh-acrylic-saturate));
+}
+
 /* ⚠ **故意不加**的（都实测过，全都是透明的，加了就是"外面糊里面透明"）：
  *   `centerCol` / `rightbarCol` / `composerSeat` / `tabHostBody`
  *   `tabStrip` / `stripChrome` / 正文 / 壁纸 / 内容盒子（callout）/ 静态徽章
