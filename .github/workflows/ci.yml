@@ -31,6 +31,7 @@ jobs:
           node --check tests/loader-smoke.cjs
           node --check tests/host-api-smoke.mjs
           node --check tests/audit-docs.mjs
+          node --check tests/audit-skin.mjs
           node --check tests/update-compat.mjs
 
       - name: host 侧文件接口冒烟测试
