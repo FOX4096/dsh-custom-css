@@ -258,6 +258,82 @@ body[data-ds-dark-theme] {
   --dsw-alias-code-diff-deleted:
     light-dark(color-mix(in srgb, #ec1313 10%, transparent),
                color-mix(in srgb, #ec1313 14%, transparent));
+
+  /* ---- 覆盖层 / 悬浮面 ----
+   * 这一组默认是**实心浅色**，在透明界面里都会变成突兀的色块。 */
+  --dsw-alias-bg-overlay:                       /* 覆盖层（16 处） */
+    light-dark(color-mix(in srgb, #e9ecf2 var(--dsh-acrylic-layer-alpha), transparent),
+               color-mix(in srgb, #1e2126 var(--dsh-acrylic-layer-alpha), transparent));
+  --dsw-alias-button-floating-fill:             /* 悬浮按钮 */
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
+               color-mix(in srgb, #262a30 var(--dsh-acrylic-chip-alpha), transparent));
+  --dsw-alias-bg-mask-drop:                     /* 拖放遮罩：本来就是半透明白，压淡一档 */
+    light-dark(color-mix(in srgb, #ffffff 62%, transparent),
+               color-mix(in srgb, #272730 70%, transparent));
+
+  /* ---- 状态底色（tertiary）----
+   * 这些**带色相**（警告淡黄、成功淡绿、业务淡蓝）。不能一律改成中性白 ——
+   * 那会把"这是什么状态"的信息抹掉。所以保留色相、只把不透明度压下来。 */
+  --dsw-alias-state-warn-tertiary:
+    light-dark(color-mix(in srgb, #f59e0b 14%, transparent),
+               color-mix(in srgb, #f59e0b 16%, transparent));
+  --dsw-alias-state-success-tertiary:
+    light-dark(color-mix(in srgb, #22c55e 14%, transparent),
+               color-mix(in srgb, #22c55e 16%, transparent));
+  --dsw-alias-state-business-tertiary:
+    light-dark(color-mix(in srgb, #4176e6 12%, transparent),
+               color-mix(in srgb, #4176e6 18%, transparent));
+  --dsw-alias-file-diff-added-bg:
+    light-dark(color-mix(in srgb, #22c55e 14%, transparent),
+               color-mix(in srgb, #22c55e 18%, transparent));
+  --dsw-alias-file-diff-deleted-bg:
+    light-dark(color-mix(in srgb, #ec1313 12%, transparent),
+               color-mix(in srgb, #ec1313 16%, transparent));
+
+  /* ---- 交互态（悬停 / 选中 / 激活）----
+   * ⚠ 这一组**最需要小心**：它们要"看得出来"，全透明化的界面里
+   * 一个实心浅灰的选中态会像补丁，但压太淡又会失去反馈。
+   * 所以档位定在 30–46%：可见、但不跳。 */
+  --dsw-alias-interactive-bg-hover-solid:
+    light-dark(color-mix(in srgb, #0f1115 6%, transparent),
+               color-mix(in srgb, #ffffff 10%, transparent));
+  --dsw-alias-button-floating-hover:
+    light-dark(color-mix(in srgb, #0f1115 8%, transparent),
+               color-mix(in srgb, #ffffff 12%, transparent));
+  --dsw-alias-button-ghost-active-fill:
+    light-dark(color-mix(in srgb, #0f1115 9%, transparent),
+               color-mix(in srgb, #ffffff 14%, transparent));
+  --dsw-alias-button-ghost-active-hover:
+    light-dark(color-mix(in srgb, #0f1115 11%, transparent),
+               color-mix(in srgb, #ffffff 16%, transparent));
+  --dsw-specific-sidebar-nav-item-hover:
+    light-dark(color-mix(in srgb, #0f1115 6%, transparent),
+               color-mix(in srgb, #ffffff 10%, transparent));
+  --dsw-specific-sidebar-nav-item-active:
+    light-dark(color-mix(in srgb, #0f1115 9%, transparent),
+               color-mix(in srgb, #ffffff 14%, transparent));
+  --dsw-specific-sidebar-nav-item-active-accent:
+    light-dark(color-mix(in srgb, #4176e6 12%, transparent),
+               color-mix(in srgb, #4176e6 18%, transparent));
+  --dsw-specific-selector:                      /* 下拉选择器的底 */
+    light-dark(color-mix(in srgb, #ffffff var(--dsh-acrylic-chip-alpha), transparent),
+               color-mix(in srgb, #262a30 var(--dsh-acrylic-chip-alpha), transparent));
+  --dsw-specific-bubble:                        /* 气泡（带淡蓝）*/
+    light-dark(color-mix(in srgb, #4176e6 10%, transparent),
+               color-mix(in srgb, #4176e6 16%, transparent));
+  --dsw-alias-turn-trigger-bg:                  /* 回合触发器：跟随悬停色 */
+    var(--dsw-alias-interactive-bg-hover);
+
+  /* ---- 滚动条 ---- */
+  --dsw-alias-scrollbar-bg-l1:
+    light-dark(color-mix(in srgb, #0f1115 14%, transparent),
+               color-mix(in srgb, #ffffff 16%, transparent));
+  --dsw-alias-scrollbar-bg-l2:
+    light-dark(color-mix(in srgb, #0f1115 16%, transparent),
+               color-mix(in srgb, #ffffff 18%, transparent));
+  --dsw-alias-scrollbar-hover-l2:
+    light-dark(color-mix(in srgb, #0f1115 26%, transparent),
+               color-mix(in srgb, #ffffff 30%, transparent));
 }
 
 /* 注意这里**没有**动下面这些令牌 —— 它们承担"有内容的颜色"，透明化会砸掉语义：
