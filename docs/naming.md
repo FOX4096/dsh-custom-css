@@ -111,6 +111,21 @@
 
 > 面板里的**壁纸记录**指宿主上那份 `wallpaper.json.css`（一张普通样式表文件，内容恰好是 JSON），
 > 不是界面元素的名字，但代码与文档里都用这个词，不再叫它「配置文件」或「设置文件」。
+> **插件设置**则是另一份 `settings.json.css`，见下面的 A3。
+
+### A3. 壁纸设置（插件详情页里独立的一节）
+
+| 名字 | 标识（代码 / 选择器） | 说明 | 状态 |
+| --- | --- | --- | --- |
+| **设置节** | `SettingsSection` · `section[data-dsh-wallpaper="settings-section"]` | 插件详情页里「壁纸设置」这一整节（order 21，排在壁纸节之后） | 已实现 |
+| **设置面板** | `SettingsPanel` · `div[data-dsh-wallpaper="settings"]` | 四行控件本体 | 已实现 |
+| **轮换下拉** | `.dshWp_select`（`aria-label` 为「壁纸轮换间隔」） | 关 / 5 分钟 / 30 分钟 / 每小时 / 每天 | 已实现 |
+| **遮罩滑块** | `.dshWp_slider`（`aria-label` 为「壁纸遮罩浓度」） | 0–80%，压在图片上的暗色层 | 已实现 |
+| **模糊滑块** | `.dshWp_slider`（`aria-label` 为「壁纸模糊半径」） | 0–24px 的 `blur()` | 已实现 |
+| **角落时间开关** | `.dshWp_switchWrap` · `.dshWp_switchInput` | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
+
+> 这一节的标签与滑块的 `aria-label` 都在 `WALLPAPER_SETTING_LABELS` 里，一处定义、两处使用
+> （看得见的字与读屏器听到的字不是同一句，所以两个都要写）。
 
 ### 设置行里的入口
 

@@ -31,7 +31,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, openWallpaperSection };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -154,6 +154,27 @@ function decodeCssString(raw) {
   return raw.replace(/\\(?:([0-9a-fA-F]{1,6}) ?|(.))/g, (whole, hex, character) => (
     hex === undefined ? character : String.fromCodePoint(parseInt(hex, 16))
   ));
+}
+
+/**
+ * Every node under one root, in document order.
+ *
+ * The harness needs this in two places now: the selector pool it matches against, and
+ * `document.getElementById` — a real lookup walks the tree, and a stub that only knew about the
+ * style tags it keeps a list of could not find the wallpaper clock the plugin had just appended.
+ * @param root - the node to walk.
+ * @returns every descendant, excluding the root.
+ */
+function collectNodes(root) {
+  const out = [];
+  const walk = (node) => {
+    for (const child of node.children ?? []) {
+      out.push(child);
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
 }
 
 /** One compound selector: tag, `.class`, `#id`, `[attr]`, `[attr op "value"]`, `:nth-child()`. */
@@ -512,6 +533,10 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, service
     // The external-change poll only runs while the page is on screen (`visibilitychange` is the
     // other half of it). A boot starts visible; a case can switch it off by assigning here.
     visibilityState: 'visible',
+    // A real document has one, and the wallpaper clock reads it before repainting: a page that is
+    // hidden has nothing to show, and the readout it would paint is the one it will paint again
+    // when it comes back.
+    hidden: false,
     head: {
       appendChild: element => {
         styleTags.push(element);
@@ -572,7 +597,23 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, service
       return [...(dom.nodes ?? []), ...appended].filter(node => matchesSelector(node, selector));
     },
     createElement: makeElement,
-    getElementById: id => styleTags.find(element => element.id === id) ?? null,
+    /**
+     * `document.getElementById`, as the browser does it: over the WHOLE document, not just the
+     * style tags this harness happens to keep a list of.
+     *
+     * The old stub searched only `styleTags`, so a real DOM element carrying an id was invisible
+     * to the plugin — and the wallpaper clock reads exactly that. Two things followed, both
+     * measured: `syncWallpaperClock` could never find the clock it had created (so the "switch it
+     * off" assertion was testing the harness, not the code), and in a real session an id lookup
+     * miss would have meant one clock element per sync. Fixed here rather than worked around in
+     * the plugin: the stub was lying about a documented DOM API.
+     */
+    getElementById(id) {
+      const inStyles = styleTags.find(element => element.id === id);
+      if (inStyles !== undefined) return inStyles;
+      const pool = [...(dom.nodes ?? []), ...collectNodes(body)];
+      return pool.find(node => node.id === id) ?? null;
+    },
     // Real hit testing over the pool, so "the pointer is over this element" is decided by
     // the coordinates the test dispatches rather than by a constant.
     elementFromPoint: (x, y) => hitTest(dom.nodes, x, y),
@@ -828,10 +869,10 @@ async function main() {
   assert.deepStrictEqual([...host.mod.inject], ['slots'], 'exports.inject must declare the slots service');
 
   assert.deepStrictEqual(
-    host.waits, ['settings.general.item', 'plugins.detail.section'],
-    'apply waits for the General item seat and for this plugin page\'s section seat',
+    host.waits, ['settings.general.item', 'plugins.detail.section', 'plugins.detail.section'],
+    'apply waits for the General item seat and registers two sections on this plugin\'s own page',
   );
-  assert.strictEqual(host.registrations.length, 2, 'apply registers the row and the wallpaper section');
+  assert.strictEqual(host.registrations.length, 3, 'apply registers the row and two sections');
   assert.strictEqual(host.registrations[0].options.id, 'custom-css');
   assert.strictEqual(host.registrations[0].options.order, 12, 'order 12 sits below Appearance (10) and Font size (11)');
   assert.strictEqual(host.registrations[0].options.registrant, 'dsh-custom-css');
@@ -839,6 +880,16 @@ async function main() {
   assert.strictEqual(host.registrations[1].options.id, 'custom-css-wallpaper');
   assert.strictEqual(host.registrations[1].options.registrant, 'dsh-custom-css');
   assert.strictEqual(typeof host.registrations[1].component, 'function', 'the wallpaper section must be a component');
+  assert.strictEqual(host.registrations[2].options.id, 'custom-css-wallpaper-settings');
+  assert.strictEqual(host.registrations[2].options.registrant, 'dsh-custom-css');
+  assert.strictEqual(typeof host.registrations[2].component, 'function', 'the settings section must be a component');
+  // The page reads 「壁纸 → 壁纸设置」, which is an order contract between the two sections and
+  // nothing else: the seat sorts by order, and equal orders would leave the reading order to
+  // registration timing.
+  assert.ok(
+    host.registrations[2].options.order > host.registrations[1].options.order,
+    'the settings section sits below the wallpaper section on the page',
+  );
 
   assert.ok(host.userStyle(), 'the active host sheet is applied on load, without opening settings');
   assert.strictEqual(host.userStyle().textContent, HOST_SHEET);
@@ -5822,7 +5873,7 @@ async function main() {
     fetchImpl: async () => { throw new Error('no route'); },
     stored: new Map([['dsh-custom-css:wallpaper', JSON.stringify({ image: 'https://example.test/a.png', fit: 'cover', transparent: 30, brightness: 0 })]]),
   });
-  assert.strictEqual(paper.registrations.length, 2, 'a Host that answers nothing still registers both seats');
+  assert.strictEqual(paper.registrations.length, 3, 'a Host that answers nothing still registers every seat');
   const paperSheet = paper.styleTags.find(element => element.id === 'dsh-custom-css-wallpaper-style');
   assert.ok(paperSheet !== undefined, 'the wallpaper sheet is installed from the browser copy');
   assert.ok(
@@ -6031,14 +6082,120 @@ async function main() {
       throw new Error('unexpected request: ' + url);
     },
   });
-  assert.strictEqual(noManager.registrations.length, 2, 'a composition without a plugin manager still gets both seats');
+  assert.strictEqual(noManager.registrations.length, 3, 'a composition without a plugin manager still gets every seat');
   assert.deepStrictEqual(
     noManager.registrations.map(entry => entry.options.id).sort(),
-    ['custom-css', 'custom-css-wallpaper'],
-    'and both are the seats this plugin registers',
+    ['custom-css', 'custom-css-wallpaper', 'custom-css-wallpaper-settings'],
+    'and all three are the seats this plugin registers',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified');
+  // --- 23. plugin settings --------------------------------------------------
+  //
+  // The settings that ship without a Host route: they reach the page through the SAME injected
+  // sheet the wallpaper uses, so what a test can hold on to is the sheet's text.
+  // The probe runs inside the harness's VM context, so its objects have that realm's prototypes —
+  // `deepStrictEqual` refuses them on identity. Compare the JSON, which is the same value a user
+  // would read in the record file anyway.
+  const settingsJson = (value) => JSON.stringify(value);
+  assert.strictEqual(
+    settingsJson(probe.normalizeSettings(undefined)),
+    settingsJson({ rotate: 'off', scrim: 0, blur: 0, clock: false }),
+    'a missing record normalises to the defaults',
+  );
+  assert.strictEqual(
+    settingsJson(probe.normalizeSettings({ rotate: '5', scrim: 999, blur: -3, clock: 'yes' })),
+    settingsJson({ rotate: 'off', scrim: 80, blur: 0, clock: false }),
+    'and an out-of-range or unknown record is measured into the range rather than written through',
+  );
+  assert.strictEqual(
+    settingsJson(probe.normalizeSettings({ rotate: '300', scrim: 40, blur: 12, clock: true })),
+    settingsJson({ rotate: '300', scrim: 40, blur: 12, clock: true }),
+    'a valid record survives normalisation unchanged',
+  );
+  assert.strictEqual(probe.rotateIntervalMs({ rotate: 'off' }), 0, 'rotation off is zero milliseconds');
+  assert.strictEqual(probe.rotateIntervalMs({ rotate: '300' }), 300000, 'and five minutes is five minutes');
+  // A hand-edited record is refused rather than obeyed: the choices are a whitelist, so a value
+  // nobody offered — including one a user typed into the file themselves — reads as "off" instead
+  // of arming a timer the interface has no control to switch off.
+  assert.strictEqual(
+    probe.rotateIntervalMs({ rotate: String(60 * 60 * 24 * 30) }), 0,
+    'a value that is not one of the offered choices reads as off',
+  );
+
+  // The picture's own layer keeps ONE filter declaration. Two would replace each other, and the
+  // measured symptom was a blur slider that moved while the picture stayed sharp.
+  const composedFilter = probe.wallpaperCss(
+    { image: PNG_DATA_URL, brightness: -55 },
+    { blur: 12, scrim: 0, rotate: 'off', clock: false },
+  );
+  assert.ok(
+    composedFilter.includes('filter:brightness(0.45) blur(12px)'),
+    'brightness and blur compose into one filter — got: ' + composedFilter.split('\n').filter(l => l.startsWith('filter')).join('|'),
+  );
+  assert.strictEqual(
+    composedFilter.split('filter:').length - 1, 1,
+    'and there is exactly one filter declaration in the rule',
+  );
+  const scrimmed = probe.wallpaperCss(
+    { image: PNG_DATA_URL },
+    { blur: 0, scrim: 40, rotate: 'off', clock: false },
+  );
+  assert.ok(
+    scrimmed.includes('background-image:linear-gradient(rgba(0,0,0,0.4),rgba(0,0,0,0.4)),url('),
+    'the scrim is a gradient UNDER the picture, in the same background-image — got: '
+      + scrimmed.split('\n').filter(l => l.includes('background-image')).join('|'),
+  );
+  assert.ok(
+    !probe.wallpaperCss({ image: PNG_DATA_URL }, { scrim: 0, blur: 0, clock: false }).includes('linear-gradient(rgba'),
+    'and no scrim means no gradient at all, not a transparent one',
+  );
+
+  // The clock: created only for a picture, ours by attribute, and never left behind.
+  const clocked = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  probe.syncWallpaperClock({ clock: true, blur: 0, scrim: 0, rotate: 'off' });
+  assert.strictEqual(
+    clocked.document.body.children.some(child => child.id === 'dsh-custom-css-wallpaper-clock'), false,
+    'a clock without a wallpaper is not created: it belongs to the picture',
+  );
+  probe.commitSettings({ clock: true, blur: 0, scrim: 0, rotate: 'off' });
+  // A real picture through the real commit, so the store holds what the clock's own rule asks
+  // about. `applyWallpaper` paints the sheet but deliberately does NOT touch the store — the
+  // first version of this case used it and measured the clock being removed by its own rule.
+  // The clock's off-switch, plus the failure mode worth guarding: a clock that stays behind after
+  // it is switched off, or a second one created every time the settings are committed.
+  //
+  // ⚠ Everything here goes through the PLUGIN'S OWN document (`probe.appendStray` / `bodyList`).
+  // Each `boot` builds its own VM and its own document object, so appending to a different boot's
+  // body and then asking this one about "its" body measures two objects that never met — which is
+  // exactly how the first version of this case reported a clock that was nowhere near it.
+  probe.appendStray(probe.clockId());
+  assert.strictEqual(
+    probe.bodyList().includes('#' + probe.clockId()), true,
+    'a clock-shaped node on the plugin\'s own body is found by id — body: ' + probe.bodyList(),
+  );
+  // The clock only exists ON a wallpaper, so the store needs a picture before "on" means anything:
+  // without one the sync correctly removes the stray, which is what this case measured before it
+  // committed a picture.
+  probe.commitWallpaper({ image: PNG_DATA_URL }, { persist: false });
+  probe.syncWallpaperClock({ clock: true, blur: 0, scrim: 0, rotate: 'off' });
+  const afterOn = probe.bodyList();
+  assert.strictEqual(
+    afterOn.split(',').filter(entry => entry.includes('wallpaper-clock')).length, 1,
+    'and syncing with the clock on reuses it instead of adding a second one — body: ' + afterOn,
+  );
+  probe.syncWallpaperClock({ clock: false, blur: 0, scrim: 0, rotate: 'off' });
+  assert.strictEqual(
+    probe.bodyList().includes('#' + probe.clockId()), false,
+    'switching the clock off removes it rather than hiding it — body: ' + probe.bodyList(),
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified');
 }
 
 main().catch((error) => {
