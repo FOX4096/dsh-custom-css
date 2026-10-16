@@ -1088,12 +1088,13 @@ async function main() {
   renderedText.length = 0;
   renderedClasses.length = 0;
   const menuView = renderRow();
-  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '历史版本']) {
+  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '历史版本', '重命名', '打开目录', '删除']) {
     assert.ok(renderedText.includes(label), 'the menu renders the ' + label + ' action');
   }
   // The order is a decision, not an accident: the file actions together, the whole-sheet
-  // actions next, and the one entry that destroys work last — where the pointer has to
-  // travel to it and cannot land on it on the way to anything else.
+  // actions next, the file-level operations on the directory after those, and the two entries
+  // that destroy work last — where the pointer has to travel to them and cannot land on one on
+  // the way to anything else.
   {
     const order = [];
     (function walk(current) {
@@ -1101,19 +1102,35 @@ async function main() {
       if (current.type === 'button' && typeof current.props?.title === 'string') order.push(textOf(current));
       for (const child of current.children ?? []) walk(child);
     })(menuView);
-    const wanted = ['打开文件', '导入', '导出', '格式化', '历史版本', '重置'];
+    const wanted = ['打开文件', '导入', '导出', '格式化', '历史版本', '重命名', '打开目录', '删除', '重置'];
     const seen = order
       .map(entry => wanted.find(label => entry.startsWith(label)))
       .filter(label => label !== undefined);
     assert.deepStrictEqual(
       [...seen], wanted,
-      'the actions menu lists the file actions, then the whole-sheet ones, then 重置 — got: ' + JSON.stringify(order),
+      'the actions menu lists the file actions, then the whole-sheet ones, then the file-level ones, then 重置 — got: ' + JSON.stringify(order),
     );
     // And the destructive one is styled as destructive, in its new place as before.
     const resetItem = buttonWith(menuView, '重置');
     assert.ok(
       String(resetItem.props.className).includes('dshCc_menuItemDanger'),
       '重置 keeps its destructive styling at the bottom — className: ' + JSON.stringify(resetItem.props.className),
+    );
+    // Deleting asks twice: the entry arms itself on the first click and only the second one
+    // spends the sheet. Asserted by driving the click, because "it asks" is the whole safety story.
+    const deleteItem = buttonWith(menuView, '删除');
+    assert.ok(
+      String(deleteItem.props.className).includes('dshCc_menuItemDanger'),
+      '删除 is styled as destructive too',
+    );
+    // ⚠ The arming path cannot be driven from THIS boot, and the reason is worth writing down:
+    // the row's file list comes from the fake Host's `/list` at bootstrap, so a case that needs two
+    // sheets has to boot with two. This one has one, which is itself the state worth asserting —
+    // 删除 is disabled for the only sheet, because the Host refuses to leave the directory empty
+    // (`last-sheet`) and the entry says so up front instead of failing when clicked.
+    assert.strictEqual(
+      deleteItem.props.disabled, true,
+      'the only sheet cannot be deleted, so the entry is disabled',
     );
   }
   assert.ok(renderedClasses.some(entry => entry.includes('dshCc_menuItemDanger')), '重置 keeps its destructive styling in the menu');

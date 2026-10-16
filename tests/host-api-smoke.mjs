@@ -584,6 +584,100 @@ const emptyImage = await call('POST', '/dsh-custom-css/wallpaper-image', { dataU
 assert.strictEqual(emptyImage.status, 400, 'a data URL with no bytes in it is refused');
 assert.strictEqual(emptyImage.payload.error, 'bad-image', 'as an image, not as a body');
 
+// --- a record is not a sheet -------------------------------------------------
+//
+// The plugin's own records (`wallpaper.json.css`, `settings.json.css`) end in `.css` and are read
+// back through the same file API — but they are not sheets, and every path that treats a name as
+// user content has to say so. Measured consequence of not saying so: the row's sheet picker offered
+// `wallpaper.json.css` for editing, and the manage actions could have renamed or deleted the record
+// that holds where the wallpaper is.
+const recordWrite = await call('POST', '/dsh-custom-css/write', {
+  name: 'wallpaper.json.css',
+  css: '{"image":"/dsh-custom-css/wallpaper?name=x.png","fit":"cover"}',
+});
+assert.strictEqual(recordWrite.status, 200, 'the browser half can still write its own record');
+const listingWithRecord = await call('GET', '/dsh-custom-css/list');
+assert.ok(
+  !listingWithRecord.payload.files.some(file => file.name === 'wallpaper.json.css'),
+  'but the listing never offers it as a sheet — files: '
+    + JSON.stringify(listingWithRecord.payload.files.map(file => file.name)),
+);
+const recordRename = await call('POST', '/dsh-custom-css/rename', { name: 'wallpaper.json.css', to: 'renamed-record.css' });
+assert.strictEqual(recordRename.status, 400, 'and it cannot be renamed as one');
+assert.strictEqual(recordRename.payload.error, 'bad-name', 'refused by the same name rule as any other route');
+const recordDelete = await call('POST', '/dsh-custom-css/delete', { name: 'wallpaper.json.css' });
+assert.strictEqual(recordDelete.status, 400, 'nor deleted as one: the wallpaper record survives');
+const recordStillReads = await call('GET', '/dsh-custom-css/read?name=wallpaper.json.css');
+assert.strictEqual(recordStillReads.status, 200, 'and it is still readable, which is what the panel needs');
+
+// --- rename / delete / open-dir ---------------------------------------------
+//
+// The three routes that manage files rather than their contents. Each one is checked for both
+// halves of its contract: what it does to the directory, and what it refuses to do.
+const beforeRename = await call('GET', '/dsh-custom-css/list');
+const victim = beforeRename.payload.files.find(file => file.name !== beforeRename.payload.active);
+assert.ok(victim !== undefined, 'the setup left a second sheet to rename');
+
+// Renaming follows the ACTIVE name in bookkeeping: a sheet that kept its old name there would come
+// back unmuted, and the switch would point at a file that no longer exists.
+await call('POST', '/dsh-custom-css/active', { name: victim.name });
+const renamed = await call('POST', '/dsh-custom-css/rename', { name: victim.name, to: 'renamed.css' });
+assert.strictEqual(renamed.status, 200, 'rename succeeds');
+assert.strictEqual(renamed.payload.name, 'renamed.css', 'and answers with the new name');
+const afterRename = await call('GET', '/dsh-custom-css/list');
+assert.ok(!afterRename.payload.files.some(file => file.name === victim.name), 'the old name is gone from the listing');
+assert.ok(afterRename.payload.files.some(file => file.name === 'renamed.css'), 'and the new one is there');
+assert.strictEqual(afterRename.payload.active, 'renamed.css', 'bookkeeping followed the file');
+const renamedRead = await call('GET', '/dsh-custom-css/read?name=renamed.css');
+assert.strictEqual(renamedRead.status, 200, 'and its contents came along');
+
+// A rename onto an existing name is refused rather than overwriting: the other sheet is somebody's
+// work, and this route is not the one that gets to decide which of the two survives.
+const occupied = beforeRename.payload.files.find(file => file.name !== victim.name && file.name !== 'renamed.css');
+const collisionTarget = occupied === undefined ? 'custom.css' : occupied.name;
+const collision = await call('POST', '/dsh-custom-css/rename', { name: 'renamed.css', to: collisionTarget });
+assert.strictEqual(collision.status, 409, 'renaming onto an existing sheet is refused');
+assert.strictEqual(collision.payload.error, 'exists', 'with the code the panel turns into a sentence');
+const stillThere = await call('GET', '/dsh-custom-css/read?name=renamed.css');
+assert.strictEqual(stillThere.status, 200, 'and nothing moved');
+
+// Deleting is reversible: the bytes go into history first, which is what makes the one destructive
+// button in the row as recoverable as every write.
+const beforeDelete = await call('GET', '/dsh-custom-css/history?name=renamed.css');
+const deleted = await call('POST', '/dsh-custom-css/delete', { name: 'renamed.css' });
+assert.strictEqual(
+  deleted.status, 200,
+  'delete succeeds — got ' + deleted.status + ' ' + JSON.stringify(deleted.payload)
+    + ' listing: ' + JSON.stringify(afterRename.payload.files.map(file => file.name)),
+);
+const afterDelete = await call('GET', '/dsh-custom-css/list');
+assert.ok(!afterDelete.payload.files.some(file => file.name === 'renamed.css'), 'the sheet is gone from the listing');
+assert.ok(afterDelete.payload.active !== 'renamed.css', 'and the active name moved off it');
+const historyAfterDelete = await call('GET', '/dsh-custom-css/history?name=renamed.css');
+assert.ok(
+  historyAfterDelete.payload.entries.length > (beforeDelete.payload.entries?.length ?? 0),
+  'with a snapshot taken BEFORE the file went away — history: ' + JSON.stringify(historyAfterDelete.payload.entries),
+);
+
+// The last sheet is not deletable: "no sheets at all" is a state the row has no screen for, and the
+// directory would come back looking like a fresh install.
+const sole = await call('GET', '/dsh-custom-css/list');
+if (sole.payload.files.length === 1) {
+  const lastDelete = await call('POST', '/dsh-custom-css/delete', { name: sole.payload.files[0].name });
+  assert.strictEqual(lastDelete.status, 409, 'the last sheet cannot be deleted');
+  assert.strictEqual(lastDelete.payload.error, 'last-sheet', 'reported as its own reason');
+}
+
+// Opening the directory goes through the same launcher as the row's "open in editor" — spied here,
+// so no window is ever spawned.
+setLauncher(full => {
+  launched.push(full);
+});
+const openedDir = await call('POST', '/dsh-custom-css/open-dir');
+assert.strictEqual(openedDir.status, 200, 'open-dir succeeds');
+assert.strictEqual(openedDir.payload.dir, stylesDir, 'and names the directory it opened');
+assert.ok(launched.includes(stylesDir), 'the launcher was pointed at that directory — launched: ' + JSON.stringify(launched));
+
 await rm(home, { recursive: true, force: true });
 // Dispose the plugin the way dsh does: the watcher has to be gone before the process can end
 // (see `effectCleanups`), and running the cleanups here is also what proves they close it.
@@ -593,6 +687,6 @@ const verified = [
   'file API', 'per-sheet switch', '/active', 'validation', 'reserved names', 'body cap',
   ...(linked ? ['symlink refusal'] : []),
   'bookkeeping recovery', 'listing cap', 'version snapshots', 'revisions', 'wallpapers',
-  'the watch filter', 'and fail-closed fence',
+  'rename', 'delete', 'open-dir', 'the watch filter', 'and fail-closed fence',
 ];
 console.log('host-api-smoke: OK — ' + verified.join(', ') + ' verified');

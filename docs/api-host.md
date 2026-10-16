@@ -25,9 +25,26 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点。这是浏览�
 | GET | `/list` | `{ files, active, disabled, dir }` |
 | GET | `/read?name=<name>` | `{ name, css, rev }` |
 | GET | `/history?name=<name>` | `{ name, entries: [{ stamp, bytes, mtime }] }`，按时间倒序（快照目录 `.history/<name>/`，`.history` 这一层不会被 `/list` 当成表列出来） |
+
+### 记录不是样式表（`.json.css`）
+
+插件自己的两份记录叫 `wallpaper.json.css` 与 `settings.json.css` —— 它们以 `.css` 结尾、并且
+**通过同一组文件端点读写**（浏览器半需要），但它们不是样式表。每条把名字当用户内容的路径都要
+说清这件事，否则会出实测过的问题：文件下拉把 `wallpaper.json.css` 当成表列出来供编辑，
+而重命名 / 删除会把「壁纸在哪」这份记录改掉。
+
+| 事情 | 规则 |
+| --- | --- |
+| 出现在 `/list` 里 | **不**（`isSheetName` 拒绝 `*.json.css`） |
+| `/read` 读得到 | **能**（记录要能被面板读回来） |
+| `/write` 写得进 | **能**（唯一的例外，走 `safeRecordPath`） |
+| `/rename`、`/delete` | **不能** → 400 `bad-name` |
 | POST | `/write` | 写入指定文件（写之前把被替换的内容留一份快照） |
 | POST | `/create` | 新建空文件（已存在 → 409） |
 | POST | `/import` | 导入内容为文件（按设计覆盖同名） |
+| POST | `/rename` | `{ name, to }` → 改名；目标已存在 → 409 `exists`，名字不合法 → 400，源不存在 → 404。**历史快照一起搬过去**，`active.json` 里的 active / disabled 也跟着改 |
+| POST | `/delete` | `{ name }` → 删掉；删之前先留一份快照（所以可逆）；**最后一张拒绝删除** → 409 `last-sheet`；active 被删时自动切到 `custom.css` 或字典序第一张 |
+| POST | `/open-dir` | 用系统文件管理器打开样式表目录（无请求体；与 `/open` 同一个启动器） |
 | POST | `/active` | 记录当前文件（文件不存在 → 404 `not-found`，与 `/toggle` 一致） |
 | POST | `/toggle` | `{ name, enabled }` → 打开 / 关闭某张样式表（**文件保留**），状态记进 `active.json` 的 `disabled` |
 | POST | `/open` | 用系统默认程序打开指定文件（仅限目录内已存在的 `.css`；不存在 → 404） |
