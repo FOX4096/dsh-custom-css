@@ -26,6 +26,7 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点。这是浏览�
 | GET | `/read?name=<name>` | `{ name, css, rev }` |
 | GET | `/history?name=<name>` | `{ name, entries: [{ stamp, bytes, mtime }] }`，按时间倒序（快照目录 `.history/<name>/`，`.history` 这一层不会被 `/list` 当成表列出来） |
 | GET | `/export` | 全部内容打成一个 JSON：每张表的正文与历史版本、两份记录、壁纸（base64）。用于「导出全部」 |
+| GET | `/about` | 宿主半的自我介绍：`{ name, version, description, license, repository, dir, wallpapers, node, platform }`，版本读的是盘上那份 `package.json` |
 | POST | `/write` | 写入指定文件（写之前把被替换的内容留一份快照） |
 | POST | `/create` | 新建空文件（已存在 → 409） |
 | POST | `/import` | 导入内容为文件（按设计覆盖同名） |

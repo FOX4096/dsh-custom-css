@@ -128,6 +128,11 @@
 | **校验下拉** | `.dshWp_select`（`aria-label` 为「格式校验严格度」） | 语法 + 变量体检 / 只查语法 / 关闭校验 | 已实现 |
 | **行号开关** | `primitives.Switch`（`aria-label` 为「显示编辑器行号」） | 关掉时给 `.dshCc_row` 加 `.dshCc_noGutter`（**隐藏**，不卸载） | 已实现 |
 | **Tab 宽度下拉** | `.dshWp_select`（`aria-label` 为「Tab 宽度（空格数）」） | 2 / 4 / 8 空格；Tab 键与「格式化」都用它 | 已实现 |
+| **数据分组** | `.dshWp_group`「数据」 | 「导出全部」「重置插件」两个动作 | 已实现 |
+| **导出全部** | `primitives.Button` | `GET /export` → 下载一个带时间戳的 JSON | 已实现 |
+| **重置插件** | `primitives.Button`（两步确认） | `POST /archive-and-reset` → 归档到 `.backup/<时间戳>/` | 已实现 |
+| **关于分组** | `.dshWp_group`「关于」 + `.dshWp_facts` | 版本 / 目录 / 宿主 / 链接四行事实（`dt`+`dd`，与壁纸节同一形状） | 已实现 |
+| **文档链接** | `.dshWp_link` | 「仓库」「文档」两个外链（`--dsw-alias-state-business-primary`） | 已实现 |
 
 > 这一节的标签与滑块的 `aria-label` 都在 `WALLPAPER_SETTING_LABELS` 里，一处定义、两处使用
 > （看得见的字与读屏器听到的字不是同一句，所以两个都要写）。

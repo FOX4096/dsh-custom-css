@@ -611,6 +611,21 @@ assert.strictEqual(recordDelete.status, 400, 'nor deleted as one: the wallpaper 
 const recordStillReads = await call('GET', '/dsh-custom-css/read?name=wallpaper.json.css');
 assert.strictEqual(recordStillReads.status, 200, 'and it is still readable, which is what the panel needs');
 
+// --- about -------------------------------------------------------------------
+//
+// The version the About section shows comes from the package that is actually installed, not from a
+// constant in the source: a version typed into a string goes stale the first time somebody edits
+// package.json without editing the string. The assertion therefore checks it against package.json
+// itself rather than against a literal — a literal here would pass while the two drifted apart.
+const about = await call('GET', '/dsh-custom-css/about');
+assert.strictEqual(about.status, 200, 'about succeeds');
+const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+assert.strictEqual(about.payload.version, manifest.version, 'and reports the installed version');
+assert.strictEqual(about.payload.name, manifest.name, 'under the package name');
+assert.strictEqual(about.payload.license, manifest.license, 'with its license');
+assert.strictEqual(about.payload.dir, stylesDir, 'and where the sheets are, so the section can say');
+assert.strictEqual(typeof about.payload.platform, 'string', 'plus what the Host half is running on');
+
 // --- rename / delete / open-dir ---------------------------------------------
 //
 // The three routes that manage files rather than their contents. Each one is checked for both

@@ -1,6 +1,6 @@
 {
   "name": "dsh-custom-css",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "description": "DSH Web GUI 扩展：设置 → 通用 里的自定义 CSS 编辑器，以及一个不用写 CSS 的自定义壁纸面板。",
   "icon": "./assets/icon.svg",
   "license": "MIT",
