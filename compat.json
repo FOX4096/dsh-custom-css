@@ -53,7 +53,7 @@
   "notes": [
     "runtimeVerified = 真机起过对应版本的 DSH 实例并跑通 host 半接口；knownGood/probe = 只做接口契约断言（解包该版本的 settings 包核对槽位与 id）。",
     "0.1.2-rc.1 的真机验证方式：独立 DSH_HOME + profile，GET /dsh-custom-css/list、POST /write、GET /read 全部 200 且文件确实落盘。",
-    "本插件浏览器半在运行时一个 @deepseek-ai/* 模块都不 require（只通过 dsh.client.inject 声明可用 id，并从 Context 取 slots 服务），因此不受「bundle 里硬编码了平台已删包」那类漂移影响。",
+    "本插件浏览器半在运行时只 require 一个 @deepseek-ai/* 模块：@deepseek-ai/dsh-client-ui-primitives（控件用它，见 docs/development.md「控件一律用平台的原生组件」）。其余平台能力仍只通过 dsh.client.inject 声明 id、并从 Context 取服务。取不到组件库时控件退化成普通元素，不会让插件失效。",
     "已知失效模式：DSH 换代若把 settings.general.item 改名，行内控件会静默不出现（没有报错）—— compat-matrix 就是为此设的门禁。",
     "0.0.1-rc.x 一代一周下载量约 94 次（≈0.02%），只做接口断言，不做专门的兼容分支。",
     "runtimeVerifiedNotes = 真机验证那一档在 README 表格里的「验证方式」原文。自动写回时从这里取，不自己编 —— 否则「独立 DSH_HOME、三个接口 200、文件落盘」这类具体做法会在第一次自动更新时被压成一句泛话。",

@@ -18,6 +18,27 @@
 > 只有浏览器半走 `dsh-client-hmr` 热更新。这条踩过：host 改动在磁盘上躺了一整夜，
 > 期间所有人都在测旧代码。见 [已知坑](./known-issues.md)。
 
+## 控件一律用平台的原生组件
+
+界面里的按钮、开关、标签**不是**这个插件画的，是 **DSH 组件库**（`@deepseek-ai/dsh-client-ui-primitives`）
+的。清单与用法：
+
+| 事项 | 事实 |
+| --- | --- |
+| 声明 | `package.json` 的 `dsh.client.inject` 里加 `@deepseek-ai/dsh-client-ui-primitives` |
+| 取用 | `require('@deepseek-ai/dsh-client-ui-primitives')`，**只有这一处 require** |
+| 为什么是 inject 而不是 import | 平台不在 `node_modules` 里暴露它，它是**模块表**里的一个模块；inject 描述的正是这张表 |
+| 实测可用 | `Button` · `Checkbox` · `Input` · `Switch` · `Tag` · `Tooltip` · `StateDot` · `Menu` · `Toast` · 98 个 `Icon*Regular` |
+| 实测**没有** | `Select` / `Slider` / `Segmented` / `Radio` —— 选择用原生 `<select>`（已按 DSH 字段规格着色），滑块用原生 `<input type=range>` |
+| 缺失时的行为 | `native(name, fallback)` 退化成带 `nativeFallback` 标记的普通元素：**控件不会消失**，只是不再来自组件库 |
+
+**React 元素类型是大小写敏感的**：组件必须作为**类型**传入（`createElement(native('Button','button'), …)`），
+写小写字符串会被当成未知 DOM 标签。
+
+> 代价与收益：这条依赖让这个插件**不再是「运行时零 require」**（那是它过去跨 31 个版本不坏的原因之一）。
+> 换来的是「这一行的控件与 DSH 自己是同一套」。降级路径留在 `native()` 里，所以组件库哪天消失，
+> 界面退回普通元素而不是坏掉。
+
 ---
 
 ## 命令

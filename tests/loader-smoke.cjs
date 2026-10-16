@@ -157,6 +157,46 @@ function decodeCssString(raw) {
 }
 
 /**
+ * The native component library, as the harness hands it to the plugin.
+ *
+ * Each export is a function component carrying its own name, so a rendered subtree says which one
+ * it came from (`node.nativeName`) — a case can then assert that a control IS the native one and
+ * not a lookalike, which is the only reason this plugin takes the dependency at all. `Button`
+ * renders as a `button` and `Switch` as a `button[role=switch]`, mirroring what the real library
+ * wraps; the rest are `div`s/`span`s whose class names a case can look for.
+ * @returns a fresh module double.
+ */
+function nativeStub() {
+  const make = (nativeName, tag, extra = {}) => {
+    const component = (props) => {
+      const children = [];
+      if (props?.icon !== undefined) children.push(props.icon);
+      if (props?.children !== undefined) children.push(...[].concat(props.children));
+      const node = { type: tag, props: { ...extra, ...props, children }, children };
+      node.nativeName = nativeName;
+      return node;
+    };
+    component.nativeName = nativeName;
+    return component;
+  };
+  return {
+    Button: make('Button', 'button', { className: 'native-button' }),
+    Switch: make('Switch', 'button', { className: 'native-switch', role: 'switch' }),
+    Checkbox: make('Checkbox', 'input', { className: 'native-checkbox' }),
+    Input: make('Input', 'input', { className: 'native-input' }),
+    Select: make('Select', 'select', { className: 'native-select' }),
+    Tag: make('Tag', 'span', { className: 'native-tag' }),
+    Tooltip: make('Tooltip', 'span', { className: 'native-tooltip' }),
+    StateDot: make('StateDot', 'span', { className: 'native-statedot' }),
+    DisclosureRow: make('DisclosureRow', 'div', { className: 'native-disclosure' }),
+    IconTrashOutlineRegular: make('IconTrashOutlineRegular', 'svg', { className: 'native-icon-trash' }),
+    IconRefreshOutlineRegular: make('IconRefreshOutlineRegular', 'svg', { className: 'native-icon-refresh' }),
+    IconFolderOutlineRegular: make('IconFolderOutlineRegular', 'svg', { className: 'native-icon-folder' }),
+    IconImageOutlineRegular: make('IconImageOutlineRegular', 'svg', { className: 'native-icon-image' }),
+  };
+}
+
+/**
  * Every node under one root, in document order.
  *
  * The harness needs this in two places now: the selector pool it matches against, and
@@ -710,6 +750,10 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, service
 
   const mod = loaded.factory((name) => {
     if (name === 'react') return fakeReact;
+    // The native component library the plugin's `inject` list asks for. The stub carries exactly
+    // the exports the plugin reaches for, each a recognisable element type, so a case can assert
+    // that a control IS the native one rather than a lookalike — the point of the dependency.
+    if (name === '@deepseek-ai/dsh-client-ui-primitives') return nativeStub();
     throw new Error('unexpected require: ' + name);
   });
 
