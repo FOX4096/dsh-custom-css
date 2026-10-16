@@ -6455,6 +6455,68 @@ async function main() {
     'switching the clock off removes it rather than hiding it — body: ' + probe.bodyList(),
   );
 
+  // --- 24. the data actions -------------------------------------------------
+  //
+  // The two buttons that touch everything at once. What a case can hold here is the SHAPE of the
+  // calls they make: the export is a GET that ends in a download, and the reset is a POST that goes
+  // through two clicks. A suite that drove the real reset would archive the fake Host's own fixture
+  // files mid-run, so the assertion stops at "what was sent".
+  const dataBoot = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      if (url.endsWith('/export')) {
+        return jsonResponse({
+          ok: true,
+          kind: 'dsh-custom-css-backup',
+          version: 1,
+          sheets: { 'custom.css': { css: '.a{color:red}', history: [] } },
+          records: {},
+          wallpapers: [],
+        });
+      }
+      if (url.endsWith('/archive-and-reset')) return jsonResponse({ ok: true, stamp: '1', backup: 'C:/css/.backup/1', moved: ['theme.css'], skipped: [] });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const settingsSection = dataBoot.registrations[2].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  assert.ok(settingsSection !== null, 'the settings section renders for its own page');
+
+  // ⚠ The data group's own markup is asserted against the SOURCE, and the reason is a measured
+  // harness limit rather than convenience: the panel reads `useSyncExternalStore`, so calling it a
+  // second time reads the stores a SECOND time and the fake React's hook slots no longer line up.
+  // Walking into the panel therefore measures the harness. What the source can prove is what the
+  // two actions are wired to; what the routes do with those calls is the host suite's business.
+  for (const needle of [
+    "'dshWp_group'",
+    '导出全部',
+    '重置插件',
+    '再按一次重置',
+    "'/export'",
+    "'/archive-and-reset'",
+    'archive-and-reset',
+  ]) {
+    assert.ok(
+      source.includes(needle),
+      'the data group is wired to ' + needle,
+    );
+  }
+  // And the reset arms before it acts: the two-click shape is in the handler, not in a comment.
+  assert.ok(
+    /if \(!confirmReset\) \{ setConfirmReset\(true\); return; \}/.test(source),
+    'the reset handler arms on the first click and returns without calling the Host',
+  );
+  assert.ok(
+    /localStorage\.removeItem\(WALLPAPER_KEY\)[\s\S]{0,120}localStorage\.removeItem\(SETTINGS_KEY\)/.test(source),
+    'and it clears BOTH browser-local records, or the next page load would resurrect what it archived',
+  );
+  assert.strictEqual(
+    dataBoot.calls.filter(call => call.url.endsWith('/archive-and-reset')).length, 0,
+    'nothing was reset merely by rendering the section',
+  );
+
   console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified');
 }
 

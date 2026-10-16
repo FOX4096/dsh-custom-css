@@ -11,6 +11,7 @@
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert';
@@ -677,6 +678,72 @@ const openedDir = await call('POST', '/dsh-custom-css/open-dir');
 assert.strictEqual(openedDir.status, 200, 'open-dir succeeds');
 assert.strictEqual(openedDir.payload.dir, stylesDir, 'and names the directory it opened');
 assert.ok(launched.includes(stylesDir), 'the launcher was pointed at that directory — launched: ' + JSON.stringify(launched));
+
+// --- export and archive-and-reset -------------------------------------------
+//
+// The backup is only worth having if it can restore what a user cannot retype, so the assertions are
+// about CONTENT: a sheet's text, its history, the records, and the pictures as bytes.
+const exported = await call('GET', '/dsh-custom-css/export');
+assert.strictEqual(exported.status, 200, 'export succeeds');
+assert.strictEqual(exported.payload.kind, 'dsh-custom-css-backup', 'and names what it is');
+assert.strictEqual(exported.payload.version, 1, 'with a version for a future reader');
+assert.ok(Object.keys(exported.payload.sheets).length > 0, 'it carries the sheets — got: ' + JSON.stringify(Object.keys(exported.payload.sheets)));
+const exportedSheet = exported.payload.sheets[Object.keys(exported.payload.sheets)[0]];
+assert.strictEqual(typeof exportedSheet.css, 'string', 'each sheet with its text');
+assert.ok(Array.isArray(exportedSheet.history), 'and its history');
+assert.ok(
+  exportedSheet.history.every(entry => typeof entry.css === 'string'),
+  'where every version carries its own text, not just a timestamp',
+);
+assert.ok(
+  exported.payload.wallpapers.length >= 1,
+  'the pictures are in it too — wallpapers: ' + JSON.stringify(exported.payload.wallpapers.map(entry => entry.name)),
+);
+assert.ok(
+  String(exported.payload.wallpapers[0].dataUrl).startsWith('data:image/png;base64,'),
+  'as bytes a file can hold, with the media type they were served with',
+);
+
+// Reset archives rather than deletes: everything the plugin owns moves one directory deeper, the
+// seed sheet stays, and the active pointer is rewritten so the next read finds it.
+const beforeReset = await call('GET', '/dsh-custom-css/list');
+const reset = await call('POST', '/dsh-custom-css/archive-and-reset', { css: '.seed{color:green}' });
+assert.strictEqual(
+  reset.status, 200,
+  'archive-and-reset succeeds — got ' + reset.status + ' ' + JSON.stringify(reset.payload),
+);
+assert.ok(String(reset.payload.backup).includes('.backup'), 'and says where the archive went — ' + reset.payload.backup);
+assert.ok(
+  reset.payload.moved.includes('wallpaper.json.css'),
+  'the wallpaper record was archived — moved: ' + JSON.stringify(reset.payload.moved),
+);
+const afterReset = await call('GET', '/dsh-custom-css/list');
+assert.strictEqual(
+  afterReset.payload.files.length, 1,
+  'one sheet is left — files: ' + JSON.stringify(afterReset.payload.files.map(file => file.name))
+    + ' skipped: ' + JSON.stringify(reset.payload.skipped)
+    + ' moved includes theme: ' + reset.payload.moved.includes('theme.css')
+    + ' active: ' + afterReset.payload.active,
+);
+assert.strictEqual(
+  afterReset.payload.files[0].name, 'custom.css',
+  'and it is the seed sheet — files: ' + JSON.stringify(afterReset.payload.files)
+    + ' skipped: ' + JSON.stringify(reset.payload.skipped) + ' moved: ' + JSON.stringify(reset.payload.moved),
+);
+assert.strictEqual(afterReset.payload.active, 'custom.css', 'with the active pointer rewritten to it');
+const seedAfterReset = await call('GET', '/dsh-custom-css/read?name=custom.css');
+assert.strictEqual(
+  seedAfterReset.payload.css, '.seed{color:green}',
+  'and the seed sheet holds the copy the caller sent, so a directory reset with no seed still has one',
+);
+assert.ok(
+  afterReset.payload.files.length < beforeReset.payload.files.length,
+  'so the reset really did take sheets out of the live directory',
+);
+assert.ok(
+  existsSync(path.join(reset.payload.backup, 'wallpaper.json.css')),
+  'and the archive really holds the record: nothing was deleted',
+);
 
 await rm(home, { recursive: true, force: true });
 // Dispose the plugin the way dsh does: the watcher has to be gone before the process can end
