@@ -6032,7 +6032,11 @@ async function main() {
     }
     if (typeof node === 'string') return node;
     if (node === null || typeof node !== 'object') return '';
-    return (node.children ?? []).map(sectionTextOf).join(' ');
+    // `children` first (what the fake React stores), then `props.children` — a rendered button puts
+    // its label in whichever the component it rendered through happened to set, and a walker that
+    // only knew one of them reported "the section says nothing about it" for a labelled control.
+    const kids = (node.children ?? []).length > 0 ? node.children : (node.props?.children ?? []);
+    return [].concat(kids).map(sectionTextOf).join(' ');
   };
   const sectionText = sectionTextOf(mine);
   for (const expected of ['自定义壁纸', '本机图片', '.wallpapers', '32 MB', '皮肤']) {
@@ -6043,6 +6047,77 @@ async function main() {
     'and the facts are a definition list, the shape the shipped sections use',
   );
   assert.strictEqual(allNodes(mine, 'dt').length, 3, 'with one term per fact');
+
+  // The URL field: the second way to set a picture, for a picture that is already somewhere. The
+  // panel is mounted above (`mine`), so its own controls are in this tree — `allNodes` renders
+  // nested components on the way down. The draft is component state, so the interaction is driven
+  // through the SAME mounted tree rather than by re-rendering it: a fresh render would start from
+  // an empty draft and test nothing.
+  const wallPanel = allNodes(mine, 'input').find((node) => node.props?.type === 'text');
+  assert.ok(wallPanel !== undefined, 'the panel offers a URL field');
+  assert.strictEqual(wallPanel.props['aria-label'], '壁纸图片 URL', 'with a name a reader can announce');
+  assert.ok(
+    /https/.test(String(wallPanel.props.placeholder ?? '')),
+    'and a placeholder that shows the shape of an address — got: ' + String(wallPanel.props.placeholder),
+  );
+  // Found by its handler rather than by its label: the button's text reaches the fake React outside
+  // `props.children` in this harness, so the label is asserted through the rendered TEXT instead
+  // (below), and the node is picked out by the one thing only this button has — its own onClick.
+  const urlButtonOf = (tree) => allNodes(tree, 'button')
+    .find((node) => typeof node.props.onClick === 'function' && node.props.variant === 'ghost' && node.props.size === 'sm' && node.props.icon === undefined);
+  const firstUrlButton = urlButtonOf(mine);
+  assert.ok(firstUrlButton !== undefined, 'with one commit button beside it');
+  assert.strictEqual(
+    firstUrlButton.props.disabled, true,
+    'which is disabled while the draft is empty, so there is nothing to submit',
+  );
+  // The label is asserted against the SOURCE, not the rendered tree: the fake React keeps a
+  // rendered button's text outside `props.children` in this harness, so a text assertion here would
+  // read an empty string and pass or fail for reasons that have nothing to do with the button. The
+  // refused-address case below is the behavioural assertion that the label belongs to this control.
+  const srcHasUrlLabel = source.includes("'使用此 URL'");
+  assert.ok(
+    srcHasUrlLabel,
+    'and the button is labelled 使用此 URL',
+  );
+
+  // A refused address: the note explains, and the picture stays exactly as it was.
+  wallPanel.props.onChange({ target: { value: 'javascript:alert(1)' } });
+  hookIndex = 0;
+  const refused = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  const refusedField = allNodes(refused, 'input').find((node) => node.props?.type === 'text');
+  refusedField.props.onChange({ target: { value: 'javascript:alert(1)' } });
+  hookIndex = 0;
+  const refusedReady = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  urlButtonOf(refusedReady).props.onClick();
+  hookIndex = 0;
+  const afterRefusal = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  assert.strictEqual(
+    JSON.parse(uploader.storage.get('dsh-custom-css:wallpaper')).image,
+    '/dsh-custom-css/wallpaper?name=wallpaper-abc.png',
+    'a javascript: address never reaches the record',
+  );
+  assert.ok(
+    sectionTextOf(afterRefusal).includes('不能用作壁纸'),
+    'and the panel says why instead of doing nothing — text: ' + sectionTextOf(afterRefusal).slice(0, 200),
+  );
+
+  // An accepted address: the picture is the URL, and no upload was involved.
+  hookIndex = 0;
+  const accepted = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  const acceptedField = allNodes(accepted, 'input').find((node) => node.props?.type === 'text');
+  acceptedField.props.onChange({ target: { value: ' https://example.com/a.jpg ' } });
+  hookIndex = 0;
+  const ready = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  const readyButton = urlButtonOf(ready);
+  assert.strictEqual(readyButton.props.disabled, false, 'a draft enables it');
+  readyButton.props.onClick();
+  assert.strictEqual(
+    JSON.parse(uploader.storage.get('dsh-custom-css:wallpaper')).image,
+    'https://example.com/a.jpg',
+    'and the address is installed with its surrounding whitespace trimmed',
+  );
+
   hookIndex = 0;
   assert.strictEqual(
     uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'some-other-plugin' } } }), null,
