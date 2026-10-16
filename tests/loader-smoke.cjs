@@ -31,7 +31,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, openWallpaperSection };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -72,6 +72,15 @@ const effects = [];
 const timers = [];
 /** Repeating timers of the boot in progress (the external-change poll). */
 const intervals = [];
+/**
+ * Bundle ids the plugin manager was asked to open, across boots.
+ *
+ * Module scope rather than per-boot on purpose: the navigation double is created inside `boot`,
+ * while the click that talks to it happens in the case body — and each boot builds its own module
+ * instance, so a per-boot list would be read from the wrong instance and look empty. `boot` clears
+ * it, so a call recorded here is always this boot's.
+ */
+const navigationCalls = [];
 
 /**
  * The effect a hook slot records.
@@ -386,7 +395,7 @@ function nameOfRequest(url, init) {
  * test bed is the wrong shape of solution. Those assertions are scoped to the half that needs
  * no engine, and the rest of that behaviour is verified in the browser.
  */
-async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
+async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, serviceMissing = false }) {
   const styleTags = [];
   const storage = new Map(stored);
   const calls = [];
@@ -402,6 +411,7 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
   effects.length = 0;
   timers.length = 0;
   intervals.length = 0;
+  navigationCalls.length = 0;
   // A boot is a fresh component instance: reusing the previous boot's hook slots
   // handed it that instance's refs and its leftover cleanups, so an unmount here
   // ran a stale effect (and fetched through the previous sandbox).
@@ -665,6 +675,16 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
   const waits = [];
   const registrations = [];
   mod.apply({
+    get(name) {
+      // `serviceMissing` models the composition this matters for: one whose plugin manager is not
+      // installed, so `pluginNavigation` does not exist. Cordis answers a missing service with
+      // `undefined` (it does not throw), and the row must still load and its link still be
+      // clickable — a REQUIRED dependency on that service would take the plugin out of such a
+      // composition entirely, which is the mistake this flag exists to catch.
+      if (serviceMissing) return undefined;
+      if (name !== 'pluginNavigation') return undefined;
+      return { openBundle: (id) => navigationCalls.push(id) };
+    },
     slots: {
       inject(name, factory) {
         waits.push(name);
@@ -5941,11 +5961,9 @@ async function main() {
     'nor does an official plugin of the same name: this contribution is about the bundle',
   );
 
-  // The wallpaper used to be mounted here as well, and it is not any more: the panel lives on
-  // this plugin's page in the plugin manager and nowhere else. Asserted against the SOURCE, not
-  // by rendering the row — the row contains a dropdown whose effects the harness runs, and
-  // walking the whole tree to look for a node nobody should have added is a lot of machinery for
-  // one negative. The class names are the mount's fingerprint, so their absence is the assertion.
+  // The wallpaper used to be mounted here as well; it is a LINK now. Asserted against the SOURCE
+  // for the mount's absence (rendering the whole row would run the dropdown's effects), and
+  // against the rendered node for the link, because "there is a labelled control" is a node fact.
   assert.ok(
     !source.includes('dshCc_wallpaperBlock') && !source.includes('dshCc_wallpaperHead'),
     'the settings row no longer references the wallpaper block it used to mount',
@@ -5957,6 +5975,67 @@ async function main() {
   assert.strictEqual(
     source.split('WallpaperPanel').length - 1, 2,
     'the panel has exactly one mount (its definition plus one call site)',
+  );
+
+  const linkRow = (() => {
+    const view = uploader.registrations[0].component();
+    const stack = [view];
+    while (stack.length > 0) {
+      const node = stack.pop();
+      if (node === null || typeof node !== 'object') continue;
+      if (node.type === 'div' && node.props.className === 'dshCc_wallpaperLinkRow') return node;
+      for (const child of node.children ?? []) stack.push(child);
+    }
+    return null;
+  })();
+  assert.ok(linkRow !== null, 'the row offers a link to the wallpaper section');
+  const linkButton = (linkRow.children ?? [])[0];
+  assert.strictEqual(
+    linkButton.props.className, 'dshCc_linkBtn',
+    'the link is a link-styled control, not one of the row\'s 36px buttons',
+  );
+  assert.strictEqual(
+    (linkButton.children ?? []).join(''), '自定义壁纸…',
+    'and it says what it opens — got: ' + JSON.stringify(linkButton.children),
+  );
+  assert.strictEqual(
+    (linkRow.children ?? []).slice(1).map(child => child.props.className).join(','), 'dshCc_linkNote',
+    'beside it, one line saying where it goes',
+  );
+  assert.strictEqual(
+    (linkRow.children ?? []).some(child => child?.type === 'input' || child?.props?.className === 'dshWp_root'),
+    false,
+    'and the row mounts NO wallpaper control: it is a link, not the panel',
+  );
+
+  // The link navigates through the official service, which is read at CLICK time: a required
+  // dependency on `pluginNavigation` would take the whole plugin out of a composition whose
+  // plugin manager does not provide one. The double counts the call on ITS OWN boot, so an
+  // earlier boot's service cannot answer for this one.
+  probe.openWallpaperSection();
+  assert.deepStrictEqual(
+    navigationCalls.slice(), ['dsh-custom-css'],
+    'the link asks the plugin manager to open this plugin\'s page',
+  );
+
+  // …and the same plugin in a composition whose plugin manager is NOT installed. The point is that
+  // it still LOADS: `pluginNavigation` is read through `ctx.get` instead of being declared in
+  // `exports.inject`, and a required dependency would take both seats out of such a composition.
+  const noManager = await boot({
+    serviceMissing: true,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  assert.strictEqual(noManager.registrations.length, 2, 'a composition without a plugin manager still gets both seats');
+  assert.deepStrictEqual(
+    noManager.registrations.map(entry => entry.options.id).sort(),
+    ['custom-css', 'custom-css-wallpaper'],
+    'and both are the seats this plugin registers',
   );
 
   console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified');
