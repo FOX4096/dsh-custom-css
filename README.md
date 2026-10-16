@@ -25,7 +25,7 @@
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a>
   <a href="https://dshfind.com/zh/plugins/FOX4096/dsh-custom-css"><img alt="收录于 dshfind" src="https://dshfind.com/api/badge/FOX4096/dsh-custom-css?lang=zh"></a><br /><br />
-  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.0.1-rc.1 ~ 0.2.1-alpha.4（接口契约断言，33 个版本）；其中 0.1.2-rc.1 与 0.1.5-rc.1 与 0.2.0-rc.2 已真机验证" src="https://img.shields.io/badge/DSH-0.0.1--rc.1_0.2.1--alpha.4_%28asserted%29-4d6bfe"></a><br /><br />
+  <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.0.1-rc.1 ~ 0.2.1-alpha.5（接口契约断言，34 个版本）；其中 0.1.2-rc.1 与 0.1.5-rc.1 与 0.2.0-rc.2 已真机验证" src="https://img.shields.io/badge/DSH-0.0.1--rc.1_0.2.1--alpha.5_%28asserted%29-4d6bfe"></a><br /><br />
   <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"> <img alt="查找替换" src="https://img.shields.io/badge/-查找替换-6048bb"> <img alt="撤销重做" src="https://img.shields.io/badge/-撤销重做-257b56"> <img alt="规则大纲" src="https://img.shields.io/badge/-规则大纲-257083"> <img alt="自定义壁纸" src="https://img.shields.io/badge/-自定义壁纸-6048bb"><br /><br />
   <b>拾取元素 · 查找 · 文件下拉 · 更多操作</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
   编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验、撤销重做、查找替换；<br />
@@ -37,7 +37,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 
 - npm：[`dsh-custom-css`](https://www.npmjs.com/package/dsh-custom-css)（2026-09-13 首发，当前版本见上方徽章）
 - 收录：[dshfind 插件超市 → 皮肤主题](https://dshfind.com/zh/plugins/FOX4096/dsh-custom-css)（徽章与展示卡由 dshfind 提供，`/api/badge` 与 `/api/card`）
-- 兼容：DSH `0.1.2-rc.1` ~ `0.2.0-rc.2` 已真机验证；接口契约断言覆盖 `0.0.1-rc.1` ~ `0.2.1-alpha.4`（共 33 个版本）；`npm run compat` 可复跑（见「兼容性」）
+- 兼容：DSH `0.1.2-rc.1` ~ `0.2.0-rc.2` 已真机验证；接口契约断言覆盖 `0.0.1-rc.1` ~ `0.2.1-alpha.5`（共 34 个版本）；`npm run compat` 可复跑（见「兼容性」）
 - 许可：MIT
 - 形态：DSH profile 插件（host 半 + 浏览器半），无构建步骤，`lib/*.js` 即产物
 
@@ -52,7 +52,7 @@ DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行
 
 ## 装
 
-**前置**：DSH `0.1.2-rc.1` ~ `0.2.0-rc.2`（**已真机验证**；接口契约断言覆盖 `0.0.1-rc.1` ~ `0.2.1-alpha.4`，见「兼容性」），Node.js ≥ 20、pnpm ≥ 10。
+**前置**：DSH `0.1.2-rc.1` ~ `0.2.0-rc.2`（**已真机验证**；接口契约断言覆盖 `0.0.1-rc.1` ~ `0.2.1-alpha.5`，见「兼容性」），Node.js ≥ 20、pnpm ≥ 10。
 
 ```bash
 # 1) 装进 profile
@@ -115,11 +115,11 @@ dsh plugin --profile web add dsh-custom-css
 | `0.2.0-rc.2` | 真机运行：本机日常在用的实例（生产 profile `web`，插件以 `link:` 装入并实际渲染设置行）。实测 host 路由 `GET /list`、`GET /read`、`GET /history` 全部 200，返回的正是磁盘上的样式表与历史快照 | 通过 |
 | `0.1.5-rc.1` | 真机运行（本仓库开发环境） | 通过 |
 | `0.1.2-rc.1` | 真机运行：独立 `DSH_HOME` 起实例，`/dsh-custom-css/list`、`/write`、`/read` 全部 200 且文件确实落盘 | 通过 |
-| `0.0.1-rc.1` ~ `0.2.1-alpha.4`（共 33 个） | 接口契约断言（`npm run compat` 解包该版本的 settings 包，核对槽位与 id） | 通过 |
+| `0.0.1-rc.1` ~ `0.2.1-alpha.5`（共 34 个） | 接口契约断言（`npm run compat` 解包该版本的 settings 包，核对槽位与 id） | 通过 |
 
 `npm run compat` 需要网络（要拉各版本的包），所以本地 `npm test` 保持离线可跑；CI 里单跑一档。
 
-上表由 `npm run compat:update` 自动维护（GitHub Actions 每 6 小时检查一次 DSH 是否更新，有新版本就重新断言并提交这一节）。**上次核对：2026-10-16，当时最新已发布版本 `0.2.1-alpha.4`。**
+上表由 `npm run compat:update` 自动维护（GitHub Actions 每 6 小时检查一次 DSH 是否更新，有新版本就重新断言并提交这一节）。**上次核对：2026-10-16，当时最新已发布版本 `0.2.1-alpha.5`。**
 
 > **换代时的两种失效模式怎么判别**（症状完全不同）：见 [兼容性](./docs/compat.md#两种失效模式的判别)。
 
