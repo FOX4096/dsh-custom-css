@@ -6141,20 +6141,144 @@ async function main() {
   // `deepStrictEqual` refuses them on identity. Compare the JSON, which is the same value a user
   // would read in the record file anyway.
   const settingsJson = (value) => JSON.stringify(value);
+  /** The wallpaper half of a settings record — the editor half is asserted in its own cases. */
+  const wallpaperHalf = (value) => {
+    const record = JSON.parse(settingsJson(value));
+    return JSON.stringify({
+      rotate: record.rotate, scrim: record.scrim, blur: record.blur, clock: record.clock,
+    });
+  };
   assert.strictEqual(
-    settingsJson(probe.normalizeSettings(undefined)),
+    wallpaperHalf(probe.normalizeSettings(undefined)),
     settingsJson({ rotate: 'off', scrim: 0, blur: 0, clock: false }),
     'a missing record normalises to the defaults',
   );
   assert.strictEqual(
-    settingsJson(probe.normalizeSettings({ rotate: '5', scrim: 999, blur: -3, clock: 'yes' })),
+    wallpaperHalf(probe.normalizeSettings({ rotate: '5', scrim: 999, blur: -3, clock: 'yes' })),
     settingsJson({ rotate: 'off', scrim: 80, blur: 0, clock: false }),
     'and an out-of-range or unknown record is measured into the range rather than written through',
   );
   assert.strictEqual(
-    settingsJson(probe.normalizeSettings({ rotate: '300', scrim: 40, blur: 12, clock: true })),
+    wallpaperHalf(probe.normalizeSettings({ rotate: '300', scrim: 40, blur: 12, clock: true })),
     settingsJson({ rotate: '300', scrim: 40, blur: 12, clock: true }),
     'a valid record survives normalisation unchanged',
+  );
+
+  // The editor's preferences are whitelists too, and their defaults are the values the editor
+  // shipped with — a record that predates them must not change how the editor behaves.
+  const editorHalf = (value) => {
+    const record = JSON.parse(settingsJson(value));
+    return JSON.stringify({
+      saveDelay: record.saveDelay, validate: record.validate,
+      lineNumbers: record.lineNumbers, tabWidth: record.tabWidth,
+    });
+  };
+  assert.strictEqual(
+    editorHalf(probe.normalizeSettings(undefined)),
+    settingsJson({ saveDelay: 400, validate: 'full', lineNumbers: true, tabWidth: 2 }),
+    'a record without editor preferences gets the values the editor already had',
+  );
+  assert.strictEqual(
+    editorHalf(probe.normalizeSettings({ saveDelay: 7, validate: 'loose', lineNumbers: 'yes', tabWidth: 3 })),
+    settingsJson({ saveDelay: 400, validate: 'full', lineNumbers: true, tabWidth: 2 }),
+    'and a hand-edited one cannot arm a delay, a strictness or a tab width nobody offered',
+  );
+  assert.strictEqual(
+    editorHalf(probe.normalizeSettings({ saveDelay: 3000, validate: 'off', lineNumbers: false, tabWidth: 8 })),
+    settingsJson({ saveDelay: 3000, validate: 'off', lineNumbers: false, tabWidth: 8 }),
+    'while the offered values pass through',
+  );
+  assert.strictEqual(
+    JSON.parse(settingsJson(probe.normalizeSettings({ lineNumbers: false }))).lineNumbers, false,
+    'turning the gutter off survives: the default is "on", so only an explicit false may switch it',
+  );
+
+  // The editor preferences have to REACH the editor, not just survive normalisation. Each case
+  // boots its own row and drives one edit through it, because the debounce and the strictness are
+  // both read at the moment they are used.
+  const slowSave = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      if (url === '/dsh-custom-css/write') return jsonResponse({ ok: true, name: 'custom.css', rev: 2 });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  slowSave.mod.__probe.commitSettings({ saveDelay: 3000, validate: 'full', lineNumbers: true, tabWidth: 2 });
+  assert.strictEqual(
+    slowSave.mod.__probe.settingsSnapshot().saveDelay, 3000,
+    'the committed delay is in the store',
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  const slowSaveRow = slowSave.registrations[0].component();
+  await slowSave.runEffects();
+  const typedArea = findNode(slowSaveRow, 'textarea');
+  typedArea.props.onChange({
+    target: { value: '.slow{color:blue}', selectionStart: 0 },
+    nativeEvent: { inputType: 'insertText' },
+  });
+  assert.strictEqual(
+    slowSave.debounces(3000).length, 1,
+    'typing schedules ONE write at the delay the setting asks for',
+  );
+  assert.strictEqual(
+    slowSave.debounces(WRITE_TICK).length, 0,
+    'and not at the built-in one: the constant is only the default now',
+  );
+
+  // Strictness reaches the status line: with the checks off, a sheet with a broken declaration no
+  // longer reports a line number — and a FAILED WRITE still reports, because that line is the
+  // plugin's own state and not a linter's opinion.
+  const lax = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red', rev: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  lax.mod.__probe.commitSettings({ validate: 'off', saveDelay: 400, lineNumbers: true, tabWidth: 2 });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const laxRow = lax.registrations[0].component();
+  await lax.runEffects();
+  const laxText = JSON.stringify(renderedText);
+  assert.ok(
+    !/第 \d+ 行/.test(laxText),
+    'with validation off, an unclosed block is not reported as a line problem — got: '
+      + laxText.slice(0, 160),
+  );
+
+  // And the gutter is a class on the row, so the layout maths keeps the column it was measured
+  // against: hidden, not unmounted.
+  const noGutter = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  noGutter.mod.__probe.commitSettings({ lineNumbers: false, saveDelay: 400, validate: 'full', tabWidth: 2 });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const noGutterRow = noGutter.registrations[0].component();
+  await noGutter.runEffects();
+  // The gutter is hidden by a class on the row, not by removing it: the editor's colour layer and
+  // its caret maths are positioned against that row, so the setting takes the numbers away and
+  // leaves the box. What a test can hold is the class itself (the `display:none` rule is asserted
+  // with the other stylesheet checks), and that the row still renders as one row.
+  const rowClass = String(findNode(noGutterRow, 'div')?.props?.className ?? '');
+  assert.ok(
+    rowClass.includes('dshCc_noGutter'),
+    'the row carries the no-gutter class — got class: ' + rowClass,
+  );
+  assert.strictEqual(
+    rowClass.includes('dshCc_row'), true,
+    'and it is still the same row element, so the editor\'s geometry is untouched',
+  );
+  assert.strictEqual(
+    JSON.parse(settingsJson(noGutter.mod.__probe.settingsSnapshot())).lineNumbers, false,
+    'the record the editor reads says the gutter is off',
   );
   assert.strictEqual(probe.rotateIntervalMs({ rotate: 'off' }), 0, 'rotation off is zero milliseconds');
   assert.strictEqual(probe.rotateIntervalMs({ rotate: '300' }), 300000, 'and five minutes is five minutes');

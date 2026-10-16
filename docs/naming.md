@@ -113,19 +113,27 @@
 > 不是界面元素的名字，但代码与文档里都用这个词，不再叫它「配置文件」或「设置文件」。
 > **插件设置**则是另一份 `settings.json.css`，见下面的 A3。
 
-### A3. 壁纸设置（插件详情页里独立的一节）
+### A3. 插件设置（插件详情页里独立的一节）
 
 | 名字 | 标识（代码 / 选择器） | 说明 | 状态 |
 | --- | --- | --- | --- |
 | **设置节** | `SettingsSection` · `section[data-dsh-wallpaper="settings-section"]` | 插件详情页里「壁纸设置」这一整节（order 21，排在壁纸节之后） | 已实现 |
-| **设置面板** | `SettingsPanel` · `div[data-dsh-wallpaper="settings"]` | 四行控件本体 | 已实现 |
+| **设置面板** | `SettingsPanel` · `div[data-dsh-wallpaper="settings"]` | 八行控件本体，分「壁纸」与「编辑器」两组 | 已实现 |
+| **分组标题** | `.dshWp_group` | 面板里的分组标题（目前只有「编辑器」一条） | 已实现 |
 | **轮换下拉** | `.dshWp_select`（`aria-label` 为「壁纸轮换间隔」） | 关 / 5 分钟 / 30 分钟 / 每小时 / 每天 | 已实现 |
 | **遮罩滑块** | `.dshWp_slider`（`aria-label` 为「壁纸遮罩浓度」） | 0–80%，压在图片上的暗色层 | 已实现 |
 | **模糊滑块** | `.dshWp_slider`（`aria-label` 为「壁纸模糊半径」） | 0–24px 的 `blur()` | 已实现 |
-| **角落时间开关** | `.dshWp_switchWrap` · `.dshWp_switchInput` | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
+| **角落时间开关** | `primitives.Switch`（`aria-label` 为「在壁纸上显示时间」） | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
+| **保存延迟下拉** | `.dshWp_select`（`aria-label` 为「样式表保存延迟」） | 200ms / 400ms / 1s / 3s | 已实现 |
+| **校验下拉** | `.dshWp_select`（`aria-label` 为「格式校验严格度」） | 语法 + 变量体检 / 只查语法 / 关闭校验 | 已实现 |
+| **行号开关** | `primitives.Switch`（`aria-label` 为「显示编辑器行号」） | 关掉时给 `.dshCc_row` 加 `.dshCc_noGutter`（**隐藏**，不卸载） | 已实现 |
+| **Tab 宽度下拉** | `.dshWp_select`（`aria-label` 为「Tab 宽度（空格数）」） | 2 / 4 / 8 空格；Tab 键与「格式化」都用它 | 已实现 |
 
 > 这一节的标签与滑块的 `aria-label` 都在 `WALLPAPER_SETTING_LABELS` 里，一处定义、两处使用
 > （看得见的字与读屏器听到的字不是同一句，所以两个都要写）。
+>
+> **开关一律是 `primitives.Switch`，不是自绘的**：`.dshWp_switch*` 那几个类在 0.3.2 里随自绘开关
+> 一起删掉了，现在页面上找不到它们。
 
 ### 设置行里的入口
 
