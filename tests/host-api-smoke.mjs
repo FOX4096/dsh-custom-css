@@ -9,6 +9,7 @@
  *   node tests/host-api-smoke.cjs
  */
 import { Readable } from 'node:stream';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -55,7 +56,7 @@ const ctx = {
   },
 };
 
-const { apply, setLauncher, isWatchedSheetName } = await import('../lib/index.js');
+const { apply, setLauncher, isWatchedSheetName, wallpaperPathFor } = await import('../lib/index.js');
 
 /** Spy launcher: the real one would spawn an editor window during the test. */
 const launched = [];
@@ -87,16 +88,22 @@ async function call(method, url, body) {
   req.headers = {};
   const captured = {};
   const res = {
-    writeHead(status) {
+    writeHead(status, headers) {
       captured.status = status;
+      captured.headers = headers ?? {};
     },
     end(chunk) {
       captured.body = chunk;
     },
   };
   await route.handler(req, res);
+  // The wallpaper route answers with image BYTES, not JSON, so the raw capture is handed back
+  // as well — a Buffer, which is what `end(chunk)` actually received. Without it a test could
+  // only assert the status of the one route whose payload is the whole point.
   return {
     status: captured.status,
+    headers: captured.headers ?? {},
+    raw: Buffer.isBuffer(captured.body) ? captured.body : undefined,
     payload: typeof captured.body === 'string' && captured.body.startsWith('{')
       ? JSON.parse(captured.body)
       : captured.body,
@@ -491,6 +498,92 @@ assert.strictEqual(isWatchedSheetName('notes.txt'), false, 'nor is anything that
 assert.strictEqual(isWatchedSheetName('nul.css'), false, 'nor a Windows device name, which is not a file');
 assert.strictEqual(isWatchedSheetName(undefined), false, 'and an event with no name is dropped');
 
+// --- wallpapers: name rules, dedup, serving, gallery -------------------------
+// The wallpaper name is joined onto a directory the way a sheet name is, and it arrives from a
+// URL rather than a body — so it is the one place where the refusal has to be proven for every
+// shape of traversal, not just the dot-dot the sheet routes already cover.
+const HASH = 'a'.repeat(64);
+assert.strictEqual(wallpaperPathFor('wallpaper-' + HASH + '.png') !== undefined, true, 'a stored name resolves');
+assert.strictEqual(wallpaperPathFor('wallpaper-' + HASH + '.exe'), undefined, 'an extension outside the table is refused');
+assert.strictEqual(wallpaperPathFor('wallpaper-' + HASH.slice(0, 63) + '.png'), undefined, 'a short digest is refused');
+assert.strictEqual(wallpaperPathFor('../wallpaper-' + HASH + '.png'), undefined, 'a traversal is refused');
+assert.strictEqual(wallpaperPathFor('wallpaper-' + HASH + '.png/../../secret'), undefined, 'and so is a traversal after a valid-looking name');
+assert.strictEqual(wallpaperPathFor('theme.css'), undefined, 'a sheet name is not a wallpaper name');
+assert.strictEqual(wallpaperPathFor(undefined), undefined, 'a missing name is refused, not defaulted');
+
+// A 1×1 PNG: the smallest thing that is really an image, and its bytes are what the route has
+// to hand back unchanged.
+const PNG_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+  'base64',
+);
+const PNG_DATA_URL = 'data:image/png;base64,' + PNG_BYTES.toString('base64');
+
+const galleryEmpty = await call('GET', '/dsh-custom-css/gallery');
+assert.strictEqual(galleryEmpty.status, 200, 'the gallery answers on a fresh directory');
+assert.deepStrictEqual(galleryEmpty.payload.wallpapers, [], 'with nothing in it');
+assert.strictEqual(galleryEmpty.payload.dir, path.join(stylesDir, '.wallpapers'), 'and names the wallpaper directory');
+
+const uploadedWallpaper = await call('POST', '/dsh-custom-css/wallpaper-image', { dataUrl: PNG_DATA_URL });
+assert.strictEqual(uploadedWallpaper.status, 200, 'a real image is stored');
+assert.strictEqual(uploadedWallpaper.payload.reused, false, 'and is new to the directory');
+assert.ok(
+  uploadedWallpaper.payload.url.startsWith('/dsh-custom-css/wallpaper?name=wallpaper-'),
+  'the answer carries the URL the browser should paint — got: ' + JSON.stringify(uploadedWallpaper.payload.url),
+);
+assert.strictEqual(uploadedWallpaper.payload.name, 'wallpaper-' + createHash('sha256').update(PNG_BYTES).digest('hex') + '.png', 'the name is the SHA-256 of the bytes');
+
+const again = await call('POST', '/dsh-custom-css/wallpaper-image', { dataUrl: PNG_DATA_URL });
+assert.strictEqual(again.payload.reused, true, 'the same picture twice costs one file');
+assert.strictEqual(again.payload.name, uploadedWallpaper.payload.name, 'and one name');
+
+const served = await call('GET', uploadedWallpaper.payload.url);
+assert.strictEqual(served.status, 200, 'the stored wallpaper is served');
+assert.ok(Buffer.isBuffer(served.raw), 'as bytes');
+assert.ok(served.raw.equals(PNG_BYTES), 'and those bytes are the picture that went in, unchanged');
+assert.strictEqual(served.headers['content-type'], 'image/png', 'with the media type its extension names');
+assert.match(String(served.headers['cache-control']), /immutable/, 'and an immutable cache directive: the name is a hash, so the answer cannot go stale');
+assert.strictEqual(served.headers['content-length'], PNG_BYTES.length, 'with the byte count, so the browser can size it without buffering');
+
+// Refusals. Every one of these is a 400 with no file read at all.
+const notAnImage = await call('POST', '/dsh-custom-css/wallpaper-image', { dataUrl: 'data:text/html;base64,PHNjcmlwdD4=' });
+assert.strictEqual(notAnImage.status, 400, 'a non-image data URL is refused');
+assert.strictEqual(notAnImage.payload.error, 'bad-image', 'with the code the panel turns into a sentence');
+const notDataUrl = await call('POST', '/dsh-custom-css/wallpaper-image', { dataUrl: 'https://example.test/a.png' });
+assert.strictEqual(notDataUrl.status, 400, 'so is a URL: this route stores bytes, it does not fetch');
+const missingName = await call('GET', '/dsh-custom-css/wallpaper');
+assert.strictEqual(missingName.status, 400, 'a wallpaper read with no name is refused');
+const traversalName = await call('GET', '/dsh-custom-css/wallpaper?name=' + encodeURIComponent('../active.json'));
+assert.strictEqual(traversalName.status, 400, 'and so is one that tries to leave the directory');
+const unknownName = await call('GET', '/dsh-custom-css/wallpaper?name=wallpaper-' + HASH + '.png');
+assert.strictEqual(unknownName.status, 404, 'a name that is legal but absent is a 404, not a 400');
+
+// The gallery offers back what it holds, newest first, and the sheet listing stays clear of it.
+const galleryAfter = await call('GET', '/dsh-custom-css/gallery');
+assert.strictEqual(galleryAfter.payload.wallpapers.length, 1, 'the gallery lists the stored picture');
+assert.strictEqual(galleryAfter.payload.wallpapers[0].name, uploadedWallpaper.payload.name, 'by the name it was stored under');
+assert.strictEqual(galleryAfter.payload.wallpapers[0].bytes, PNG_BYTES.length, 'with its size, so the panel can say how big it is');
+const sheetsAfterWallpaper = await call('GET', '/dsh-custom-css/list');
+assert.ok(
+  !sheetsAfterWallpaper.payload.files.some(file => file.name === uploadedWallpaper.payload.name || file.name.startsWith('wallpaper-')),
+  'the top-level listing never sees a wallpaper: they are stored a level below it — files: '
+    + JSON.stringify(sheetsAfterWallpaper.payload.files.map(file => file.name)),
+);
+
+// Two ceilings, and the difference between them is the point: the BODY cap keeps a hostile
+// upload out of memory, and the DECODED cap is the one the feature actually promises. A body
+// just over base64's expansion of the decoded ceiling is refused as a bad body without ever
+// being decoded; a body inside it whose bytes decode past the ceiling is refused as a bad image.
+const oversizeBody = await call('POST', '/dsh-custom-css/wallpaper-image', {
+  dataUrl: 'data:image/png;base64,' + 'A'.repeat(Math.ceil((32 << 20) * 4 / 3) + 8192),
+});
+assert.strictEqual(oversizeBody.status, 400, 'a body past the upload ceiling is refused');
+assert.strictEqual(oversizeBody.payload.error, 'bad-body', 'as a body, before anything decodes it');
+
+const emptyImage = await call('POST', '/dsh-custom-css/wallpaper-image', { dataUrl: 'data:image/png;base64,' });
+assert.strictEqual(emptyImage.status, 400, 'a data URL with no bytes in it is refused');
+assert.strictEqual(emptyImage.payload.error, 'bad-image', 'as an image, not as a body');
+
 await rm(home, { recursive: true, force: true });
 // Dispose the plugin the way dsh does: the watcher has to be gone before the process can end
 // (see `effectCleanups`), and running the cleanups here is also what proves they close it.
@@ -499,6 +592,7 @@ assert.ok(effectCleanups.length > 0, 'the plugin registered at least one effect 
 const verified = [
   'file API', 'per-sheet switch', '/active', 'validation', 'reserved names', 'body cap',
   ...(linked ? ['symlink refusal'] : []),
-  'bookkeeping recovery', 'listing cap', 'version snapshots', 'revisions', 'the watch filter', 'and fail-closed fence',
+  'bookkeeping recovery', 'listing cap', 'version snapshots', 'revisions', 'wallpapers',
+  'the watch filter', 'and fail-closed fence',
 ];
 console.log('host-api-smoke: OK — ' + verified.join(', ') + ' verified');

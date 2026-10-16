@@ -32,9 +32,28 @@ host 侧在 `/dsh-custom-css` 前缀上挂了一组 JSON 端点。这是浏览�
 | POST | `/toggle` | `{ name, enabled }` → 打开 / 关闭某张样式表（**文件保留**），状态记进 `active.json` 的 `disabled` |
 | POST | `/open` | 用系统默认程序打开指定文件（仅限目录内已存在的 `.css`；不存在 → 404） |
 | POST | `/restore` | `{ name, stamp }` → 把某一版快照写回该文件（被替换的内容先留一份快照，所以恢复可逆；`stamp` 不是时间戳 → 400，快照不存在 → 404） |
+| GET | `/gallery` | `{ dir, wallpapers: [{ name, bytes, mtime }] }`，按时间倒序 —— 壁纸用过的图，供面板列缩略图 |
+| GET | `/wallpaper?name=<name>` | **直接返回图片字节**（不是 JSON），带 `content-type` 与 `cache-control: private, max-age=31536000, immutable` |
+| POST | `/wallpaper-image` | `{ dataUrl }` → 存下这张图，回 `{ name, bytes, reused, url }` |
 
 `rev` 是宿主报的**修订号**（`size/mtime` 拼出来的），不是内容哈希 —— 编辑器用它判断
 「文件在别处被动过没有」。详见 [编辑器 · 在别的编辑器里改](./editor.md#在别的编辑器里改这里跟着变)。
+
+## 壁纸的三个端点
+
+壁纸不是样式表，所以它有自己的目录与自己的白名单：图片存在
+`$DSH_HOME/custom-css/.wallpapers/`（**样式表目录下一层**，所以 `/list` 永远看不到它们，
+不需要按扩展名过滤）。详见 [自定义壁纸](./wallpaper.md)。
+
+- **名字是内容哈希**：`wallpaper-<sha256>.png`。同一张图传两次只落一个文件、一个缓存项，
+  而一个「名字就是哈希」的 URL 可以永久缓存 —— 它不可能改主意指向别的字节。
+- **接受的名字形状是钉死的**：`^wallpaper-[0-9a-f]{64}\.(png|jpg|webp|gif|avif|bmp)$`。
+  名字来自 URL 且会被拼到目录上，所以这里比样式表名更严：不是这个形状一律 **400**，
+  合法但不存在才是 **404**。
+- **两个上限，不是一回事**：请求体上限（`32 MiB × 4/3 + 4 KiB`）先把过大的上传挡在内存外
+  → `bad-body`；解码后的字节数上限（32 MiB）由 `/wallpaper-image` 自己判 → `bad-image`。
+- 只接受 `data:image/*;base64,…`。传 URL 不下载 —— **这个端点存字节，不取字节**。
+
 
 ## 文件名白名单
 

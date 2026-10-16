@@ -31,7 +31,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -454,8 +454,10 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
         return false;
       },
       remove() {
+        // The head owns a style tag and holds no `children` list of its own, so a tag that was
+        // never explicitly parented is taken out of `styleTags` — which is where the head put it.
         const owner = node.parentElement ?? null;
-        const list = owner === null ? styleTags : owner.children;
+        const list = owner === null || !Array.isArray(owner.children) ? styleTags : owner.children;
         const index = list.indexOf(node);
         if (index >= 0) list.splice(index, 1);
       },
@@ -500,7 +502,28 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     // The external-change poll only runs while the page is on screen (`visibilitychange` is the
     // other half of it). A boot starts visible; a case can switch it off by assigning here.
     visibilityState: 'visible',
-    head: { appendChild: element => { styleTags.push(element); } },
+    head: {
+      appendChild: element => {
+        styleTags.push(element);
+        // The head is the owner, and `remove()` asks it to take the tag out. `head.insertBefore`
+        // sets the same thing, because both routes into the head are used.
+        element.parentElement = document.head;
+        return element;
+      },
+      /**
+       * The position the wallpaper sheet is inserted at is a contract, not an accident: it goes
+       * BEFORE the user's sheet so the user's own rules win on a tie. `styleTags` is already the
+       * ordered list the real head would hold, so honouring the anchor here is what makes that
+       * order assertable at all.
+       */
+      insertBefore: (element, anchor) => {
+        const at = styleTags.indexOf(anchor);
+        if (at < 0) styleTags.push(element);
+        else styleTags.splice(at, 0, element);
+        element.parentElement = document.head;
+        return element;
+      },
+    },
     styleSheets: dom.styleSheets ?? [],
     querySelector(selector) {
       const match = /^style\[data-plugin-css="(.*)"\]$/.exec(selector);
@@ -568,6 +591,20 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {} }) {
     localStorage: {
       getItem: key => (storage.has(key) ? storage.get(key) : null),
       setItem: (key, value) => { storage.set(key, String(value)); },
+    },
+    /**
+     * The browser's own file reader, as far as the wallpaper upload uses it: hand it a file,
+     * get a data URL back. Synchronous here — the plugin awaits the promise either way, so the
+     * only thing the real one adds is a tick, and `settle()` already covers that. `result` is
+     * built from the file's own type, so a case that wants a rejected payload supplies a type
+     * the Host would refuse instead of reaching into this double.
+     */
+    FileReader: class {
+      readAsDataURL(file) {
+        const result = 'data:' + String(file?.type ?? 'application/octet-stream') + ';base64,AAAA';
+        this.result = result;
+        if (typeof this.onload === 'function') this.onload();
+      }
     },
     fetch: async (url, init) => {
       calls.push({ url, init });
@@ -770,12 +807,18 @@ async function main() {
   assert.strictEqual(typeof host.mod.apply, 'function', 'exports.apply must be a function');
   assert.deepStrictEqual([...host.mod.inject], ['slots'], 'exports.inject must declare the slots service');
 
-  assert.deepStrictEqual(host.waits, ['settings.general.item'], 'apply waits for the General item seat');
-  assert.strictEqual(host.registrations.length, 1, 'apply registers exactly one row');
+  assert.deepStrictEqual(
+    host.waits, ['settings.general.item', 'plugins.detail.section'],
+    'apply waits for the General item seat and for this plugin page\'s section seat',
+  );
+  assert.strictEqual(host.registrations.length, 2, 'apply registers the row and the wallpaper section');
   assert.strictEqual(host.registrations[0].options.id, 'custom-css');
   assert.strictEqual(host.registrations[0].options.order, 12, 'order 12 sits below Appearance (10) and Font size (11)');
   assert.strictEqual(host.registrations[0].options.registrant, 'dsh-custom-css');
   assert.strictEqual(typeof host.registrations[0].component, 'function', 'the registered row must be a component');
+  assert.strictEqual(host.registrations[1].options.id, 'custom-css-wallpaper');
+  assert.strictEqual(host.registrations[1].options.registrant, 'dsh-custom-css');
+  assert.strictEqual(typeof host.registrations[1].component, 'function', 'the wallpaper section must be a component');
 
   assert.ok(host.userStyle(), 'the active host sheet is applied on load, without opening settings');
   assert.strictEqual(host.userStyle().textContent, HOST_SHEET);
@@ -5670,7 +5713,253 @@ async function main() {
       + JSON.stringify(synced.userStyle().textContent),
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified');
+  // --- 22. custom wallpaper -------------------------------------------------
+  //
+  // The sheet this feature writes is the one place where a value the plugin did not invent —
+  // a URL — is interpolated into CSS, so the escaping is asserted here rather than trusted.
+  // A PNG's magic prefix, small enough that the whole data URL is readable in a failure.
+  const PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+  assert.strictEqual(probe.wallpaperCss({ image: '' }), '', 'no picture means no sheet at all');
+  assert.strictEqual(probe.wallpaperUrlAllowed('javascript:alert(1)'), false, 'a javascript URL is refused');
+  assert.strictEqual(probe.wallpaperUrlAllowed('data:text/html;base64,PHNjcmlwdD4='), false, 'a non-image data URL is refused');
+  assert.strictEqual(probe.wallpaperUrlAllowed('data:image/png;base64,AAAA'), true, 'an image data URL is accepted');
+  assert.strictEqual(probe.wallpaperUrlAllowed('https://example.test/a.png'), true, 'an https URL is accepted');
+  assert.strictEqual(probe.wallpaperUrlAllowed('file:///C:/pictures/a.png'), true, 'a file URL is accepted');
+  assert.strictEqual(probe.wallpaperUrlAllowed('a".png</style><script>'), false, 'a value that could end the style element is refused');
+  assert.strictEqual(
+    probe.wallpaperCss({ image: 'x".png</style>', fit: 'cover' }), '',
+    'and the sheet is empty rather than escaped — a value that cannot be carried legally is not carried',
+  );
+  const coverCss = probe.wallpaperCss({ image: PNG_DATA_URL, fit: 'cover', transparent: 20, brightness: 0 });
+  assert.ok(
+    coverCss.includes('background-image:url("' + PNG_DATA_URL + '")'),
+    'the picture is written as a QUOTED url(), so nothing in it can end the declaration — got: ' + coverCss,
+  );
+  assert.ok(coverCss.includes('background-size:cover'), 'cover maps to the background-size keyword');
+  assert.ok(!coverCss.includes('filter:'), 'brightness 0 writes no filter at all');
+  const brightCss = probe.wallpaperCss({ image: PNG_DATA_URL, brightness: 25 });
+  assert.ok(brightCss.includes('filter:brightness(1.25)'), 'a positive offset lightens: ' + brightCss);
+  assert.ok(
+    probe.wallpaperCss({ image: PNG_DATA_URL, brightness: -50 }).includes('filter:brightness(0.50)'),
+    'and a negative one darkens',
+  );
+  // The interface keeps 100 − transparency per cent of its own colour, so the numbers in the
+  // sheet have to move the other way from the slider the user drags.
+  /** The interface's own share at one transparency setting, read back out of the sheet. */
+  const baseAlpha = transparent => {
+    const css = probe.wallpaperCss({ image: PNG_DATA_URL, transparent });
+    const match = /--dsw-alias-bg-base:color-mix\(in srgb, light-dark\(#ffffff,#16181c\) (\d+)%/.exec(css);
+    assert.ok(match !== null, 'the base surface has a percentage in it: ' + css);
+    return Number(match[1]);
+  };
+  // The audience selectors have to outrank a skin's own. Measured in the dev instance: with a
+  // bare `body::before`, the acrylic skin's `body::before` won the tie and the picture never
+  // appeared, while the panel happily reported 已保存. That is a colourless difference — a
+  // selector one step higher — so it is exactly the kind of thing a test has to hold.
+  assert.ok(
+    coverCss.includes('html body::before,html body[data-ds-dark-theme]::before{'),
+    'the wallpaper layer outranks a bare body::before: ' + coverCss.split('\n').slice(0, 3).join(' | '),
+  );
+  assert.ok(
+    coverCss.includes('opacity:1;'),
+    'and pins its own opacity, so a skin that dims its own wallpaper layer cannot dim the picture',
+  );
+  assert.ok(
+    /html body,html body\[data-ds-dark-theme\]\{/.test(coverCss),
+    'the transparency tokens outrank a skin that sets the same tokens on `body`: ' + coverCss,
+  );
+  assert.ok(
+    probe.wallpaperCss({ image: PNG_DATA_URL, transparent: 999 }).includes('background-size:cover'),
+    'a setting out of range still produces a sheet',
+  );
+  assert.ok(
+    baseAlpha(60) < baseAlpha(30) && baseAlpha(30) < baseAlpha(0),
+    'the interface keeps less of its own colour the more the slider is raised — '
+      + [0, 30, 60].map(value => value + '→' + baseAlpha(value) + '%').join(', '),
+  );
+  assert.strictEqual(baseAlpha(999), baseAlpha(60), 'and a value past the top is clamped to the top');
+  assert.strictEqual(baseAlpha(-40), baseAlpha(0), 'a value past the bottom is clamped to the bottom');
+  assert.ok(
+    probe.wallpaperCss({ image: PNG_DATA_URL, fit: 'fill' }).includes('background-size:100% 100%'),
+    'fill stretches to both axes',
+  );
+  assert.ok(
+    probe.wallpaperCss({ image: PNG_DATA_URL, fit: 'tile' }).includes('background-repeat:repeat'),
+    'tile repeats the picture',
+  );
+  assert.ok(
+    probe.wallpaperCss({ image: PNG_DATA_URL, fit: 'nonsense' }).includes('background-size:cover'),
+    'an unknown fit mode falls back to cover rather than into the stylesheet',
+  );
+  assert.strictEqual(
+    probe.normalizeWallpaper({ image: 42, fit: 'x', transparent: 'nope', brightness: null }).image, '',
+    'a record that is not a record normalises to nothing',
+  );
+
+  // The record is applied on its own, with no sheet route involved: an installed wallpaper must
+  // survive the Host half being unreachable, and the browser's copy is what makes that true.
+  const paper = await boot({
+    fetchImpl: async () => { throw new Error('no route'); },
+    stored: new Map([['dsh-custom-css:wallpaper', JSON.stringify({ image: 'https://example.test/a.png', fit: 'cover', transparent: 30, brightness: 0 })]]),
+  });
+  assert.strictEqual(paper.registrations.length, 2, 'a Host that answers nothing still registers both seats');
+  const paperSheet = paper.styleTags.find(element => element.id === 'dsh-custom-css-wallpaper-style');
+  assert.ok(paperSheet !== undefined, 'the wallpaper sheet is installed from the browser copy');
+  assert.ok(
+    paperSheet.textContent.includes('url("https://example.test/a.png")'),
+    'the installed picture is in it — got: ' + (paperSheet === undefined ? '(no sheet)' : paperSheet.textContent),
+  );
+  assert.strictEqual(paper.userStyle(), undefined, 'no stylesheet was applied, so there is no user sheet to order against');
+
+  // Uploading: the browser reads the file, the Host stores the bytes and answers with the URL,
+  // and what the browser keeps is that URL — not the picture, and not a name it invented.
+  const uploads = [];
+  const uploader = await boot({
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      if (url.endsWith('/wallpaper-image')) {
+        uploads.push(JSON.parse(init.body));
+        return jsonResponse({ ok: true, name: 'wallpaper-abc.png', bytes: 120, reused: false, url: '/dsh-custom-css/wallpaper?name=wallpaper-abc.png' });
+      }
+      if (url.endsWith('/gallery')) return jsonResponse({ ok: true, dir: 'C:/css/.wallpapers', wallpapers: [] });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  /**
+   * Every rendered node of one type, so a case can pick the input it means. `findNode` returns
+   * the FIRST match by type, and this row has three inputs (the sheet importer, the row's own
+   * file field, and the wallpaper's) — an assertion that grabbed "the first input" would be
+   * measuring the wrong control while looking like it measured the right one. A nested component
+   * is still a function among the props, exactly as React leaves it, so it is rendered on the way
+   * down: that is what makes the panel's own controls reachable from the section that mounts it.
+   */
+  const allNodes = (node, type) => {
+    // A nested component is an element whose `type` is the function, exactly as React stores it.
+    // Rendering it here is what makes the panel's own controls reachable from the section that
+    // mounts it — with the hook index reset first, so the panel starts from slot 0 rather than
+    // reading the slots its parent already consumed.
+    if (typeof node?.type === 'function') {
+      hookIndex = 0;
+      node = node.type(node.props ?? {});
+    }
+    if (node === null || typeof node !== 'object') return [];
+    const found = node.type === type ? [node] : [];
+    for (const child of node.children ?? []) found.push(...allNodes(child, type));
+    return found;
+  };
+  const uploadPanel = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  const fileInput = allNodes(uploadPanel, 'input').find(node => node.props.accept === 'image/*');
+  assert.ok(fileInput !== undefined, 'the panel offers a file picker; inputs rendered: '
+    + JSON.stringify(allNodes(uploadPanel, 'input').map(node => node.props.accept)));
+  fileInput.props.onChange({
+    target: { files: [{ name: 'a.png', type: 'image/png', size: 120 }] },
+  });
+  await settle();
+  assert.strictEqual(uploads.length, 1, 'the picture is posted to the Host exactly once; requests so far: '
+    + JSON.stringify(uploader.calls.map(entry => entry.url)));
+  assert.ok(uploads[0].dataUrl.startsWith('data:image/png;base64,'), 'as a data URL the Host can decode: ' + String(uploads[0].dataUrl).slice(0, 40));
+  assert.strictEqual(
+    probe.wallpaperUrlAllowed('/dsh-custom-css/wallpaper?name=wallpaper-abc.png'), true,
+    'a root-relative path is accepted — it is the shape the Host\'s own route answers with',
+  );
+  assert.strictEqual(
+    probe.wallpaperUrlAllowed('//evil.test/a.png'), false,
+    'but a protocol-relative one is not: that is somewhere else wearing the costume of a path',
+  );
+  const uploadSheet = uploader.styleTags.find(element => element.id === 'dsh-custom-css-wallpaper-style');
+  assert.ok(
+    uploadSheet !== undefined && uploadSheet.textContent.includes('/dsh-custom-css/wallpaper?name=wallpaper-abc.png'),
+    'the sheet points at the URL the Host answered with — tags: '
+      + JSON.stringify(uploader.styleTags.map(element => element.id)),
+  );
+  const userIndex = uploader.styleTags.indexOf(uploader.userStyle());
+  assert.ok(
+    userIndex >= 0 && uploader.styleTags.indexOf(uploadSheet) < userIndex,
+    'and it sits BEFORE the user sheet, so the user\'s own rules win on a tie — order: '
+      + JSON.stringify(uploader.styleTags.map(element => element.id || element.dataset.pluginCss)),
+  );
+  const storedWallpaper = JSON.parse(uploader.storage.get('dsh-custom-css:wallpaper'));
+  assert.strictEqual(storedWallpaper.image, '/dsh-custom-css/wallpaper?name=wallpaper-abc.png', 'the browser keeps the URL, not the picture');
+  assert.strictEqual(storedWallpaper.transparent, 26, 'with the settings it was installed under');
+  await uploader.runTimers();
+  await settle();
+  assert.ok(
+    uploader.calls.some(entry => entry.url.includes('/write') && JSON.parse(entry.init.body).name === 'wallpaper.json.css'),
+    'the record is written to the Host under its own sheet name, so it survives this browser',
+  );
+
+  // 2. The section on this plugin's page in the plugin manager: rendered for its own page,
+  //    declined on every other one. The plugin manager hands the page down as owner props, so
+  //    the check is on the real subject rather than on a registration of ours.
+  hookIndex = 0;
+  const mine = uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  assert.ok(mine !== null && mine !== undefined, 'this plugin\'s own page shows the wallpaper section');
+  // The seat's contract is that an entry draws its OWN section chrome, and the official section it
+  // is modelled on has three parts: a 14px/500 title, a description line, and the facts list.
+  // Asserted on the rendered tree, because "the section exists" is not "the section says anything".
+  assert.strictEqual(mine.type, 'section', 'the contribution is a section element');
+  assert.strictEqual(mine.props['data-dsh-wallpaper'], 'section', 'carrying this plugin\'s own marker');
+  assert.strictEqual(mine.props['aria-label'], '自定义壁纸', 'and a name a landmark reader can announce');
+  /**
+   * Every string in a rendered subtree. The fake React keeps text in `children`, not in
+   * `props.children`, so the copy a user reads is collected by walking that list — an assertion
+   * written against `props.children` found empty strings and would have passed vacuously
+   * against a section with no copy at all.
+   */
+  const sectionTextOf = (node) => {
+    if (typeof node?.type === 'function') {
+      hookIndex = 0;
+      node = node.type(node.props ?? {});
+    }
+    if (typeof node === 'string') return node;
+    if (node === null || typeof node !== 'object') return '';
+    return (node.children ?? []).map(sectionTextOf).join(' ');
+  };
+  const sectionText = sectionTextOf(mine);
+  for (const expected of ['自定义壁纸', '本机图片', '.wallpapers', '32 MB', '皮肤']) {
+    assert.ok(sectionText.includes(expected), 'the section chrome mentions ' + expected + ' — text: ' + sectionText);
+  }
+  assert.strictEqual(
+    allNodes(mine, 'dl').length, 1,
+    'and the facts are a definition list, the shape the shipped sections use',
+  );
+  assert.strictEqual(allNodes(mine, 'dt').length, 3, 'with one term per fact');
+  hookIndex = 0;
+  assert.strictEqual(
+    uploader.registrations[1].component({ subject: { kind: 'bundle', pkg: { name: 'some-other-plugin' } } }), null,
+    'another plugin\'s page does not',
+  );
+  hookIndex = 0;
+  assert.strictEqual(uploader.registrations[1].component({}), null, 'and a page with no subject at all does not');
+  hookIndex = 0;
+  assert.strictEqual(
+    uploader.registrations[1].component({ subject: { kind: 'item', id: 'dsh-custom-css' } }), null,
+    'nor does an official plugin of the same name: this contribution is about the bundle',
+  );
+
+  // The wallpaper used to be mounted here as well, and it is not any more: the panel lives on
+  // this plugin's page in the plugin manager and nowhere else. Asserted against the SOURCE, not
+  // by rendering the row — the row contains a dropdown whose effects the harness runs, and
+  // walking the whole tree to look for a node nobody should have added is a lot of machinery for
+  // one negative. The class names are the mount's fingerprint, so their absence is the assertion.
+  assert.ok(
+    !source.includes('dshCc_wallpaperBlock') && !source.includes('dshCc_wallpaperHead'),
+    'the settings row no longer references the wallpaper block it used to mount',
+  );
+  assert.ok(
+    !source.includes('dshWp_lede'),
+    'and the panel no longer carries the intro copy that moved into the section',
+  );
+  assert.strictEqual(
+    source.split('WallpaperPanel').length - 1, 2,
+    'the panel has exactly one mount (its definition plus one call site)',
+  );
+
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified');
 }
 
 main().catch((error) => {

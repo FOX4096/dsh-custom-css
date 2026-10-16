@@ -26,10 +26,11 @@
   <a href="https://github.com/topics/dsh-plugin"><img alt="插件生态：GitHub topic dsh-plugin" src="https://img.shields.io/badge/插件生态-topic%20dsh--plugin-4d6bfe"></a>
   <a href="https://dshfind.com/zh/plugins/FOX4096/dsh-custom-css"><img alt="收录于 dshfind" src="https://dshfind.com/api/badge/FOX4096/dsh-custom-css?lang=zh"></a><br /><br />
   <a href="https://www.npmjs.com/package/@deepseek-ai/dsh?activeTab=versions"><img alt="支持的 DSH 版本：0.0.1-rc.1 ~ 0.2.1-alpha.4（接口契约断言，33 个版本）；其中 0.1.2-rc.1 与 0.1.5-rc.1 与 0.2.0-rc.2 已真机验证" src="https://img.shields.io/badge/DSH-0.0.1--rc.1_0.2.1--alpha.4_%28asserted%29-4d6bfe"></a><br /><br />
-  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"> <img alt="查找替换" src="https://img.shields.io/badge/-查找替换-6048bb"> <img alt="撤销重做" src="https://img.shields.io/badge/-撤销重做-257b56"> <img alt="规则大纲" src="https://img.shields.io/badge/-规则大纲-257083"><br /><br />
+  <img alt="即时生效" src="https://img.shields.io/badge/-即时生效-257b56"> <img alt="DevTools 编辑器" src="https://img.shields.io/badge/-DevTools_编辑器-257083"> <img alt="键入补全" src="https://img.shields.io/badge/-键入补全-3156af"> <img alt="规则面板" src="https://img.shields.io/badge/-规则面板-6048bb"> <img alt="格式校验" src="https://img.shields.io/badge/-格式校验-257b56"> <img alt="声明模板" src="https://img.shields.io/badge/-声明模板-257083"> <img alt="元素拾取器" src="https://img.shields.io/badge/-元素拾取器-3156af"> <img alt="多文件管理" src="https://img.shields.io/badge/-多文件管理-6048bb"> <img alt="明暗自适应" src="https://img.shields.io/badge/-明暗自适应-257b56"> <img alt="属性字典" src="https://img.shields.io/badge/-属性字典-257083"> <img alt="历史版本" src="https://img.shields.io/badge/-历史版本-3156af"> <img alt="查找替换" src="https://img.shields.io/badge/-查找替换-6048bb"> <img alt="撤销重做" src="https://img.shields.io/badge/-撤销重做-257b56"> <img alt="规则大纲" src="https://img.shields.io/badge/-规则大纲-257083"> <img alt="自定义壁纸" src="https://img.shields.io/badge/-自定义壁纸-6048bb"><br /><br />
   <b>拾取元素 · 查找 · 文件下拉 · 更多操作</b>，把 <code>~/.dsh/custom-css/</code> 下的样式表注入界面 ——<br />
   编辑器照 DevTools 的 Styles 标签页做：行号 gutter、语法高亮、键入补全、规则面板、格式校验、撤销重做、查找替换；<br />
-  拾取器在界面里点选一个元素，直接给出跨版本尽量稳的选择器，并把它实际生效的令牌写成声明。
+  拾取器在界面里点选一个元素，直接给出跨版本尽量稳的选择器，并把它实际生效的令牌写成声明；<br />
+  <b>壁纸</b>不用写 CSS：选一张本机图片即可，界面透明与明暗都由它自己调（插件详情页里那一节）。
 </div>
 
 DSH Web GUI 扩展：在 **设置 → 通用** 的「外观」下方增加一行 **自定义 CSS** —— 样式表以普通 `.css` 文件保存在宿主磁盘上，写进去即时应用到整个界面。
@@ -86,6 +87,7 @@ dsh plugin --profile web add dsh-custom-css
 | 我在… | 看这些 |
 | --- | --- |
 | **刚装上** | [安装](./docs/install.md) · [三分钟上手](./docs/getting-started.md) · [已知坑](./docs/known-issues.md) |
+| **换张背景图（不写 CSS）** | [自定义壁纸](./docs/wallpaper.md) —— 入口在插件详情页里 |
 | **写样式** | [编辑器](./docs/editor.md) · [元素拾取器](./docs/picker.md) · [规则面板](./docs/rule-panel.md) · [格式校验](./docs/validation.md) · [控件](./docs/controls.md) |
 | **改插件** | [开发](./docs/development.md) · [测试与巡检](./docs/testing.md) · [设计一致性](./docs/design-tokens.md) · [仓库结构](./docs/repo-map.md) · [命名表](./docs/naming.md) |
 | **排查问题** | [已知坑与已知限制](./docs/known-issues.md) · [兼容性](./docs/compat.md) · [host 侧文件接口](./docs/api-host.md) |
@@ -126,6 +128,8 @@ dsh plugin --profile web add dsh-custom-css
 - 只能**追加** CSS，不能修改内置样式表本身。
 - 规则面板只认**顶层**样式规则（`@media` 里的规则照常生效，只是面板编辑不到）。
 - 拾取器只能拾取**当前文档**里的元素，跨域 iframe 里拾取不到。
+- 壁纸一次只挂**一张**图，且只认**本机文件上传**（不填 URL、不下载网图），单张 ≤ 32 MiB。
+  它自己会做界面透明，但皮肤若也设了那几个 `--dsw-alias-bg-*` 令牌，**皮肤优先**（面板会说明）。
 
 另外五条（含 host 接口不可达时的降级行为、令牌建议为什么可能一个都不给）
 在 [已知坑与已知限制](./docs/known-issues.md)。
