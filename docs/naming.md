@@ -101,8 +101,8 @@
 | **壁纸面板** | `WallpaperPanel` · `.dshWp_root` | 控件本体：预览列 + 四行控件 | 已实现 |
 | **壁纸预览** | `.dshWp_preview`（在 `.dshWp_previewCol` 里） | 左（窄时在上）那块 16:9 的图，底下盖一层界面浓度 | 已实现 |
 | **预览说明** | `.dshWp_previewNote` | 预览下面那行小字：预览里压着的那层就是「界面浓度」 | 已实现 |
-| **选择图片钮** | `.dshWp_btn` | `选择图片…`；已有图时写 `更换图片`，旁边多一个 `移除` | 已实现 |
-| **填充下拉** | `.dshWp_select` | 铺满 / 完整 · 留边 / 拉伸 · 填满 / 平铺 | 已实现 |
+| **选择图片钮** | `.dshCc_btn`（`rowButton`） | `选择图片…`；已有图时写 `更换图片`，旁边多一个 `移除` | 已实现 |
+| **填充下拉** | `.dshCc_select`（`rowChoice`） | 铺满 / 完整 · 留边 / 拉伸 · 填满 / 平铺 | 已实现 |
 | **界面浓度滑块** | `.dshWp_slider`（`aria-label` 为「界面底色浓度…」） | 0–60%，越小壁纸越明显 | 已实现 |
 | **明暗滑块** | `.dshWp_slider`（`aria-label` 为「壁纸明暗」） | −60%…+60% 的 `filter: brightness()` | 已实现 |
 | **用过的** | `.dshWp_gallery` · `.dshWp_thumb` | 宿主上还留着的图，每个叫**壁纸缩略图** | 已实现 |
@@ -120,25 +120,27 @@
 | **设置节** | `SettingsSection` · `section[data-dsh-wallpaper="settings-section"]` | 插件详情页里「壁纸设置」这一整节（order 21，排在壁纸节之后） | 已实现 |
 | **设置面板** | `SettingsPanel` · `div[data-dsh-wallpaper="settings"]` | 八行控件本体，分「壁纸」与「编辑器」两组 | 已实现 |
 | **分组标题** | `.dshWp_group` | 面板里的分组标题（目前只有「编辑器」一条） | 已实现 |
-| **轮换下拉** | `.dshWp_select`（`aria-label` 为「壁纸轮换间隔」） | 关 / 5 分钟 / 30 分钟 / 每小时 / 每天 | 已实现 |
+| **轮换下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「壁纸轮换间隔」） | 关 / 5 分钟 / 30 分钟 / 每小时 / 每天 | 已实现 |
 | **遮罩滑块** | `.dshWp_slider`（`aria-label` 为「壁纸遮罩浓度」） | 0–80%，压在图片上的暗色层 | 已实现 |
 | **模糊滑块** | `.dshWp_slider`（`aria-label` 为「壁纸模糊半径」） | 0–24px 的 `blur()` | 已实现 |
-| **角落时间开关** | `primitives.Switch`（`aria-label` 为「在壁纸上显示时间」） | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
-| **保存延迟下拉** | `.dshWp_select`（`aria-label` 为「样式表保存延迟」） | 200ms / 400ms / 1s / 3s | 已实现 |
-| **校验下拉** | `.dshWp_select`（`aria-label` 为「格式校验严格度」） | 语法 + 变量体检 / 只查语法 / 关闭校验 | 已实现 |
-| **行号开关** | `primitives.Switch`（`aria-label` 为「显示编辑器行号」） | 关掉时给 `.dshCc_row` 加 `.dshCc_noGutter`（**隐藏**，不卸载） | 已实现 |
-| **Tab 宽度下拉** | `.dshWp_select`（`aria-label` 为「Tab 宽度（空格数）」） | 2 / 4 / 8 空格；Tab 键与「格式化」都用它 | 已实现 |
+| **角落时间开关** | `.dshCc_switch`（`rowSwitch`，`aria-label` 为「在壁纸上显示时间」） | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
+| **保存延迟下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「样式表保存延迟」） | 200ms / 400ms / 1s / 3s | 已实现 |
+| **校验下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「格式校验严格度」） | 语法 + 变量体检 / 只查语法 / 关闭校验 | 已实现 |
+| **行号开关** | `.dshCc_switch`（`rowSwitch`，`aria-label` 为「显示编辑器行号」） | 关掉时给 `.dshCc_row` 加 `.dshCc_noGutter`（**隐藏**，不卸载） | 已实现 |
+| **Tab 宽度下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「Tab 宽度（空格数）」） | 2 / 4 / 8 空格；Tab 键与「格式化」都用它 | 已实现 |
 | **数据分组** | `.dshWp_group`「数据」 | 「导出全部」「重置插件」两个动作 | 已实现 |
-| **导出全部** | `primitives.Button` | `GET /export` → 下载一个带时间戳的 JSON | 已实现 |
-| **重置插件** | `primitives.Button`（两步确认） | `POST /archive-and-reset` → 归档到 `.backup/<时间戳>/` | 已实现 |
+| **导出全部** | `.dshCc_btn`（`rowButton`） | `GET /export` → 下载一个带时间戳的 JSON | 已实现 |
+| **重置插件** | `.dshCc_btn`（`rowButton`，两步确认） | `POST /archive-and-reset` → 归档到 `.backup/<时间戳>/` | 已实现 |
 | **关于分组** | `.dshWp_group`「关于」 + `.dshWp_facts` | 版本 / 目录 / 宿主 / 链接四行事实（`dt`+`dd`，与壁纸节同一形状） | 已实现 |
 | **文档链接** | `.dshWp_link` | 「仓库」「文档」两个外链（`--dsw-alias-state-business-primary`） | 已实现 |
 
 > 这一节的标签与滑块的 `aria-label` 都在 `WALLPAPER_SETTING_LABELS` 里，一处定义、两处使用
 > （看得见的字与读屏器听到的字不是同一句，所以两个都要写）。
 >
-> **开关一律是 `primitives.Switch`，不是自绘的**：`.dshWp_switch*` 那几个类在 0.3.2 里随自绘开关
-> 一起删掉了，现在页面上找不到它们。
+> **控件全是设置行那一套自绘的**：`.dshCc_btn`（`rowButton`）、`.dshCc_switch`（`rowSwitch`）、
+> `.dshCc_select`（`rowChoice`，底层是行里的 `Dropdown`）、`.dshCc_languageBadge`（`rowBadge`）、
+> `.dshCc_input`（URL 文本框）。组件库那一路已在 0.3.8 撤回，见 [开发](./development.md) 的
+> 「控件只有一套」。`.dshWp_btn` / `.dshWp_select` / `.dshWp_text` / `.dshWp_switch*` 都已不存在。
 
 ### 设置行里的入口
 

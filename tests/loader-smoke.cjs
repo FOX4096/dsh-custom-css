@@ -17,7 +17,16 @@ const vm = require('node:vm');
 const assert = require('node:assert');
 
 const pluginRoot = path.join(__dirname, '..');
-const source = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8');
+/**
+ * The module text this suite runs, with line endings normalised to LF.
+ *
+ * The anchor below is compared against this text, and it is a multi-line literal: a file that has
+ * been rewritten by a tool that mixes CRLF and LF makes the literal and the file disagree by one
+ * `\r` — which reads as "the module no longer exports the way this suite patches in" while the
+ * export is in plain sight. Line endings carry no meaning in JavaScript, so normalising here is
+ * honest rather than a workaround: the suite asserts the CODE, not the byte style.
+ */
+const source = fs.readFileSync(path.join(pluginRoot, 'lib', 'client.js'), 'utf8').replace(/\r\n/g, '\n');
 /**
  * The module text this suite runs.
  *
@@ -154,46 +163,6 @@ function decodeCssString(raw) {
   return raw.replace(/\\(?:([0-9a-fA-F]{1,6}) ?|(.))/g, (whole, hex, character) => (
     hex === undefined ? character : String.fromCodePoint(parseInt(hex, 16))
   ));
-}
-
-/**
- * The native component library, as the harness hands it to the plugin.
- *
- * Each export is a function component carrying its own name, so a rendered subtree says which one
- * it came from (`node.nativeName`) — a case can then assert that a control IS the native one and
- * not a lookalike, which is the only reason this plugin takes the dependency at all. `Button`
- * renders as a `button` and `Switch` as a `button[role=switch]`, mirroring what the real library
- * wraps; the rest are `div`s/`span`s whose class names a case can look for.
- * @returns a fresh module double.
- */
-function nativeStub() {
-  const make = (nativeName, tag, extra = {}) => {
-    const component = (props) => {
-      const children = [];
-      if (props?.icon !== undefined) children.push(props.icon);
-      if (props?.children !== undefined) children.push(...[].concat(props.children));
-      const node = { type: tag, props: { ...extra, ...props, children }, children };
-      node.nativeName = nativeName;
-      return node;
-    };
-    component.nativeName = nativeName;
-    return component;
-  };
-  return {
-    Button: make('Button', 'button', { className: 'native-button' }),
-    Switch: make('Switch', 'button', { className: 'native-switch', role: 'switch' }),
-    Checkbox: make('Checkbox', 'input', { className: 'native-checkbox' }),
-    Input: make('Input', 'input', { className: 'native-input' }),
-    Select: make('Select', 'select', { className: 'native-select' }),
-    Tag: make('Tag', 'span', { className: 'native-tag' }),
-    Tooltip: make('Tooltip', 'span', { className: 'native-tooltip' }),
-    StateDot: make('StateDot', 'span', { className: 'native-statedot' }),
-    DisclosureRow: make('DisclosureRow', 'div', { className: 'native-disclosure' }),
-    IconTrashOutlineRegular: make('IconTrashOutlineRegular', 'svg', { className: 'native-icon-trash' }),
-    IconRefreshOutlineRegular: make('IconRefreshOutlineRegular', 'svg', { className: 'native-icon-refresh' }),
-    IconFolderOutlineRegular: make('IconFolderOutlineRegular', 'svg', { className: 'native-icon-folder' }),
-    IconImageOutlineRegular: make('IconImageOutlineRegular', 'svg', { className: 'native-icon-image' }),
-  };
 }
 
 /**
@@ -750,10 +719,6 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, service
 
   const mod = loaded.factory((name) => {
     if (name === 'react') return fakeReact;
-    // The native component library the plugin's `inject` list asks for. The stub carries exactly
-    // the exports the plugin reaches for, each a recognisable element type, so a case can assert
-    // that a control IS the native one rather than a lookalike — the point of the dependency.
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return nativeStub();
     throw new Error('unexpected require: ' + name);
   });
 
@@ -6077,21 +6042,22 @@ async function main() {
     /https/.test(String(wallPanel.props.placeholder ?? '')),
     'and a placeholder that shows the shape of an address — got: ' + String(wallPanel.props.placeholder),
   );
-  // Found by its handler rather than by its label: the button's text reaches the fake React outside
-  // `props.children` in this harness, so the label is asserted through the rendered TEXT instead
-  // (below), and the node is picked out by the one thing only this button has — its own onClick.
+  // Found by its label, which now really is in the tree: these buttons are plain DOM elements built
+  // by the row's own `rowButton` helper, not elements handed to a component that re-arranges its
+  // children on the way down. (That was the reason for the old props-based lookup.)
   const urlButtonOf = (tree) => allNodes(tree, 'button')
-    .find((node) => typeof node.props.onClick === 'function' && node.props.variant === 'ghost' && node.props.size === 'sm' && node.props.icon === undefined);
+    .find((node) => (node.children ?? []).join('').includes('使用此 URL'));
   const firstUrlButton = urlButtonOf(mine);
   assert.ok(firstUrlButton !== undefined, 'with one commit button beside it');
   assert.strictEqual(
     firstUrlButton.props.disabled, true,
     'which is disabled while the draft is empty, so there is nothing to submit',
   );
-  // The label is asserted against the SOURCE, not the rendered tree: the fake React keeps a
-  // rendered button's text outside `props.children` in this harness, so a text assertion here would
-  // read an empty string and pass or fail for reasons that have nothing to do with the button. The
-  // refused-address case below is the behavioural assertion that the label belongs to this control.
+  assert.strictEqual(
+    firstUrlButton.props.className, 'dshCc_btn',
+    'and it is the settings row\'s own button, not a second kind of button — className: '
+      + String(firstUrlButton.props.className),
+  );
   const srcHasUrlLabel = source.includes("'使用此 URL'");
   assert.ok(
     srcHasUrlLabel,
@@ -6165,6 +6131,14 @@ async function main() {
   );
 
   const linkRow = (() => {
+    // A clean mount, not just a clean index: the cases above mounted the wallpaper section, whose
+    // panel now renders the settings row's `Dropdown` (a stateful component). The harness keeps
+    // hook slots by position across mounts, so the row's first `useState` would read the value the
+    // dropdown left at that index — measured: `openIndex` came back `undefined`, and the row then
+    // asked for `rules[undefined]`. Clearing the slot table as well is what makes this the "fresh
+    // component" every other mount in this file is.
+    hookIndex = 0;
+    hookSlots.length = 0;
     const view = uploader.registrations[0].component();
     const stack = [view];
     while (stack.length > 0) {

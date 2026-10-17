@@ -2,6 +2,31 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.3.8 — 控件撤回自绘一套（撤掉 0.3.2 的组件库依赖）
+
+0.3.2 把插件详情页的按钮/开关/标签换成了 DSH 组件库（`primitives.Button` 等），而设置界面里
+那一行一直是自绘的 `dshCc_*`。结果同一个扩展有了**两套控件**：同一个开关在两处长得不一样，
+同一个按钮在两处一套来自库、一套来自自己。这一版撤回组件库那一路，统一到**设置行那套**：
+
+| 控件 | 现在用的 | 定义位置 |
+| --- | --- | --- |
+| 按钮 | `.dshCc_btn`（`rowButton`） | `ROW_CSS` |
+| 开关 | `.dshCc_switch` + Track/Thumb/Label（`rowSwitch`） | `ROW_CSS` |
+| 徽标 | `.dshCc_languageBadge`（`rowBadge`） | `ROW_CSS` |
+| 下拉 | `Dropdown` + `.dshCc_select`（`rowChoice`） | `ROW_CSS` |
+| 文本框 | `.dshCc_input` | `ROW_CSS` |
+
+**这是往回退一步、但方向更对的一次**：这个插件不再 require 任何 `@deepseek-ai/*` 模块（回到
+「运行时零 require」，那是它跨 34 个版本不坏的原因之一），而「像 DSH」靠的是把 DSH 的规格值抄进
+自己的样式表（36px 按钮、`bg-module-platform` 填充、`radius-sm` 徽标、`l4` 边框字段）。
+
+下拉从原生 `<select>` 换成行里的 `Dropdown`：`<select>` 的弹层是系统的方形调色板，改不了样式，
+在行的圆角菜单旁边像另一个产品 —— 行自己的注释早就这么写过，现在两处一致了。
+
+实测：面板里 `select` 元素 **0 个**，5 个选择项都是 `.dshCc_select` 触发钮；2 个开关都是
+`.dshCc_switch`（`aria-checked` 上色）；按钮 `.dshCc_btn`；URL 输入框 `.dshCc_input`；徽标
+`.dshCc_languageBadge`；零横向溢出。
+
 ## 0.3.7 — 关于一节
 
 插件详情页的设置里多了「关于」一组，四行事实（与壁纸节同一形状：`dt` + `dd`）：

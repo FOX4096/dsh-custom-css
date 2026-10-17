@@ -18,26 +18,35 @@
 > 只有浏览器半走 `dsh-client-hmr` 热更新。这条踩过：host 改动在磁盘上躺了一整夜，
 > 期间所有人都在测旧代码。见 [已知坑](./known-issues.md)。
 
-## 控件一律用平台的原生组件
+## 控件只有一套：设置行那套
 
-界面里的按钮、开关、标签**不是**这个插件画的，是 **DSH 组件库**（`@deepseek-ai/dsh-client-ui-primitives`）
-的。清单与用法：
+界面里的按钮、开关、标签、下拉，**全是这个插件自己画的**，而且只有一套实现 ——
+就是设置界面里那一行（`CustomCssRow`）用的那几个类：
 
-| 事项 | 事实 |
-| --- | --- |
-| 声明 | `package.json` 的 `dsh.client.inject` 里加 `@deepseek-ai/dsh-client-ui-primitives` |
-| 取用 | `require('@deepseek-ai/dsh-client-ui-primitives')`，**只有这一处 require** |
-| 为什么是 inject 而不是 import | 平台不在 `node_modules` 里暴露它，它是**模块表**里的一个模块；inject 描述的正是这张表 |
-| 实测可用 | `Button` · `Checkbox` · `Input` · `Switch` · `Tag` · `Tooltip` · `StateDot` · `Menu` · `Toast` · 98 个 `Icon*Regular` |
-| 实测**没有** | `Select` / `Slider` / `Segmented` / `Radio` —— 选择用原生 `<select>`（已按 DSH 字段规格着色），滑块用原生 `<input type=range>` |
-| 缺失时的行为 | `native(name, fallback)` 退化成带 `nativeFallback` 标记的普通元素：**控件不会消失**，只是不再来自组件库 |
+| 控件 | 类 | 在哪定义 | 从哪调 |
+| --- | --- | --- | --- |
+| 按钮 | `.dshCc_btn` | `ROW_CSS` | `rowButton(props, …children)` |
+| 开关 | `.dshCc_switch` + `-Track` / `-Thumb` / `-Label` | `ROW_CSS` | `rowSwitch({ checked, ariaLabel, labelText, onChange })` |
+| 徽标 | `.dshCc_languageBadge` | `ROW_CSS` | `rowBadge(text)` |
+| 下拉 | `.dshCc_select`（`Dropdown` 的触发钮） | `ROW_CSS` | `rowChoice({ ariaLabel, choices, value, onChange })` |
+| 文本框 | `.dshCc_input` | `ROW_CSS` | 直接 `className: 'dshCc_input'` |
 
-**React 元素类型是大小写敏感的**：组件必须作为**类型**传入（`createElement(native('Button','button'), …)`），
-写小写字符串会被当成未知 DOM 标签。
+三个函数与 `Dropdown` 都在 `lib/client.js` 里，`ROW_CSS` 在模块加载时就注入 ——
+所以插件详情页不需要先打开设置界面也拿得到这些样式。
 
-> 代价与收益：这条依赖让这个插件**不再是「运行时零 require」**（那是它过去跨 31 个版本不坏的原因之一）。
-> 换来的是「这一行的控件与 DSH 自己是同一套」。降级路径留在 `native()` 里，所以组件库哪天消失，
-> 界面退回普通元素而不是坏掉。
+**为什么是这一套，不是组件库**：`@deepseek-ai/dsh-client-ui-primitives` 曾经短暂接进来过
+（0.3.2），它确实能在运行时的模块表里取到，但那样这个插件就有了**两套控件**：设置行是自绘的，
+详情页是组件库的，同一个扩展看起来像两个产品。现在统一在自绘这一套上：
+
+- **零 require**：浏览器半一个 `@deepseek-ai/*` 模块都不在运行时 `require`，这正是它跨 34 个
+  版本没坏的原因之一；
+- **值照抄 DSH 规格**：36px 按钮、`--dsw-alias-bg-module-platform` 填充、`radius-sm` 的 chip、
+  `l4` 边框的 34px 字段 —— 是「看着像 DSH」，不是「依赖 DSH 的实现」；
+- **开关的状态画在 `aria-checked` 上**，不另开一个平行 class：外观不可能和读屏器读到的状态分家。
+
+> 组件库那一路的实测结论仍然留着做参考：它有 `Button`/`Switch`/`Tag`/`Checkbox`/`Input`/
+> `Tooltip`/`StateDot`/`Menu`/`Toast`/`SettingsForm`/`SettingsValueField` 等，**没有**
+> `Select`/`Slider`。哪天要切回去，这份清单还在 `git log` 里（022e1f4）。
 
 ---
 
