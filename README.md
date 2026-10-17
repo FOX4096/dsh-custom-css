@@ -89,7 +89,7 @@ dsh plugin --profile web add dsh-custom-css
 | **刚装上** | [安装](./docs/install.md) · [三分钟上手](./docs/getting-started.md) · [已知坑](./docs/known-issues.md) |
 | **换张背景图（不写 CSS）** | [自定义壁纸](./docs/wallpaper.md) —— 入口在插件详情页里 |
 | **写样式** | [编辑器](./docs/editor.md) · [元素拾取器](./docs/picker.md) · [规则面板](./docs/rule-panel.md) · [格式校验](./docs/validation.md) · [控件](./docs/controls.md) |
-| **改插件** | [开发](./docs/development.md) · [测试与巡检](./docs/testing.md) · [设计一致性](./docs/design-tokens.md) · [仓库结构](./docs/repo-map.md) · [命名表](./docs/naming.md) |
+| **改插件** | [开发](./docs/development.md) · [UI 组件库](./docs/ui-kit.md) · [测试与巡检](./docs/testing.md) · [设计一致性](./docs/design-tokens.md) · [仓库结构](./docs/repo-map.md) · [命名表](./docs/naming.md) |
 | **排查问题** | [已知坑与已知限制](./docs/known-issues.md) · [兼容性](./docs/compat.md) · [host 侧文件接口](./docs/api-host.md) |
 | **等新功能** | [预览块（规划中）](./docs/preview.md) |
 
@@ -128,8 +128,9 @@ dsh plugin --profile web add dsh-custom-css
 - 只能**追加** CSS，不能修改内置样式表本身。
 - 规则面板只认**顶层**样式规则（`@media` 里的规则照常生效，只是面板编辑不到）。
 - 拾取器只能拾取**当前文档**里的元素，跨域 iframe 里拾取不到。
-- 壁纸一次只挂**一张**图，且只认**本机文件上传**（不填 URL、不下载网图），单张 ≤ 32 MiB。
-  它自己会做界面透明，但皮肤若也设了那几个 `--dsw-alias-bg-*` 令牌，**皮肤优先**（面板会说明）。
+- 壁纸一次只挂**一张**图；来源二选一 —— **上传本机文件**（≤ 32 MiB），或**贴一个 URL**
+  （`https://` / `file:///` / `data:image/…`，不下载、直接引用）。它自己会做界面透明，但皮肤若也设了
+  那几个 `--dsw-alias-bg-*` 令牌，**皮肤优先**（面板会说明）。
 
 另外五条（含 host 接口不可达时的降级行为、令牌建议为什么可能一个都不给）
 在 [已知坑与已知限制](./docs/known-issues.md)。

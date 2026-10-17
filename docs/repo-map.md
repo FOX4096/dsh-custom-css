@@ -26,7 +26,7 @@ dsh-custom-css/
 │   ├── visual-probe.mjs      # 无头 Edge + CDP：量几何、截图、收控制台错误
 │   ├── compat-matrix.mjs     # 跨版本兼容断言（槽位 + inject id）
 │   ├── update-compat.mjs     # 换代检查：发现新版本 → 断言 → 写回文档
-│   └── audit-*.mjs           # 圆角 / 字体 / 可访问名 / 重复率四个审计
+│   └── audit-*.mjs           # 圆角 / 字体 / 可访问名 / 重复率 / 组件库 五个审计（audit-ui 禁止绕过 ui.*）
 ├── .github/
 │   ├── workflows/ci.yml           # Node 20/22 × 语法自检 + 冒烟 + 巡检 + 兼容
 │   ├── workflows/publish.yml      # 推 v* tag → OIDC 受信发布 + 自动建 Release
