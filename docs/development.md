@@ -18,21 +18,24 @@
 > 只有浏览器半走 `dsh-client-hmr` 热更新。这条踩过：host 改动在磁盘上躺了一整夜，
 > 期间所有人都在测旧代码。见 [已知坑](./known-issues.md)。
 
-## 控件只有一套：设置行那套
+## 控件只有一套：`ui.*`
 
-界面里的按钮、开关、标签、下拉，**全是这个插件自己画的**，而且只有一套实现 ——
-就是设置界面里那一行（`CustomCssRow`）用的那几个类：
+界面里的按钮、开关、标签、下拉、行布局，**全是这个插件自己画的**，而且只有一套实现 ——
+`lib/client.js` 里的 `ui` 对象（详见 **[UI 组件库](./ui-kit.md)**）。
 
 | 控件 | 类 | 在哪定义 | 从哪调 |
 | --- | --- | --- | --- |
-| 按钮 | `.dshCc_btn` | `ROW_CSS` | `rowButton(props, …children)` |
-| 开关 | `.dshCc_switch` + `-Track` / `-Thumb` / `-Label` | `ROW_CSS` | `rowSwitch({ checked, ariaLabel, labelText, onChange })` |
-| 徽标 | `.dshCc_languageBadge` | `ROW_CSS` | `rowBadge(text)` |
-| 下拉 | `.dshCc_select`（`Dropdown` 的触发钮） | `ROW_CSS` | `rowChoice({ ariaLabel, choices, value, onChange })` |
-| 文本框 | `.dshCc_input` | `ROW_CSS` | 直接 `className: 'dshCc_input'` |
+| 按钮 | `.dshUi_button` | `ROW_CSS` | `ui.button(props, …children)` |
+| 开关 | `.dshUi_switch` + `-Track` / `-Thumb` / `-Label` | `ROW_CSS` | `ui.switch({ checked, ariaLabel, labelText, onChange })` |
+| 徽标 | `.dshUi_badge` | `ROW_CSS` | `ui.badge(text)` |
+| 下拉 | `.dshUi_choice`（`Dropdown` 的触发钮） | `ROW_CSS` | `ui.choice({ ariaLabel, choices, value, onChange })` |
+| 文本框 | `.dshUi_field` | `ROW_CSS` | `ui.field(props)` |
+| 设置行 | `.dshUi_row` + `-Label` / `-Controls` | `WALLPAPER_CSS` | `ui.row(label, control, note?)` |
 
-三个函数与 `Dropdown` 都在 `lib/client.js` 里，`ROW_CSS` 在模块加载时就注入 ——
+`ui` 与 `Dropdown` 都在 `lib/client.js` 里，两张样式表在模块加载时就注入 ——
 所以插件详情页不需要先打开设置界面也拿得到这些样式。
+
+**`tests/audit-ui.mjs` 是这条规则的守门人**：组件库之外手写 `dshUi_*` 类名会直接失败。
 
 **为什么是这一套，不是组件库**：`@deepseek-ai/dsh-client-ui-primitives` 曾经短暂接进来过
 （0.3.2），它确实能在运行时的模块表里取到，但那样这个插件就有了**两套控件**：设置行是自绘的，
@@ -42,7 +45,8 @@
   版本没坏的原因之一；
 - **值照抄 DSH 规格**：36px 按钮、`--dsw-alias-bg-module-platform` 填充、`radius-sm` 的 chip、
   `l4` 边框的 34px 字段 —— 是「看着像 DSH」，不是「依赖 DSH 的实现」；
-- **开关的状态画在 `aria-checked` 上**，不另开一个平行 class：外观不可能和读屏器读到的状态分家。
+- **状态画在属性上**（`aria-checked` / `aria-pressed` / `aria-invalid` / `aria-busy`）：
+  外观不可能和读屏器读到的状态分家。
 
 > 组件库那一路的实测结论仍然留着做参考：它有 `Button`/`Switch`/`Tag`/`Checkbox`/`Input`/
 > `Tooltip`/`StateDot`/`Menu`/`Toast`/`SettingsForm`/`SettingsValueField` 等，**没有**

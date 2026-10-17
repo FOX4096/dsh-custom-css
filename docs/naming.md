@@ -69,13 +69,13 @@
 | **动作组** | `.dshCc_actions` | 行头右侧那排入口 | 已实现 |
 | **拾取入口** | `.dshCc_pickBtn` | [拾取元素]，武装期间变成 [取消拾取] | 已实现 |
 | **查找入口** | `.dshCc_findBtn` | [查找]，栏打开时变 [关闭查找] | 已实现 |
-| **文件下拉** | `.dshCc_trigger` `.dshCc_menu` | DSH 原生样式的样式表下拉 | 已实现 |
+| **文件下拉** | `.dshCc_trigger` `.dshUi_menu` | DSH 原生样式的样式表下拉 | 已实现 |
 | **更多操作菜单** | `.dshCc_menuBtn` | [更多操作]：打开文件 / 导入 / 导出 / 格式化 / 历史版本 / 重置 | 已实现 |
 | **文件栏** | `.dshCc_fileBar` | [图标 + 文件名 + 徽章] [大纲] [状态点] [启用开关] | 已实现 |
 | **文件身份区** | `.dshCc_fileIdentity` | 文件栏左侧：图标 + 文件名 + `CSS` 徽章 | 已实现 |
 | **大纲** | `.dshCc_outline` | 规则清单下拉，每条带「命中 N 个」 | 已实现 |
 | **状态点** | `.dshCc_statusDot` | 文件栏里那个小圆点 | 已实现 |
-| **启用开关** | `.dshCc_switch` | 临时停用当前样式表的胶囊 | 已实现 |
+| **启用开关** | `.dshUi_switch` | 临时停用当前样式表的胶囊 | 已实现 |
 | **编辑容器** | `.dshCc_shell` | 圆角 12px 的大框：表头 / 正文 / 状态行三段同框 | 已实现 |
 | **编辑表头** | — | 容器顶部：文件名 + 徽章 + 开关 | 已实现 |
 | **编辑正文** | `.dshCc_main` | 容器中间那一块 | 已实现 |
@@ -86,7 +86,7 @@
 ## A2. 壁纸（插件详情页里的那一节）
 
 壁纸的**控件本体**挂在**插件详情页**（插件管理器 → `dsh-custom-css`）里，是**一节**
-（`.dshWp_section`）里的一块面板（`.dshWp_root`）。**设置行里只有一行链接**
+（`.dshUi_section`）里的一块面板（`.dshWp_root`）。**设置行里只有一行链接**
 （`.dshCc_wallpaperLinkRow`），点它跳到这一节 —— 见文末「设置行里的入口」。
 
 > 它曾经在设置行里挂过**整份面板**（`.dshCc_wallpaperBlock`），**已删除**。下面这张表里
@@ -94,20 +94,20 @@
 
 | 名字 | 标识（代码 / 选择器） | 说明 | 状态 |
 | --- | --- | --- | --- |
-| **壁纸节** | `WallpaperSection` · `.dshWp_section` | 插件详情页里这一整节（标题 + 说明 + 面板 + 事实） | 已实现 |
-| **壁纸标题** | `.dshWp_sectionTitle` | 节标题「自定义壁纸」（14px/500，跟插件管理器自己的 section 同规格） | 已实现 |
-| **壁纸说明** | `.dshWp_desc` | 标题下那一句（讲图片存在哪、浓度是干什么的） | 已实现 |
-| **壁纸事实** | `.dshWp_facts` | 节底部的 `dl`：图片与记录 / 上限 / 与皮肤的关系 | 已实现 |
+| **壁纸节** | `WallpaperSection` · `.dshUi_section` | 插件详情页里这一整节（标题 + 说明 + 面板 + 事实） | 已实现 |
+| **壁纸标题** | `.dshUi_sectionTitle` | 节标题「自定义壁纸」（14px/500，跟插件管理器自己的 section 同规格） | 已实现 |
+| **壁纸说明** | `.dshUi_desc` | 标题下那一句（讲图片存在哪、浓度是干什么的） | 已实现 |
+| **壁纸事实** | `.dshUi_facts` | 节底部的 `dl`：图片与记录 / 上限 / 与皮肤的关系 | 已实现 |
 | **壁纸面板** | `WallpaperPanel` · `.dshWp_root` | 控件本体：预览列 + 四行控件 | 已实现 |
 | **壁纸预览** | `.dshWp_preview`（在 `.dshWp_previewCol` 里） | 左（窄时在上）那块 16:9 的图，底下盖一层界面浓度 | 已实现 |
 | **预览说明** | `.dshWp_previewNote` | 预览下面那行小字：预览里压着的那层就是「界面浓度」 | 已实现 |
-| **选择图片钮** | `.dshCc_btn`（`rowButton`） | `选择图片…`；已有图时写 `更换图片`，旁边多一个 `移除` | 已实现 |
-| **填充下拉** | `.dshCc_select`（`rowChoice`） | 铺满 / 完整 · 留边 / 拉伸 · 填满 / 平铺 | 已实现 |
-| **界面浓度滑块** | `.dshWp_slider`（`aria-label` 为「界面底色浓度…」） | 0–60%，越小壁纸越明显 | 已实现 |
-| **明暗滑块** | `.dshWp_slider`（`aria-label` 为「壁纸明暗」） | −60%…+60% 的 `filter: brightness()` | 已实现 |
+| **选择图片钮** | `.dshUi_button`（`ui.button`） | `选择图片…`；已有图时写 `更换图片`，旁边多一个 `移除` | 已实现 |
+| **填充下拉** | `.dshUi_choice`（`ui.choice`） | 铺满 / 完整 · 留边 / 拉伸 · 填满 / 平铺 | 已实现 |
+| **界面浓度滑块** | `.dshUi_slider`（`aria-label` 为「界面底色浓度…」） | 0–60%，越小壁纸越明显 | 已实现 |
+| **明暗滑块** | `.dshUi_slider`（`aria-label` 为「壁纸明暗」） | −60%…+60% 的 `filter: brightness()` | 已实现 |
 | **用过的** | `.dshWp_gallery` · `.dshWp_thumb` | 宿主上还留着的图，每个叫**壁纸缩略图** | 已实现 |
 | **图片文件夹** | `.dshWp_path` + 「重新读取」钮 | 显示 `.wallpapers/` 目录，并可重新列出「用过的」 | 已实现 |
-| **壁纸状态行** | `.dshWp_status` | 「已保存」/「正在保存…」/ 错误；皮肤覆盖令牌时的说明另起一行 `.dshWp_hint` | 已实现 |
+| **壁纸状态行** | `.dshUi_status` | 「已保存」/「正在保存…」/ 错误；皮肤覆盖令牌时的说明另起一行 `.dshUi_hint` | 已实现 |
 
 > 面板里的**壁纸记录**指宿主上那份 `wallpaper.json.css`（一张普通样式表文件，内容恰好是 JSON），
 > 不是界面元素的名字，但代码与文档里都用这个词，不再叫它「配置文件」或「设置文件」。
@@ -119,27 +119,27 @@
 | --- | --- | --- | --- |
 | **设置节** | `SettingsSection` · `section[data-dsh-wallpaper="settings-section"]` | 插件详情页里「壁纸设置」这一整节（order 21，排在壁纸节之后） | 已实现 |
 | **设置面板** | `SettingsPanel` · `div[data-dsh-wallpaper="settings"]` | 八行控件本体，分「壁纸」与「编辑器」两组 | 已实现 |
-| **分组标题** | `.dshWp_group` | 面板里的分组标题（目前只有「编辑器」一条） | 已实现 |
-| **轮换下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「壁纸轮换间隔」） | 关 / 5 分钟 / 30 分钟 / 每小时 / 每天 | 已实现 |
-| **遮罩滑块** | `.dshWp_slider`（`aria-label` 为「壁纸遮罩浓度」） | 0–80%，压在图片上的暗色层 | 已实现 |
-| **模糊滑块** | `.dshWp_slider`（`aria-label` 为「壁纸模糊半径」） | 0–24px 的 `blur()` | 已实现 |
-| **角落时间开关** | `.dshCc_switch`（`rowSwitch`，`aria-label` 为「在壁纸上显示时间」） | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
-| **保存延迟下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「样式表保存延迟」） | 200ms / 400ms / 1s / 3s | 已实现 |
-| **校验下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「格式校验严格度」） | 语法 + 变量体检 / 只查语法 / 关闭校验 | 已实现 |
-| **行号开关** | `.dshCc_switch`（`rowSwitch`，`aria-label` 为「显示编辑器行号」） | 关掉时给 `.dshCc_row` 加 `.dshCc_noGutter`（**隐藏**，不卸载） | 已实现 |
-| **Tab 宽度下拉** | `.dshCc_select`（`rowChoice`，`aria-label` 为「Tab 宽度（空格数）」） | 2 / 4 / 8 空格；Tab 键与「格式化」都用它 | 已实现 |
-| **数据分组** | `.dshWp_group`「数据」 | 「导出全部」「重置插件」两个动作 | 已实现 |
-| **导出全部** | `.dshCc_btn`（`rowButton`） | `GET /export` → 下载一个带时间戳的 JSON | 已实现 |
-| **重置插件** | `.dshCc_btn`（`rowButton`，两步确认） | `POST /archive-and-reset` → 归档到 `.backup/<时间戳>/` | 已实现 |
-| **关于分组** | `.dshWp_group`「关于」 + `.dshWp_facts` | 版本 / 目录 / 宿主 / 链接四行事实（`dt`+`dd`，与壁纸节同一形状） | 已实现 |
-| **文档链接** | `.dshWp_link` | 「仓库」「文档」两个外链（`--dsw-alias-state-business-primary`） | 已实现 |
+| **分组标题** | `.dshUi_group` | 面板里的分组标题（目前只有「编辑器」一条） | 已实现 |
+| **轮换下拉** | `.dshUi_choice`（`ui.choice`，`aria-label` 为「壁纸轮换间隔」） | 关 / 5 分钟 / 30 分钟 / 每小时 / 每天 | 已实现 |
+| **遮罩滑块** | `.dshUi_slider`（`aria-label` 为「壁纸遮罩浓度」） | 0–80%，压在图片上的暗色层 | 已实现 |
+| **模糊滑块** | `.dshUi_slider`（`aria-label` 为「壁纸模糊半径」） | 0–24px 的 `blur()` | 已实现 |
+| **角落时间开关** | `.dshUi_switch`（`ui.switch`，`aria-label` 为「在壁纸上显示时间」） | 右下角时钟；`.dshWp_clock` 是它落在页面上的那个元素 | 已实现 |
+| **保存延迟下拉** | `.dshUi_choice`（`ui.choice`，`aria-label` 为「样式表保存延迟」） | 200ms / 400ms / 1s / 3s | 已实现 |
+| **校验下拉** | `.dshUi_choice`（`ui.choice`，`aria-label` 为「格式校验严格度」） | 语法 + 变量体检 / 只查语法 / 关闭校验 | 已实现 |
+| **行号开关** | `.dshUi_switch`（`ui.switch`，`aria-label` 为「显示编辑器行号」） | 关掉时给 `.dshCc_row` 加 `.dshCc_noGutter`（**隐藏**，不卸载） | 已实现 |
+| **Tab 宽度下拉** | `.dshUi_choice`（`ui.choice`，`aria-label` 为「Tab 宽度（空格数）」） | 2 / 4 / 8 空格；Tab 键与「格式化」都用它 | 已实现 |
+| **数据分组** | `.dshUi_group`「数据」 | 「导出全部」「重置插件」两个动作 | 已实现 |
+| **导出全部** | `.dshUi_button`（`ui.button`） | `GET /export` → 下载一个带时间戳的 JSON | 已实现 |
+| **重置插件** | `.dshUi_button`（`ui.button`，两步确认） | `POST /archive-and-reset` → 归档到 `.backup/<时间戳>/` | 已实现 |
+| **关于分组** | `.dshUi_group`「关于」 + `.dshUi_facts` | 版本 / 目录 / 宿主 / 链接四行事实（`dt`+`dd`，与壁纸节同一形状） | 已实现 |
+| **文档链接** | `.dshUi_link` | 「仓库」「文档」两个外链（`--dsw-alias-state-business-primary`） | 已实现 |
 
 > 这一节的标签与滑块的 `aria-label` 都在 `WALLPAPER_SETTING_LABELS` 里，一处定义、两处使用
 > （看得见的字与读屏器听到的字不是同一句，所以两个都要写）。
 >
-> **控件全是设置行那一套自绘的**：`.dshCc_btn`（`rowButton`）、`.dshCc_switch`（`rowSwitch`）、
-> `.dshCc_select`（`rowChoice`，底层是行里的 `Dropdown`）、`.dshCc_languageBadge`（`rowBadge`）、
-> `.dshCc_input`（URL 文本框）。组件库那一路已在 0.3.8 撤回，见 [开发](./development.md) 的
+> **控件全是设置行那一套自绘的**：`.dshUi_button`（`ui.button`）、`.dshUi_switch`（`ui.switch`）、
+> `.dshUi_choice`（`ui.choice`，底层是行里的 `Dropdown`）、`.dshUi_badge`（`ui.badge`）、
+> `.dshUi_field`（URL 文本框）。组件库那一路已在 0.3.8 撤回，见 [开发](./development.md) 的
 > 「控件只有一套」。`.dshWp_btn` / `.dshWp_select` / `.dshWp_text` / `.dshWp_switch*` 都已不存在。
 
 ### 设置行里的入口

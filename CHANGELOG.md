@@ -2,6 +2,32 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.3.9 — UI 组件库（`ui`）+ 状态补齐
+
+界面元素全部收进 `lib/client.js` 里的一个 `ui` 对象，类名统一成 `dshUi_*`。加功能只调用
+`ui.*`，不再手写控件结构 —— `tests/audit-ui.mjs` 会拒绝绕过。
+
+**组件**（详见 [docs/ui-kit.md](./docs/ui-kit.md)）：
+
+| 类别 | 组件 |
+| --- | --- |
+| 控件 | `ui.button` · `ui.switch` · `ui.choice` · `ui.field` · `ui.slider` · `ui.link` · `ui.badge` |
+| 行布局 | `ui.row` · `ui.group` · `ui.hint` · `ui.value` · `ui.facts` |
+| 反馈 | `ui.status`（idle/busy/ok/error）· `ui.empty` |
+| 小节 | `ui.section`（标题 + 徽标 + 说明 + 内容） |
+
+**新补的状态**：
+
+- **busy**：按钮转圈（纯 CSS、`prefers-reduced-motion` 下停转）+ 禁用 + `aria-busy`；
+  「导出全部 / 重置插件 / 更换图片」在对应操作进行时用它。
+- **error / ok**：状态行四态化，带 `role=status` + `aria-live=polite` —— 变化会被念出来。
+- **empty**：虚线框空态，替代「把空状态写进状态行」的做法（壁纸面板那句「还没有壁纸」）。
+- **invalid**：字段的 `aria-invalid` 与错误说明由同一个布尔决定（`ui.field({ invalid, message })`）。
+- **slider**：`onInput`（拖动预览）+ `onCommit`（手势结束落盘）分离，读数由 `ui.value` 统一。
+
+原来散在面板里的 61 处手写结构（12 处设置行、7 处按钮、8 处开关、7 处下拉……）都改走它；
+`audit-ui` 检查 30 个组件类，组件库之外出现一处即失败。
+
 ## 0.3.8 — 控件撤回自绘一套（撤掉 0.3.2 的组件库依赖）
 
 0.3.2 把插件详情页的按钮/开关/标签换成了 DSH 组件库（`primitives.Button` 等），而设置界面里

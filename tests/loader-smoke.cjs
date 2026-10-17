@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -925,13 +925,13 @@ async function main() {
     '.dshCc_propGrid>*{min-width:0}',
     '.dshCc_prop{align-items:center;display:flex;gap:8px;min-width:0}',
     'overflow-x:hidden',
-    '.dshCc_select{box-sizing:border-box;',
+    '.dshUi_choice{box-sizing:border-box;',
     '.dshCc_addPropWrap{width:100%;max-width:none}',
     '.dshCc_panel>*{flex:none}',
     '.dshCc_partName{flex:none;padding:1px 8px;border-radius:999px;background:var(--dsw-alias-markdown-tag);',
-    '.dshCc_select{justify-content:space-between}',
+    '.dshUi_choice{justify-content:space-between}',
     // The shipped settings-row spec: 36px tall, radius-md (12px), 14px text.
-    '.dshCc_select{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
+    '.dshUi_choice{box-sizing:border-box;display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:36px;padding:0 14px;',
     'border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-module-platform);',
     // The text fields' last layout declaration: the shared box rule carries height, stroke,
     // fill and type; each of the three keeps only what its own container needs.
@@ -1099,7 +1099,7 @@ async function main() {
     );
   }
   assert.ok(renderedClasses.some(entry => entry.includes('dshCc_menuItemDanger')), '重置 keeps its destructive styling in the menu');
-  assert.ok(renderedClasses.some(entry => entry.includes('dshCc_menuHint')), 'each menu item says what it does');
+  assert.ok(renderedClasses.some(entry => entry.includes('dshUi_menuHint')), 'each menu item says what it does');
   buttonWith(menuView, '更多操作').props.onClick();
   assert.ok(renderedClasses.includes('dshCc_picker'), 'the picker is wrapped for menu positioning');
   assert.ok(renderedClasses.includes('dshCc_trigger'), 'the sheet picker renders as a DSH-style trigger button');
@@ -2766,7 +2766,7 @@ async function main() {
       + ringsAtOne.length + ' at 1px and ' + ringsAtTwo.length + ' at 2px',
     );
     assert.ok(
-      sheet.includes('.dshCc_switch:focus-visible{outline-style:solid;outline-offset:2px}'),
+      sheet.includes('.dshUi_switch:focus-visible{outline-style:solid;outline-offset:2px}'),
       'the switch keeps the 2px offset its own spec uses',
     );
     for (const banned of ['outline:2px solid', 'outline-color:', 'outline-width:']) {
@@ -2780,10 +2780,10 @@ async function main() {
     // colour to the business state. Asserted both ways so the exception stays a decision
     // rather than becoming "some fields lost their focus styling".
     assert.ok(
-      sheet.includes('.dshCc_input:focus-visible,.dshCc_panelField:focus-within,.dshCc_propText:focus-visible{border-color:var(--dsw-alias-state-business-primary)}'),
+      sheet.includes('.dshUi_field:focus-visible,.dshCc_panelField:focus-within,.dshCc_propText:focus-visible{border-color:var(--dsw-alias-state-business-primary)}'),
       'a focused text field shows it by its border colour, the way DSH\'s form fields do',
     );
-    for (const field of ['dshCc_input', 'dshCc_panelField', 'dshCc_propText']) {
+    for (const field of ['dshUi_field', 'dshCc_panelField', 'dshCc_propText']) {
       assert.ok(
         !new RegExp('\\.' + field + ':[a-z-]+\\{[^}]*outline-style').test(sheet),
         'the text field ' + field + ' does not also draw a ring',
@@ -2970,21 +2970,21 @@ async function main() {
     // Switch: 36x20 track with a 16x16 thumb, from `Switch.module.css`. Ours was 30x16 with a
     // 12x12 thumb, and the 14px travel that went with them.
     assert.ok(
-      sheet.includes('.dshCc_switchTrack{position:relative;flex:none;width:36px;height:20px;'),
+      sheet.includes('.dshUi_switchTrack{position:relative;flex:none;width:36px;height:20px;'),
       'the switch track is 36x20, the size DSH\'s Switch uses',
     );
     assert.ok(
-      sheet.includes('.dshCc_switchThumb{position:absolute;top:2px;left:2px;width:16px;height:16px;'),
+      sheet.includes('.dshUi_switchThumb{position:absolute;top:2px;left:2px;width:16px;height:16px;'),
       'and its thumb is 16x16',
     );
     // The checked state paints from the attribute rather than from a class, so the paint
     // cannot disagree with what assistive technology reads (DSH states this outright).
     assert.ok(
-      sheet.includes('.dshCc_switch[aria-checked="true"] .dshCc_switchTrack{background:var(--dsw-alias-brand-primary)}'),
+      sheet.includes('.dshUi_switch[aria-checked="true"] .dshUi_switchTrack{background:var(--dsw-alias-brand-primary)}'),
       'the switch paints its checked state from aria-checked',
     );
     assert.ok(
-      sheet.includes('.dshCc_switchThumb{') && sheet.includes('background:var(--dsw-alias-switch-thumb)'),
+      sheet.includes('.dshUi_switchThumb{') && sheet.includes('background:var(--dsw-alias-switch-thumb)'),
       'the thumb takes DSH\'s thumb token rather than a hard-coded white',
     );
     // Status dot: DSH's StateDot draws a 10px box with a 6px core.
@@ -2994,12 +2994,12 @@ async function main() {
     );
     // The `CSS` badge: DSH's Tag outline tone — a capsule on a border-l4 hairline.
     assert.ok(
-      sheet.includes('.dshCc_languageBadge{flex:none;padding:1px 8px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:999px;'),
+      sheet.includes('.dshUi_badge{flex:none;padding:1px 8px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:999px;'),
       'the language badge is a capsule on DSH\'s tag hairline',
     );
     // And the switch keeps its own focus offset: 2px, where buttons use 1.
     assert.ok(
-      sheet.includes('.dshCc_switch:focus-visible{outline-style:solid;outline-offset:2px}'),
+      sheet.includes('.dshUi_switch:focus-visible{outline-style:solid;outline-offset:2px}'),
       'the switch uses the 2px offset its spec gives it',
     );
   }
@@ -3273,7 +3273,7 @@ async function main() {
     const CONTROL_STEPS = new Set(['28px', '34px', '36px']);
     // Rows that are sized, not controls: the editor's drag-resizable default, and the two
     // menus' scroll ceilings.
-    const SKIP = /dshCc_editorWrap|dshCc_suggest|dshCc_menu\b|dshCc_selectMenu|dshCc_panel\b/;
+    const SKIP = /dshCc_editorWrap|dshCc_suggest|dshUi_menu\b|dshUi_choiceMenu|dshCc_panel\b/;
     const offenders = [];
     for (const rule of sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       const selector = rule[1].trim().split('\n').pop().trim();
@@ -3285,7 +3285,7 @@ async function main() {
     }
     // 16/17/18/20/22/26/10px all legitimately appear as line heights and icon or dot sizes,
     // so the assertion names the two that are controls rather than banning every small number.
-    const controlOffenders = offenders.filter(entry => /conflictBtn|pickInsert|dshCc_btn|dshCc_trigger|dshCc_select\b|dshCc_findBtn|dshCc_findField|dshCc_pickBarBtn/.test(entry));
+    const controlOffenders = offenders.filter(entry => /conflictBtn|pickInsert|dshUi_button|dshCc_trigger|dshUi_choice\b|dshCc_findBtn|dshCc_findField|dshCc_pickBarBtn/.test(entry));
     assert.deepStrictEqual(
       controlOffenders, [],
       'controls are sized on DSH\'s button ladder — off-step: ' + JSON.stringify(controlOffenders),
@@ -3419,10 +3419,10 @@ async function main() {
   {
     const sheet = rowSheets[0].textContent;
     assert.ok(
-      sheet.includes('.dshCc_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:100%;width:max-content;max-width:360px;'),
+      sheet.includes('.dshUi_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:100%;width:max-content;max-width:360px;'),
       'the sheet menu is sized from its trigger and its own content',
     );
-    for (const banned of ['min-width:218px', '.dshCc_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:2']) {
+    for (const banned of ['min-width:218px', '.dshUi_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:2']) {
       assert.ok(
         !sheet.includes(banned),
         'no invented width comes back to the menu (found ' + banned + ')',
@@ -3431,7 +3431,7 @@ async function main() {
     // `max-content` is load-bearing: without it the menu is a block child of the wrapper and
     // stretches to the wrapper's width, which would undo the whole point.
     assert.ok(
-      /\.dshCc_menu\{[^}]*width:max-content/.test(sheet),
+      /\.dshUi_menu\{[^}]*width:max-content/.test(sheet),
       'the menu sizes to its content rather than stretching to its container',
     );
   }
@@ -3566,13 +3566,13 @@ async function main() {
     // That is the third time in this sweep a guard turned out to be satisfiable by an
     // unrelated rule; the fix is always the same: assert the rule, not the fragment.
     const required = [
-      ['menu rows are menu-sized', '.dshCc_menuItem{display:flex;align-items:center;gap:6px;width:100%;min-height:34px;padding:6px 8px;'],
-      ['dropdown rows are menu-sized', '.dshCc_selectItem{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;'],
+      ['menu rows are menu-sized', '.dshUi_menuItem{display:flex;align-items:center;gap:6px;width:100%;min-height:34px;padding:6px 8px;'],
+      ['dropdown rows are menu-sized', '.dshUi_choiceItem{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;'],
       ['menu row type', 'cursor:pointer;font:var(--dsw-font-xs-13);'],
-      ['the list has no row gaps', '.dshCc_selectMenu{z-index:60;box-sizing:border-box;display:flex;flex-direction:column;gap:0;'],
+      ['the list has no row gaps', '.dshUi_choiceMenu{z-index:60;box-sizing:border-box;display:flex;flex-direction:column;gap:0;'],
       ['selected check colour', '.dshCc_menuCheck{flex:none;color:var(--dsw-alias-label-primary)}'],
       ['danger hover fill', '.dshCc_menuItemDanger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger)}'],
-      ['group heading', '.dshCc_selectGroup{position:sticky;top:0;z-index:1;padding:4px 7px 2px;color:var(--dsw-alias-label-tertiary);font-weight:500;'],
+      ['group heading', '.dshUi_choiceGroup{position:sticky;top:0;z-index:1;padding:4px 7px 2px;color:var(--dsw-alias-label-tertiary);font-weight:500;'],
     ];
     for (const [what, declaration] of required) {
       assert.ok(sheet.includes(declaration), what + ' — expected ' + JSON.stringify(declaration));
@@ -3589,11 +3589,11 @@ async function main() {
     // box across ten groups, so a heading does sit over the rows below it — measured, and the
     // fill appears there (`rgba(248,249,250,.94)` at 4px from the list's top edge).
     assert.ok(
-      sheet.includes('.dshCc_selectGroup[data-stuck]{background:var(--dsw-alias-menu-group-header-fill)}'),
+      sheet.includes('.dshUi_choiceGroup[data-stuck]{background:var(--dsw-alias-menu-group-header-fill)}'),
       'the sticky group heading has its fill rule',
     );
     assert.ok(
-      sheet.includes('.dshCc_selectGroup{position:sticky;top:0;'),
+      sheet.includes('.dshUi_choiceGroup{position:sticky;top:0;'),
       'and it is the sticky positioning that gives the fill something to do',
     );
     // The attribute comes from an IntersectionObserver rooted on the list, the way DSH does it,
@@ -3694,7 +3694,7 @@ async function main() {
   // `:focus-visible` (and with the browser's default ring suppressed, the way DSH's own
   // menu does it) walking the list with the arrow keys highlights nothing at all.
   const rowCss = rowSheets[0].textContent;
-  for (const surface of ['dshCc_selectItem', 'dshCc_menuItem']) {
+  for (const surface of ['dshUi_choiceItem', 'dshUi_menuItem']) {
     assert.ok(
       rowCss.includes('.' + surface + ':focus-visible'),
       'the ' + surface + ' shows keyboard focus, not only hover',
@@ -3996,7 +3996,7 @@ async function main() {
 
   // The disabled look itself: one treatment for the row, not a second invention.
   assert.ok(
-    rowSheets[0].textContent.includes('.dshCc_select:disabled{opacity:.4;cursor:not-allowed}'),
+    rowSheets[0].textContent.includes('.dshUi_choice:disabled{opacity:.4;cursor:not-allowed}'),
     'a disabled dropdown looks disabled (opacity + a cursor that says why)',
   );
 
@@ -4011,7 +4011,7 @@ async function main() {
   // attribute object must carry the prop.
   {
     const cssStart = code.indexOf('const ROW_CSS = [');
-    const triggerAt = code.indexOf("className: 'dshCc_select'", cssStart);
+    const triggerAt = code.indexOf("className: 'dshUi_choice'", cssStart);
     assert.ok(triggerAt > 0, 'the dropdown trigger is findable in the source');
     const trigger = code.slice(triggerAt, triggerAt + 700);
     assert.ok(
@@ -4151,7 +4151,7 @@ async function main() {
     'a scroll container with no height ceiling can leave the window — got: ' + JSON.stringify(uncapped),
   );
   assert.ok(
-    [...blocks.keys()].some(selector => selector.includes('dshCc_menu')),
+    [...blocks.keys()].some(selector => selector.includes('dshUi_menu')),
     'the audit actually saw the menu rule — got: ' + JSON.stringify([...blocks.keys()].slice(0, 6)),
   );
 
@@ -6054,7 +6054,7 @@ async function main() {
     'which is disabled while the draft is empty, so there is nothing to submit',
   );
   assert.strictEqual(
-    firstUrlButton.props.className, 'dshCc_btn',
+    firstUrlButton.props.className, 'dshUi_button',
     'and it is the settings row\'s own button, not a second kind of button — className: '
       + String(firstUrlButton.props.className),
   );
@@ -6429,6 +6429,61 @@ async function main() {
     'switching the clock off removes it rather than hiding it — body: ' + probe.bodyList(),
   );
 
+  // --- 23b. the UI kit: one button, one switch, four states ------------------
+  //
+  // The kit is the extension's only control implementation. What a test can hold is what the DOM
+  // says: the class, the attribute that carries each state, and the fact that the panel's buttons
+  // really go through it (the audit forbids the hand-written variant).
+  const kitBoot = await boot({
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: 'C:/css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css' });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}', rev: 1 });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  hookSlots.length = 0;
+  const kitSection = kitBoot.registrations[2].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+  const kitButtons = allNodes(kitSection, 'button');
+  assert.ok(kitButtons.length > 0, 'the section renders buttons');
+  // Every button in the panel is kit-built: either the button (`dshUi_button`), the switch, or
+  // a choice trigger. What matters is that none of them is a hand-written shell.
+  assert.strictEqual(
+    kitButtons.every((node) => String(node.props.className).startsWith('dshUi_')),
+    true,
+    'every button comes from the kit — got: '
+      + JSON.stringify(kitButtons.map((node) => String(node.props.className))),
+  );
+  assert.ok(
+    kitButtons.filter((node) => String(node.props.className).startsWith('dshUi_button')).length >= 2,
+    'including the plain buttons (export / reset)',
+  );
+  // The switch's state lives on `aria-checked`, not on a parallel class.
+  const kitSwitches = kitButtons.filter((node) => String(node.props.role) === 'switch');
+  assert.ok(kitSwitches.length >= 2, 'the section has its two switches');
+  assert.deepStrictEqual(
+    kitSwitches.map((node) => node.props['aria-checked']),
+    [false, true],
+    'with their state on aria-checked (clock off, line numbers on)',
+  );
+  // The busy state is three things at once: disabled, aria-busy, and a spinner node.
+  const busy = kitBoot.mod.__probe.ui.button({ busy: true }, '保存中');
+  assert.strictEqual(busy.props.disabled, true, 'a busy button is disabled');
+  assert.strictEqual(busy.props['aria-busy'], 'true', 'and says it is busy');
+  assert.ok(
+    busy.children.some((child) => child !== null && String(child.props?.className ?? '').includes('dshUi_spinner')),
+    'and carries the spinner',
+  );
+  const idle = kitBoot.mod.__probe.ui.button({}, '保存');
+  // React drops `disabled={false}` from the DOM, so the value here is false rather than absent.
+  assert.strictEqual(idle.props.disabled, false, 'an idle button is not disabled');
+  assert.strictEqual(idle.props['aria-busy'], undefined, 'and says nothing about busy');
+  // The status line announces itself, and its state decides the paint.
+  const liveStatus = kitBoot.mod.__probe.ui.status({ state: 'error', text: '失败了' });
+  assert.strictEqual(liveStatus.props.role, 'status', 'the status line is a live region');
+  assert.strictEqual(liveStatus.props['aria-live'], 'polite', 'politely announced');
+  assert.ok(String(liveStatus.props.className).includes('dshUi_statusBad'), 'and painted as an error');
+
   // --- 24. the data actions -------------------------------------------------
   //
   // The two buttons that touch everything at once. What a case can hold here is the SHAPE of the
@@ -6464,7 +6519,7 @@ async function main() {
   // Walking into the panel therefore measures the harness. What the source can prove is what the
   // two actions are wired to; what the routes do with those calls is the host suite's business.
   for (const needle of [
-    "'dshWp_group'",
+    "'dshUi_group'",
     '导出全部',
     '重置插件',
     '再按一次重置',

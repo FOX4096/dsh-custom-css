@@ -1,6 +1,6 @@
 {
   "name": "dsh-custom-css",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "DSH Web GUI 扩展：设置 → 通用 里的自定义 CSS 编辑器，以及一个不用写 CSS 的自定义壁纸面板。",
   "icon": "./assets/icon.svg",
   "license": "MIT",
@@ -58,7 +58,7 @@
     "compat": "node tests/compat-matrix.mjs",
     "compat:check": "node tests/update-compat.mjs",
     "compat:update": "node tests/update-compat.mjs --write",
-    "audit": "node tests/audit-radii.mjs && node tests/audit-fonts.mjs && node tests/audit-accessible-names.mjs && node tests/audit-docs.mjs && node tests/audit-skin.mjs",
+    "audit": "node tests/audit-radii.mjs && node tests/audit-fonts.mjs && node tests/audit-accessible-names.mjs && node tests/audit-ui.mjs && node tests/audit-docs.mjs && node tests/audit-skin.mjs",
     "audit:duplication": "node tests/audit-duplication.mjs",
     "dev": "node dev/instance.mjs up",
     "dev:alpha": "node dev/instance.mjs up --alpha",
