@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6452,6 +6452,40 @@ async function main() {
   assert.strictEqual(
     probe.bodyList().includes('#' + probe.clockId()), false,
     'switching the clock off removes it rather than hiding it — body: ' + probe.bodyList(),
+  );
+
+  // --- 23c. the account menu follows its trigger -----------------------------
+  //
+  // The menu is a portal on `body` with JS-positioned `left`/`top` (no CSS anchor
+  // positioning), so CSS cannot learn the trigger's width — the plugin measures it. These
+  // assertions cover the measuring function itself: what it copies, and when it refuses.
+  const fakeTrigger = (expanded, width) => ({
+    getAttribute: (name) => (name === 'aria-expanded' ? expanded : null),
+    getBoundingClientRect: () => ({ width }),
+  });
+  const fitMenu = probe.fitMenuToTrigger;
+  const openMenu = { style: {} };
+  assert.strictEqual(
+    fitMenu(openMenu, fakeTrigger('true', 252)),
+    true,
+    'an open menu takes the trigger width',
+  );
+  assert.strictEqual(openMenu.style.width, '252px', 'as a width');
+  assert.strictEqual(openMenu.style.minWidth, '252px', 'and a min-width, so the content cannot shrink it');
+  const closedMenu = { style: {} };
+  assert.strictEqual(
+    fitMenu(closedMenu, fakeTrigger('false', 252)),
+    false,
+    'a closed trigger is not copied — the menu belongs to nothing',
+  );
+  assert.strictEqual(closedMenu.style.width, undefined, 'and the menu is left alone');
+  const zeroMenu = { style: {} };
+  assert.strictEqual(fitMenu(zeroMenu, fakeTrigger('true', 0)), false, 'a zero-width trigger is ignored');
+  assert.strictEqual(fitMenu(null, fakeTrigger('true', 252)), false, 'no menu, nothing to do');
+  assert.strictEqual(
+    fitMenu({ style: {} }, null),
+    false,
+    'no trigger, nothing to do',
   );
 
   // --- 23b. the UI kit: one button, one switch, four states ------------------

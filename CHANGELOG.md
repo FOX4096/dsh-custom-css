@@ -2,6 +2,22 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.3.12 — 弹出菜单跟随触发器宽度（侧栏「更多」按钮）
+
+侧栏左下「更多」的按钮宽度随侧栏走，但它的下拉菜单是挂到 body 的 **portal**：inline 只给
+`left` / `top`，没有 CSS 锚点定位（`position-anchor: normal`、触发器没有 `anchor-name`），
+所以 CSS 量不到按钮宽度 —— 只能写死像素，侧栏一变就错位。
+
+现在由插件补：`installMenuWidthFollower()` 用 MutationObserver 盯着新出现的
+`[role="menu"]`，量一下设置区里那个已展开的触发器，把菜单的 `width` / `min-width` 设成同一个
+值；窗口 resize 时如果菜单还开着，再量一次。只认设置区里的触发器，不碰别的弹出层。
+
+- 实测：默认侧栏触发器和菜单都是 252px；把触发器临时改成 300px，菜单跟着 300px（inline width）
+- 不做成纯 CSS 的原因：`anchor-size(width)` 要 `anchor-name` + `position-anchor` 成对出现，
+  而菜单的定位是 JS 算的 left/top，不参与锚点定位 —— 那段 JS 不归我们改
+- 测试：loader-smoke 新增一组（展开时复制宽度 / 收起时不复制 / 零宽忽略 / 空菜单与空触发器）
+- 用户的 custom.css 里那条写死的 `[role=menu]{width:252px}` 已换成说明注释
+
 ## 0.3.11 — 安静：全新安装不再在控制台报两个 404
 
 装了插件、但**还没设过壁纸 / 改过设置**时，每次打开页面控制台都会出现两条：
