@@ -5899,6 +5899,19 @@ async function main() {
     'the interface keeps less of its own colour the more the slider is raised — '
       + [0, 30, 60].map(value => value + '→' + baseAlpha(value) + '%').join(', '),
   );
+  // The floor is the point: at 0 the interface must FULLY cover the picture. The old formula
+  // multiplied a 14% base by the slider, so 0 left 14% of the colour and the picture showed
+  // through — text sat on the photograph and could not be read. Reported from a real window.
+  assert.strictEqual(baseAlpha(0), 100, 'at 0 the shell is opaque — the picture is fully covered');
+  assert.ok(
+    baseAlpha(26) >= 70,
+    'and the default leaves the shell readable — 26 → ' + baseAlpha(26) + '%',
+  );
+  assert.ok(
+    baseAlpha(60) > 0,
+    'while the maximum keeps a floor of its own colour rather than going fully transparent — 60 → '
+      + baseAlpha(60) + '%',
+  );
   assert.strictEqual(baseAlpha(999), baseAlpha(60), 'and a value past the top is clamped to the top');
   assert.strictEqual(baseAlpha(-40), baseAlpha(0), 'a value past the bottom is clamped to the bottom');
   assert.ok(
