@@ -483,6 +483,16 @@ async function run(options) {
 			result.selectors.push(await measureSelector(session, selector));
 		}
 
+		// 一个都没量到，说明插件根本没被加载（或者设置没打开）—— 这不是「阈值还没定」，
+		// 是这次采集没有意义。0 命中让它红，部分命中只记一行：CI 交一张空表比红更糟，
+		// 因为空的几何看起来和「没变化」一模一样。
+		const missed = result.selectors.filter(entry => entry.found !== true);
+		if (missed.length > 0) log('info', `没量到：${missed.map(entry => entry.selector).join('、')}`);
+		if (options.selectors.length > 0 && missed.length === options.selectors.length) {
+			log('error', '请求的选择器一个都没命中 —— 插件大概没加载，这次采集没有意义。');
+			process.exitCode = 1;
+		}
+
 		// 截图：视觉确认用。结论不靠它 —— PNG 是给人看的，数字是给判断用的。
 		if (options.shot) {
 			const name = `probe-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
@@ -629,10 +639,15 @@ async function openSettings(session, result) {
 	await sleep(900);
 
 	const panel = await session.evaluate(`(() => {
-		const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]');
-		return dialog === null
-			? { present: false }
-			: { present: true, text: (dialog.innerText || '').slice(0, 120) };
+		const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+			.filter(node => node.getBoundingClientRect().width > 0);
+		if (dialogs.length === 0) return { present: false };
+		// 页面上可能还压着别的对话框（首启通知之类），所以认「正文里有设置」的那个；
+		// 认不出来再退到最后一个 —— 后开的在上面。CI 第一次跑就记成了「Preview Notice
+		// 已打开」，而设置其实就在它下面开着。
+		const textOf = (node) => (node.innerText || '').trim();
+		const target = dialogs.find(node => /设置|Settings/i.test(textOf(node))) ?? dialogs[dialogs.length - 1];
+		return { present: true, text: textOf(target).slice(0, 120) };
 	})()`);
 	step('面板', panel.present ? `已打开，正文开头：${String(panel.text).split('\\n')[0]}` : '点了入口但没看到对话框');
 	return panel.present;
