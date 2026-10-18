@@ -2,29 +2,34 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
-## 0.3.10 — 修宿主：聊天里的图片压住后面内容
+## 0.3.10 — 修：聊天里的图片压住后面内容（扩展冲突的补丁）
 
-**这是「用扩展修 DSH」的一次性补丁**，不是这个插件自己的 UI 问题。
+**归因**：不是 DSH 本身，是另一个扩展 **`dsh-smooth-stream` 0.7.0** 的样式表。
 
-现象：消息里的图片会盖住下一块内容（256px 图标压住下面的 callout），看着像图片样式写坏了。
+判别方法（3080 真机，逐张样式表二分，本插件补丁关闭）：以 217 张扩展样式表为集合，
+每步只量「图片外层 `<p>` 的高度」。
 
-根因在包图片的那个 `<button>`：DSH 把 markdown 图片渲染成
-`<p><button class="_imageButton_…"><img class="_image_…" loading="lazy"></button></p>`，
-该按钮是 `display:inline-block` 且不贡献高度。同页实测：
+| 打开的样式表 | `<p>` 高 |
+| --- | --- |
+| 全部关闭 | 256px（DSH 自己是对的） |
+| 只开 `dsh-smooth-stream/TypewriterAssistantNodeView.module.css` | 19px（行高，图 256px 溢出） |
+| off/on 交替 ×3 | 256 / 19 稳定复现 |
 
-| 状态 | 按钮 display | `<p>` 高 | 图片高 |
-| --- | --- | --- | --- |
-| 修复前 | `inline-block` | 19px | 256px（溢出） |
-| 修复后 | `block` | 256px | 256px |
+机制：smooth-stream 为了折叠动画，把消息体放进 `display:grid; grid-template-rows:1fr`
+且给子项 `min-height:0` 的容器，于是图片那个 `<p>` 能被压到行高，图就画在盒子外面、
+盖住下一块内容。
 
-补丁只有一条规则，注入成独立的 `<style data-plugin-css=\"dsh-custom-css/host-fix.css\">`：
+**补丁**（独立 `<style data-plugin-css="dsh-custom-css/host-fix.css">`）：
 
 ```css
 [class*="_imageButton_"] { display: block; width: fit-content; max-width: 100% }
 ```
 
-选择器用模块名前缀而不是完整类名（哈希每构建都变）；`width: fit-content` 不能省，否则按钮撑满整行。
-DSH 修好之后这段可整块删除。详见 [已知坑](./docs/known-issues.md)。
+让包图片的按钮成为块级元素，那个 `<p>` 的高度只能由图片决定 —— 上游哪个扩展布局出岔子都不再溢出。
+`width: fit-content` 不能省，否则按钮撑满整行。真正修法在 smooth-stream 那边；它修好后这段可整块删除。
+
+> 更正：0.3.10 最初把原因写成「DSH 的 inline-block 不贡献高度」，那是错的 ——
+> 全部扩展关掉时同一个 inline-block 的 `<p>` 是 256px。详见 [已知坑](./docs/known-issues.md)。
 
 ## 0.3.9 — UI 组件库（`ui`）+ 状态补齐
 

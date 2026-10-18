@@ -27,22 +27,33 @@
 | **窄栏里 `flex-wrap` 会悄悄把布局撑坏** | 设置对话框右侧开一个面板后只剩 198px：260px 的预览单独占一行，控件列被压到 0 宽又各自溢出 96–124px，整块涨到 691px 高 | 用 `container-type: inline-size` + `@container` 在阈值处切换方向（宽了并排、窄了堆叠），并且**窄时每一行自己也要改成纵向** —— 96px 的标签 + 滑块放不进同一行 |
 | 跨代插件 | 插件加载失败：`client-modules: require("…") missed the module table` | 那是给**旧一代 DSH** 编译的 bundle：它把平台包硬写进了产物（如 `@deepseek-ai/dsh-client-runtime/client`、`dsh-ui-primitives`），而当前代已删掉这些包。只能等插件作者更新；本插件运行时 require 数为 0，不受这类漂移影响 |
 
-### 宿主缺陷：聊天气泡里的图片压住后面的内容（本插件已打补丁）
+### 扩展冲突：聊天里的图片压住后面的内容（本插件已打补丁）
 
 **现象**：消息里的图片会盖住下一块内容（截图里那张 256px 图标压住了下面的 callout），看起来像「图片样式写错了」。
 
-**根因不在图片，在包图片的那个 `<button>`**。DSH 把 markdown 图片渲染成：
+**归因：是另一个扩展 `dsh-smooth-stream` 0.7.0，不是 DSH 本身。** 判别方法是「逐张样式表二分」——
+在 3080 真机上关掉本插件的补丁，然后以 217 张扩展样式表为集合做二分，每步只量一个数：图片外层 `<p>` 的高度。
 
-```html
-<p><button class="_imageButton_1ypvv_446"><img class="_image_1ypvv_287" loading="lazy"></button></p>
+| 打开的样式表 | 图片 `<p>` 高度 | 结论 |
+| --- | --- | --- |
+| 全部关闭 | **256px** | DSH 自己布局是对的 |
+| 只打开 `dsh-smooth-stream/TypewriterAssistantNodeView.module.css` | **19px**（行高） | 就是这张表 |
+| 交替 off/on ×3 | 256 / 19 稳定复现 | 可确定归因 |
+| 本插件补丁开启 | **256px** | 补丁把它盖住了 |
+
+它压塌的方式：smooth-stream 为了让回复「流式展开 / 折叠」有动画，把消息体放进了
+
+```css
+.disclosureContent { display: grid; grid-template-rows: 1fr; overflow: hidden }
+.disclosureContent > * { min-height: 0 }          /* 允许子项缩到内容以下 */
 ```
 
-那个按钮是 `display:inline-block`，而它在该 `<p>` 里**不贡献高度**。实测（同一页三张 256px 图）：
+再配合它自己逐帧钉住的高度。`min-height: 0` 一给，那个 `<p>` 就可以被压到行高（19px），
+而里面的图片仍是 256px —— 于是图画在自己的盒子外面，盖住下一块内容。
 
-| 状态 | 按钮 display | `<p>` 高度 | 图片高度 |
-| --- | --- | --- | --- |
-| 修复前 | `inline-block` | **19px** | 256px（溢出） |
-| 加上 `display:block` | `block` | **256px** | 256px |
+> 我最初把这判成「DSH 的 `<button>` 是 inline-block、不贡献高度」。**那个结论是错的**：
+> 全部扩展关掉时，同一个 inline-block 的 `<p>` 稳稳是 256px。教训是「A/B 只在同一个可控
+> 变量上做」—— 第一次实验里其他 216 张样式表都开着。
 
 **本插件的补丁**（`lib/client.js` 的 `HOST_FIX_CSS`，注入成独立的 `<style data-plugin-css="dsh-custom-css/host-fix.css">`）：
 
@@ -50,9 +61,12 @@
 [class*="_imageButton_"] { display: block; width: fit-content; max-width: 100% }
 ```
 
+让包图片的按钮成为块级元素，那个 `<p>` 的高度就只能由图片决定 —— 不管上游是哪个扩展布局出岔子，
+图都不会再盖住下文。
+
 选择器用**模块名前缀**（`_imageButton_`）而不是完整类名：哈希后缀每次构建都变，而这段来自 CSS module 文件名，跨版本稳定；DSH 哪天改了这个模块名，规则会静默失效（退回原状），不会误伤别的元素。`width: fit-content` 不能省 —— 只写 `display:block` 会让按钮撑满整行、点整行都开大图。
 
-**副作用**：无（只在 markdown 图片按钮上生效）。DSH 修好这件事之后，这段可以整块删掉。
+**副作用**：无（只在 markdown 图片按钮上生效）。真正的修法在 smooth-stream 那边（别让可折叠容器把消息内容压到行高），它修好之后这段可以整块删掉。
 
 
 > 最后一条的判别方式见 [兼容性 · 两种失效模式的判别](./compat.md#两种失效模式的判别)。
