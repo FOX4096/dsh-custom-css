@@ -2,6 +2,30 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.3.11 — 安静：全新安装不再在控制台报两个 404
+
+装了插件、但**还没设过壁纸 / 改过设置**时，每次打开页面控制台都会出现两条：
+
+```
+GET /dsh-custom-css/read?name=wallpaper.json.css 404
+GET /dsh-custom-css/read?name=settings.json.css 404
+  bootstrapWallpaper → readSheet → api
+```
+
+功能上没问题（读不到就用默认值），但这两条是浏览器对失败请求的日志，会让人以为插件坏了。
+
+改法：`/read` 接受 `optional=1`，文件不存在时回答 `{ok:true, absent:true, css:""}` 而不是 404；
+壁纸与设置的两个 bootstrap 都带上这个参数。编辑器不传，所以「打开一个不存在的样式表」仍然是硬 404。
+
+- host：`/read` 新增 `optional` 参数（`lib/index.js`）
+- 浏览器：`readSheet(name, { optional })` 返回 `{css, rev, absent}`；两个记录读取都走 optional
+- 兼容旧 host：旧版不认这个参数仍会 404，客户端把 optional 读的 404 当作 absent（功能不受影响，
+  只有控制台那两条日志要等重启 host 才消失）
+- 验证：dev 实例（新 host）上 `read?…&optional=1` → 200 `{absent:true}`；页面加载的三条 read
+  请求全部 200（wallpaper / settings 带 optional，custom.css 不带）
+- 测试：host-api-smoke 新增 4 条断言（无参数仍 404 / 有参数 200 absent / css 为空串 / 非记录名同样适用）；
+  loader-smoke 断言两个记录都以 `optional=1` 读取
+
 ## 0.3.10 — 修：聊天里的图片压住后面内容（扩展冲突的补丁）
 
 **归因**：不是 DSH 本身，是另一个扩展 **`dsh-smooth-stream` 0.7.0** 的样式表。

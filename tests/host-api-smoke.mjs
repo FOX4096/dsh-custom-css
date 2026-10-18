@@ -611,6 +611,19 @@ assert.strictEqual(recordDelete.status, 400, 'nor deleted as one: the wallpaper 
 const recordStillReads = await call('GET', '/dsh-custom-css/read?name=wallpaper.json.css');
 assert.strictEqual(recordStillReads.status, 200, 'and it is still readable, which is what the panel needs');
 
+// A record that has never been written is not an error, and asking for it must not produce one:
+// a 404 on every page load is logged by the browser as an error and trains people to ignore the
+// console. `optional=1` answers "absent"; without it the route still fails hard.
+const missingPlain = await call('GET', '/dsh-custom-css/read?name=settings.json.css');
+assert.strictEqual(missingPlain.status, 404, 'a missing record without the flag is still a 404');
+const missingOptional = await call('GET', '/dsh-custom-css/read?name=settings.json.css&optional=1');
+assert.strictEqual(missingOptional.status, 200, 'with the flag it is an answer, not a failure');
+assert.strictEqual(missingOptional.payload.absent, true, 'and it says the record is absent');
+assert.strictEqual(missingOptional.payload.css, '', 'with an empty body rather than an error');
+const missingSheetOptional = await call('GET', '/dsh-custom-css/read?name=nope.css&optional=1');
+assert.strictEqual(missingSheetOptional.status, 200, 'the flag is name-agnostic: a missing sheet also answers absent');
+assert.strictEqual(missingSheetOptional.payload.absent, true, 'so the caller can tell it apart from empty text');
+
 // --- about -------------------------------------------------------------------
 //
 // The version the About section shows comes from the package that is actually installed, not from a

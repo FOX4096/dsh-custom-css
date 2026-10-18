@@ -905,6 +905,16 @@ async function main() {
   assert.ok(host.calls.some(call => call.url === '/dsh-custom-css/list'), 'bootstrap lists sheets');
   assert.ok(host.calls.some(call => call.url.startsWith('/dsh-custom-css/read')), 'bootstrap reads the active sheet');
 
+  // The two records are read through `/read` too, but with `optional=1`: on a fresh install they do
+  // not exist, and a plain GET shows up in DevTools as a 404 error on every page load. Asserting the
+  // URL (not just "some read happened") is what keeps that flag from being quietly dropped.
+  const recordReads = host.calls.map(call => String(call.url)).filter(url => url.includes('optional=1'));
+  assert.deepStrictEqual(
+    recordReads.map(url => url.split('name=')[1].split('&')[0]).sort(),
+    ['settings.json.css', 'wallpaper.json.css'],
+    'both records are read as optional — got: ' + JSON.stringify(recordReads),
+  );
+
   const rowSheets = host.styleTags.filter(element => element.dataset.pluginCss === 'dsh-custom-css/CustomCssRow.module.css');
   assert.strictEqual(rowSheets.length, 1, 'the row stylesheet is injected exactly once');
   assert.ok(rowSheets[0].textContent.includes('--dsw-alias-label-primary'), 'row styles consume DSH tokens');
