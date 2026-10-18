@@ -15,6 +15,15 @@ shared/base.css  ──(shared/sync.mjs)──▶  lib/client.js 的 SHARED_BASE
 
 ---
 
+## 两张公共表
+
+除了这份「样式基座」，扩展自己的控件（`dshUi_*`）也独立成一张表 `Base.module.css` ——
+它由 `ROW_CSS` 里拆出来，只留桌面控件与行布局，编辑器自己只剩 `dshCc_*`。注入顺序：
+
+```
+shared-base.css（令牌） → Base.module.css（控件） → CustomCssRow.module.css（编辑器） → Wallpaper.module.css（面板）
+```
+
 ## 里面有什么
 
 | 内容 | 说明 |

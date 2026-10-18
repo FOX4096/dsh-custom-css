@@ -931,6 +931,16 @@ async function main() {
   assert.strictEqual(rowSheets.length, 1, 'the row stylesheet is injected exactly once');
   assert.ok(rowSheets[0].textContent.includes('--dsw-alias-label-primary'), 'row styles consume DSH tokens');
 
+  // 控件（dshUi_*）已抽到公共层（Base.module.css），编辑器只留 dshCc_*。断言按
+  // 「扩展自己的 CSS」整体看，同时保留每张表各自的完整性检查。
+  const componentSheets = host.styleTags.filter(element => element.dataset.pluginCss === 'dsh-custom-css/Base.module.css');
+  assert.strictEqual(componentSheets.length, 1, 'the component stylesheet is injected exactly once');
+  assert.ok(
+    componentSheets[0].textContent.includes('.dshUi_button'),
+    'and carries the shared control styles',
+  );
+  const ownSheet = componentSheets[0].textContent + rowSheets[0].textContent;
+
   // The host fix: a one-rule sheet that makes DSH's markdown image buttons block-level.
   // It is a patch for the HOST, not for this plugin's UI, so it gets its own tag — one that
   // can be found (and removed) without touching the two sheets above.
@@ -949,7 +959,7 @@ async function main() {
   // A stylesheet with an unbalanced brace is dropped from that point on by the
   // browser while still looking fine as text — an orphaned declaration block from
   // a deleted selector did exactly that once. Count the braces too.
-  const sheetText = rowSheets[0].textContent;
+  const sheetText = ownSheet;
   const opens = (sheetText.match(/\{/g) ?? []).length;
   const closes = (sheetText.match(/\}/g) ?? []).length;
   assert.strictEqual(opens, closes, 'the injected stylesheet has balanced braces');
@@ -974,7 +984,7 @@ async function main() {
     // fill and type; each of the three keeps only what its own container needs.
     '.dshCc_propText{flex:1;min-width:0;max-width:100%;font-family:var(--ds-font-family-code)}',
   ]) {
-    assert.ok(rowSheets[0].textContent.includes(guard), 'overflow guard is present: ' + guard);
+    assert.ok(ownSheet.includes(guard), 'overflow guard is present: ' + guard);
   }
 
   // --- radii come from DSH's ladder, not from literals ----------------------
@@ -995,7 +1005,7 @@ async function main() {
   //   • 50%   — a round dot (status dot, switch thumb)
   //   • 999px — a capsule (the switch and its track); no step expresses half the height
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     const allowedShapes = ['2px', '3px', '4px', '6px', '8px', '50%', '999px'];
     const literals = [...sheet.matchAll(/border-radius:([^;}]+)/g)]
       .map(match => match[1].trim())
@@ -1043,7 +1053,7 @@ async function main() {
     '@media (max-width:540px){.dshCc_findLabel{display:none}',
   ];
   for (const guard of boundsGuards) {
-    assert.ok(rowSheets[0].textContent.includes(guard), 'explicit box: ' + guard);
+    assert.ok(ownSheet.includes(guard), 'explicit box: ' + guard);
   }
 
   // The row must actually render. The settings shell turns a thrown render into
@@ -2791,7 +2801,7 @@ async function main() {
   // style and the offset, and never hard-codes a ring colour. Asserting the token names
   // was what made the first version look correct while it was pinning the colour.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     // Two offsets, because DSH's own components use two: input-height controls and buttons
     // take 1px, and the switch takes 2px (it is a 20px control, and the ring needs the extra
     // room to clear its capsule). Both are asserted, so neither can silently become the other.
@@ -2839,7 +2849,7 @@ async function main() {
   // DSH paints text on a filled surface with `--dsw-alias-label-primary-foreground`
   // (Button's `.primary`, and the theme defines it per colour scheme).
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     assert.ok(
       sheet.includes('var(--dsw-alias-label-primary-foreground)'),
       'text on a filled surface uses DSH\'s foreground token',
@@ -2862,7 +2872,7 @@ async function main() {
   // here writes through the same Host route the editor debounces into, so a second press
   // during a write is a race rather than a preference.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     // Each assertion names the DECLARATIONS that make the state work, not a substring
     // that happens to appear somewhere. The first version of this guard checked for
     // `dshCc_statusDot[data-state=ongoing]{animation:none`, which is satisfied by the
@@ -2951,7 +2961,7 @@ async function main() {
   // no step, so tokenising them would silently resize them — that belongs to a visible
   // change, not to this one.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     for (const token of ['--dsw-font-s-14', '--dsw-font-xxs-12', '--dsw-font-xs-13']) {
       assert.ok(
         sheet.includes('font:var(' + token + ')'),
@@ -2984,7 +2994,7 @@ async function main() {
   // hypothetical — while writing this, a replace meant for the panel menu landed on the
   // sheet menu instead, so the two disagreed and the guard below is what caught it.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     const fills = [...sheet.matchAll(/background:var\(--dsw-menu-surface-fill\)/g)].length;
     const blurs = [...sheet.matchAll(/backdrop-filter:var\(--dsw-menu-backdrop-filter\)/g)].length;
     assert.strictEqual(
@@ -3003,7 +3013,7 @@ async function main() {
   // Three shapes that had drifted to sizes of their own. Each one is asserted with the
   // declaration that carries it, because "the rule exists" is not the same claim.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     // Switch: 36x20 track with a 16x16 thumb, from `Switch.module.css`. Ours was 30x16 with a
     // 12x12 thumb, and the 14px travel that went with them.
     assert.ok(
@@ -3164,7 +3174,7 @@ async function main() {
 
   // --- the highlight toggle's markup and lifecycle --------------------------
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     // The box: the picker's own recipe (fixed, top of the stack, clicks pass through) on the
     // warn step rather than the brand colour, so the two can be told apart when both are up.
     assert.ok(
@@ -3306,7 +3316,7 @@ async function main() {
   // The allow-list below is the full set of heights this sheet may declare for something that
   // is sized like a control. Decoration is not in scope and is skipped by selector.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     const CONTROL_STEPS = new Set(['28px', '34px', '36px']);
     // Rows that are sized, not controls: the editor's drag-resizable default, and the two
     // menus' scroll ceilings.
@@ -3352,7 +3362,7 @@ async function main() {
   // `999px` is the one literal allowed, because DSH writes capsules that way in its own Tag
   // and Pill stylesheets rather than through a token.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     // Decoration blocks carry percentages (`::after{inset:20%;border-radius:50%}`) and are not
     // corners in the component sense; everything else must resolve through the ladder.
     const bad = [];
@@ -3392,7 +3402,7 @@ async function main() {
   // "elements don't match DSH", and a token audit cannot see it: the value was fine, it was
   // simply the wrong font stack.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     assert.ok(
       sheet.includes('var(--ds-font-family-code)'),
       'monospace text takes DSH\'s code font token',
@@ -3421,7 +3431,7 @@ async function main() {
   // one row renders 34px tall, which is 1 × 26 + 8 — the formula in the layout code. That
   // agreement is what the flip direction depends on, so it is asserted rather than assumed.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     assert.ok(
       sheet.includes('.dshCc_suggest{position:absolute;z-index:120;min-width:164px;max-width:280px;box-sizing:border-box;')
         && sheet.includes('padding:4px;display:flex;flex-direction:column;border:0;border-radius:var(--dsw-radius-lg);'),
@@ -3454,7 +3464,7 @@ async function main() {
   // Verified in the browser: short name → 121px (= the trigger), long name → 282px with no
   // truncation, right edges aligned in both cases, capped at 360px.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     assert.ok(
       sheet.includes('.dshUi_menu{position:absolute;top:calc(100% + 4px);right:0;z-index:100;min-width:100%;width:max-content;max-width:360px;'),
       'the sheet menu is sized from its trigger and its own content',
@@ -3571,7 +3581,7 @@ async function main() {
   // `min-width`, wrapping the children changed the outer width not at all — measured, 256px of
   // overflow remained.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     assert.ok(
       sheet.includes('.dshCc_head{align-items:center;justify-content:space-between;gap:12px;display:flex;flex-wrap:wrap}'),
       'the head wraps rather than pushing the row past the dialog',
@@ -3595,7 +3605,7 @@ async function main() {
   // Asserted with the declarations, not with the class name: a rule that keeps its
   // selector but loses its numbers is exactly the regression this is for.
   {
-    const sheet = rowSheets[0].textContent;
+    const sheet = ownSheet;
     // Every entry names the SELECTOR it is about, not just a declaration. A declaration-only
     // substring is satisfied by any rule that happens to share it — and this pair of menus
     // shares most of its metrics, so `min-height:34px;padding:6px 8px` alone stayed true
@@ -3730,7 +3740,7 @@ async function main() {
   // Both list surfaces give the pointer a fill on hover; without the same fill on
   // `:focus-visible` (and with the browser's default ring suppressed, the way DSH's own
   // menu does it) walking the list with the arrow keys highlights nothing at all.
-  const rowCss = rowSheets[0].textContent;
+  const rowCss = ownSheet;
   for (const surface of ['dshUi_choiceItem', 'dshUi_menuItem']) {
     assert.ok(
       rowCss.includes('.' + surface + ':focus-visible'),
@@ -4033,7 +4043,7 @@ async function main() {
 
   // The disabled look itself: one treatment for the row, not a second invention.
   assert.ok(
-    rowSheets[0].textContent.includes('.dshUi_choice:disabled{opacity:.4;cursor:not-allowed}'),
+    ownSheet.includes('.dshUi_choice:disabled{opacity:.4;cursor:not-allowed}'),
     'a disabled dropdown looks disabled (opacity + a cursor that says why)',
   );
 
@@ -4134,7 +4144,8 @@ async function main() {
   // plugin actually injects (not its JS source, which has comments talking about it) and allows
   // those properties only as `none` (hiding a scrollbar on purpose) or behind the webkit
   // feature query, which only engines without the pseudo-element ever see.
-  const injected = host.document.querySelector('style[data-plugin-css="dsh-custom-css/CustomCssRow.module.css"]');
+  // 控件样式在公共层、编辑器在行表：这两条断言都按「扩展自己的 CSS」整体看。
+const injected = { textContent: ownSheet };
   assert.ok(injected !== null, 'the row injects its own stylesheet');
   /** Drop every `@supports not selector(::-webkit-scrollbar){…}` block, braces and all. */
   const withoutWebkitFallback = (css) => {
