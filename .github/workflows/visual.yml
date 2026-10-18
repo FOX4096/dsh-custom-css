@@ -1,0 +1,60 @@
+# 视觉回归：在真浏览器里量几何、截图，并把「看起来没变」变成机器留存的证据。
+#
+# 为什么单独一个工作流而不是塞进 ci.yml：
+#   · 它需要一个**跑着的 DSH 实例**和一个真实 Chromium（Edge），启动比单元测试慢一个数量级；
+#   · 它是「留证」性质：截图与 JSON 是给人看的产物，不是断言。断言还没搬进浏览器（见
+#     tests/visual-probe.mjs 的头注释），所以失败不应该卡住每一次 push。
+# 手动触发 + 每日一次就够，先让证据积累起来，再谈把哪些数字升级成断言。
+name: Visual
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 每天 03:00 UTC —— 与 compat-watch 错开，避免同一时段抢 runner。
+    - cron: '0 3 * * *'
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 开发实例用的是「全局那份 dsh」；这里显式装一份，版本与 README 的验证矩阵同一条线。
+      - name: Install DSH
+        shell: pwsh
+        run: |
+          npm install -g @deepseek-ai/dsh
+          $bin = Join-Path $env:APPDATA 'npm\node_modules\@deepseek-ai\dsh\lib\bin.js'
+          if (-not (Test-Path $bin)) { throw "找不到 dsh 的 bin.js：$bin" }
+          echo "DSH_DEV_BIN=$bin" >> $env:GITHUB_ENV
+
+      # 开发实例会自己建 profile、写 dev/state/url.txt（探针靠它拿带令牌的地址）。
+      - name: Start dev instance
+        shell: pwsh
+        run: node dev/instance.mjs up --port 3181 --timeout 240000
+
+      # 打开设置页里的这一行，量它的几何并截图。选择器写在这里而不是脚本里，
+      # 是为了以后加一个面（面板、壁纸节）只需要改这一行。
+      - name: Probe the settings row
+        shell: pwsh
+        run: |
+          node tests/visual-probe.mjs --open-settings `
+            --sel .dshCc_row --sel .dshCc_editorWrap --sel .dshCc_fileBar --shot
+
+      - name: Upload probe artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-probe
+          path: temp/probe
+          if-no-files-found: warn
+
+      - name: Stop dev instance
+        if: always()
+        shell: pwsh
+        run: node dev/instance.mjs down

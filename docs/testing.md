@@ -104,6 +104,14 @@ git push origin main --follow-tags
 推上去后它自己跑完测试与发布。前置条件只有一条：npmjs.com 上该包的
 Settings → Trusted Publisher 已填本仓库与本文件名。
 
+## 视觉回归（`.github/workflows/visual.yml`）
+
+手动触发 + 每日一次：在 **windows-latest** 上装一份 DSH、用 `dev/instance.mjs up` 起开发实例、
+再用 `tests/visual-probe.mjs` 打开设置页量几何并截图，产物上传为 `visual-probe` artifact。
+
+它是「留证」而不是断言：探针只测量、不判定，所以它失败不该卡住每次 push —— 这是它能和
+`ci.yml` 分开的原因。等证据积累够了，再把关键数字（行高、面板宽度、查找栏是否折行）升级成断言。
+
 ## 相关
 
 - [开发](./development.md) —— 命令表、开发实例、探针
