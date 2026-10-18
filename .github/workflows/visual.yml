@@ -25,11 +25,17 @@ jobs:
           node-version: '22'
 
       # 开发实例用的是「全局那份 dsh」；这里显式装一份，版本与 README 的验证矩阵同一条线。
+      #
+      # bin 的路径问 npm 要，不要自己拼 `%APPDATA%\npm\node_modules`：第一次跑就栽在这里 ——
+      # windows-latest 的全局前缀不是 `%APPDATA%\npm`，包装完了、路径猜错了、步骤红在
+      # 「找不到 bin.js」上，而 npm 明明说 added 538 packages。
       - name: Install DSH
         shell: pwsh
         run: |
           npm install -g @deepseek-ai/dsh
-          $bin = Join-Path $env:APPDATA 'npm\node_modules\@deepseek-ai\dsh\lib\bin.js'
+          $root = (npm root -g).Trim()
+          $bin = Join-Path $root '@deepseek-ai\dsh\lib\bin.js'
+          Write-Host "global root: $root"
           if (-not (Test-Path $bin)) { throw "找不到 dsh 的 bin.js：$bin" }
           echo "DSH_DEV_BIN=$bin" >> $env:GITHUB_ENV
 

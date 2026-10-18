@@ -626,7 +626,7 @@ if (options.help === true) {
 选项
   --sel <选择器>     量这个选择器（可出现多次）
   --open-settings    先点开设置面板，再量
-  --shot             存一张 PNG 到 dev/artifacts/
+  --shot             存一张 PNG 到 temp/probe/（CI 上传的就是这个目录）
   --wait <ms>        页面就绪后额外等多久，默认 1200（前端渲染是异步的）
   --timeout <ms>    等页面加载的上限，默认 120000
   --width/--height   视口尺寸，默认 1440x900
