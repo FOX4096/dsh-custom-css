@@ -1,0 +1,54 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   dsh-shared · 样式公共层（v1）
+
+   这一份源码会被 `shared/sync.mjs` 原样写进各扩展的浏览器半，作为**一张独立的样式表**
+   注入（`<style data-plugin-css="…/shared-base.css">`），顺序在用户自己的样式表**之前** ——
+   于是用户表里的规则天然赢过它，不需要 `!important`。
+
+   它只放「多个扩展共用、且与具体扩展无关」的东西：
+
+   · 本地设计令牌（`--dsl-g-*`）：各扩展的卡片 / 描边 / 圆角都读这几个，换成一份定义，
+     一处调整就能全线生效；
+   · 两个原语（`:where()` 包着，特异性 0）：细描边卡片、单行省略 —— 任何扩展都可以用，
+     也可以用一行选择器覆盖掉。
+   · 三个原语都**不碰** DSH 自己的 `--dsw-*` 令牌：那些归宿主，扩展覆盖它们会连带打断
+     深色主题（实测过一次：把 `--dsw-alias-label-primary` 钉死成深色，深色主题下正文就
+     变成黑底黑字）。
+
+   这里的每一条都必须能在「没有用户样式表」时独立存在。
+   ════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* 表面：细描边 + 卡片阴影 + 圆角。三个值在扩展里反复出现，所以只定义一次。 */
+  --dsl-g-border-surface: color-mix(in srgb, var(--dsw-alias-label-primary, #0f1115) 12%, transparent);
+  --dsl-g-shadow-card: 0 1px 3px #0000001a, 0 8px 24px #0000000f;
+  --dsl-g-radius-surface: 12px;
+  /* 间距与字号步进：面板内边距、卡片标题、说明文字各取一档。 */
+  --dsl-g-gap-tight: 8px;
+  --dsl-g-gap: 12px;
+  --dsl-g-font-title: 13px;
+  --dsl-g-font-note: 12px;
+}
+
+/* 原语一：细描边卡片。`:where()` 让特异性为 0 —— 任何扩展自己的类名都能直接覆盖。 */
+:where(.dsl-card, .dsl-surface) {
+  background: var(--dsw-alias-bg-module-platform, #ffffff);
+  border: 1px solid var(--dsl-g-border-surface);
+  border-radius: var(--dsl-g-radius-surface);
+  box-shadow: var(--dsl-g-shadow-card);
+}
+
+/* 原语二：单行省略。宽度不够时截断而不是换行，行高不会被撑开。 */
+:where(.dsl-ellipsis) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 原语三：面板里的小号说明文字。 */
+:where(.dsl-note) {
+  color: var(--dsw-alias-label-tertiary, #6b7280);
+  font-size: var(--dsl-g-font-note);
+  line-height: 18px;
+}

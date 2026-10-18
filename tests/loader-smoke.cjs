@@ -915,6 +915,18 @@ async function main() {
     'both records are read as optional — got: ' + JSON.stringify(recordReads),
   );
 
+  // 公共层：一张独立的样式表，先于用户表注入 —— 用户规则天然赢过它，不需要 !important。
+  const baseSheet = host.styleTags.find(element => element.dataset.pluginCss === 'dsh-custom-css/shared-base.css');
+  assert.ok(baseSheet, 'the shared base stylesheet is installed at load');
+  assert.ok(
+    String(baseSheet.textContent).includes('--dsl-g-radius-surface'),
+    'and carries the shared design tokens',
+  );
+  assert.ok(
+    host.styleTags.indexOf(baseSheet) < host.styleTags.findIndex(element => element.id === 'dsh-custom-css-user-style' || element.textContent === HOST_SHEET),
+    'installed before the user sheet, so the user rules win without !important',
+  );
+
   const rowSheets = host.styleTags.filter(element => element.dataset.pluginCss === 'dsh-custom-css/CustomCssRow.module.css');
   assert.strictEqual(rowSheets.length, 1, 'the row stylesheet is injected exactly once');
   assert.ok(rowSheets[0].textContent.includes('--dsw-alias-label-primary'), 'row styles consume DSH tokens');

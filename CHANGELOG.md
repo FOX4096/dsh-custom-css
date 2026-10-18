@@ -2,6 +2,23 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.4.2 — CSS 公共层：把跨扩展共用的令牌与原语抽成一份基座
+
+本机自定义样式里，描边 / 卡片阴影 / 圆角在多个扩展的覆盖中反复出现。现在抽成随插件发布的
+`shared/base.css`，启动时注入成独立样式表（`data-plugin-css="dsh-custom-css/shared-base.css"`），
+**先于用户样式表** —— 用户规则天然赢过它，不需要 `!important`。
+
+- 令牌：`--dsl-g-border-surface` / `--dsl-g-shadow-card` / `--dsl-g-radius-surface`，
+  外加间距与字号步进；用户表里重复的那三个已删除（值不变）。
+- 原语（`:where()`，特异性 0）：`.dsl-card` / `.dsl-surface`、`.dsl-ellipsis`、`.dsl-note`。
+- **不碰 DSH 的 `--dsw-*` 令牌**：覆盖它们会连带打断深色主题（实测过黑底黑字）。
+- 无构建：`shared/sync.mjs` 把 CSS 写进 `lib/client.js` 的标记块；`--check` 已接进
+  `npm run audit`，漂移即失败。
+- 测试：断言基座样式表在启动时装上、带令牌、且排在用户表之前。
+
+修掉的两个自造问题（记在 `docs/shared-layer.md`）：块首标记漏 `*/` 把内容吞进注释；
+同步不幂等（第二次跑多一行空白，`--check` 永远报漂移）。
+
 ## 0.4.1 — 修「界面浓度」：0 不再是把文字糊在照片上
 
 用户报告「界面浓度设置有问题，文字看不清」。两处真问题，都在同一个控件上：
