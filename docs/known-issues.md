@@ -41,19 +41,34 @@
 | 交替 off/on ×3 | 256 / 19 稳定复现 | 可确定归因 |
 | 本插件补丁开启 | **256px** | 补丁把它盖住了 |
 
-它压塌的方式：smooth-stream 为了让回复「流式展开 / 折叠」有动画，把消息体放进了
+它压塌的方式（**真正的规则**，上一版把这里写成 `min-height:0`，是错的）：
 
 ```css
-.disclosureContent { display: grid; grid-template-rows: 1fr; overflow: hidden }
-.disclosureContent > * { min-height: 0 }          /* 允许子项缩到内容以下 */
+@supports (text-box-trim: trim-both) {
+  .root :is(p, h1, h2, h3, h4, h5, h6, blockquote) {
+    text-box-trim: trim-both;
+    text-box-edge: text;
+  }
+}
 ```
 
-再配合它自己逐帧钉住的高度。`min-height: 0` 一给，那个 `<p>` 就可以被压到行高（19px），
-而里面的图片仍是 256px —— 于是图画在自己的盒子外面，盖住下一块内容。
+`text-box-trim: trim-both` 会按**文字边**裁掉首末行的半行距。而 DSH 把图片渲染成
+`<p><button class="imageButton"><img class="image"></button></p>` —— 当段落里只有一个很高的
+inline-block 时，裁剪按的是**文字行高**（19px），于是 `<p>` 只剩一行文字的高度，
+而图片仍按 256px 绘制：图就画在自己盒子外面，盖住上面/下面的内容。
 
-> 我最初把这判成「DSH 的 `<button>` 是 inline-block、不贡献高度」。**那个结论是错的**：
-> 全部扩展关掉时，同一个 inline-block 的 `<p>` 稳稳是 256px。教训是「A/B 只在同一个可控
-> 变量上做」—— 第一次实验里其他 216 张样式表都开着。
+判别做到最细的一步（3080 真机，本插件补丁关闭）：
+
+| 动作 | 图片 `<p>` 高度 |
+| --- | --- |
+| 原样（smooth-stream 开） | 19px |
+| 只删掉上面那条 `@supports` 规则 | **256px** |
+| 把规则放回去 | 19px |
+| 换用作者修复版的选择器（加 `:not(:has(img, …))`） | **256px** |
+
+**上游状态**：作者已在 `main`（commit `1f199b7`）与 **0.8.0-rc.1**（npm tag `next`，2026-10-07）
+修好 —— 选择器改成 `:not(:has(img, video, canvas, iframe, object, embed, code))`，注释里描述的
+症状与这里完全一致。但 npm 的 `latest` 仍是 **0.7.0**，所以装 latest 的人依旧会看到。
 
 **本插件的补丁**（`lib/client.js` 的 `HOST_FIX_CSS`，注入成独立的 `<style data-plugin-css="dsh-custom-css/host-fix.css">`）：
 

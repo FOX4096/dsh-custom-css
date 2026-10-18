@@ -15,9 +15,13 @@
 | 只开 `dsh-smooth-stream/TypewriterAssistantNodeView.module.css` | 19px（行高，图 256px 溢出） |
 | off/on 交替 ×3 | 256 / 19 稳定复现 |
 
-机制：smooth-stream 为了折叠动画，把消息体放进 `display:grid; grid-template-rows:1fr`
-且给子项 `min-height:0` 的容器，于是图片那个 `<p>` 能被压到行高，图就画在盒子外面、
-盖住下一块内容。
+机制（已定位到具体规则）：smooth-stream 的
+`@supports (text-box-trim: trim-both){ .root :is(p,h1…){text-box-trim:trim-both;text-box-edge:text} }`
+会按文字边裁掉首末行的半行距 —— 段落里只有一个高 inline-block 图片时，`<p>` 被压到
+文字行高 19px，而图仍按 256px 绘制，于是画到盒子外面盖住下文。删掉这条规则或把它加上
+`:not(:has(img, …))`，`<p>` 立刻回到 256px（实测）。
+
+上游状态：作者已在 main（1f199b7）与 0.8.0-rc.1（npm tag `next`）修好，但 `latest` 仍是 0.7.0。
 
 **补丁**（独立 `<style data-plugin-css="dsh-custom-css/host-fix.css">`）：
 
