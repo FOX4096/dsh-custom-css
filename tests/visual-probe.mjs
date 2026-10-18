@@ -535,6 +535,39 @@ async function openSettings(session, result) {
 		result.settings.steps.push({ name, detail });
 		log('debug', `设置面板：${name} —— ${detail}`);
 	};
+	const sleep = async (ms) => { await new Promise(resolve => setTimeout(resolve, ms)); };
+
+	// 全新 profile 会先弹「开始使用」（登录 / 加 API Key），它盖在页面正中。
+	// 这张卡片不是本插件的地盘，但它是**干净的实例 vs 能用的实例**之间那道门：
+	// 不关掉它，截图里只有它，设置入口也点不着。CI 上第一次跑就是这么栽的。
+	const blocking = await session.evaluate(`(() => {
+		const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]');
+		if (dialog === null) return null;
+		return { text: (dialog.innerText || '').trim().slice(0, 60) };
+	})()`);
+	if (blocking !== null) {
+		const how = await session.evaluate(`(() => {
+			const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]');
+			if (dialog === null) return 'already gone';
+			const close = dialog.querySelector('button[aria-label*="关闭"], button[aria-label*="Close" i], button[aria-label*="close" i]');
+			if (close !== null) { close.click(); return 'clicked the close button'; }
+			return 'no close button';
+		})()`);
+		if (how !== 'clicked the close button' && how !== 'already gone') {
+			// 没有可点的关闭按钮时用 Esc：DSH 的对话框都会响应它。
+			for (const type of ['keyDown', 'keyUp']) {
+				await session.send('Input.dispatchKeyEvent', {
+					type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
+				});
+			}
+			await sleep(400);
+			step('首启弹窗', `${how}，改发 Esc —— 开头：${String(blocking.text).split('\n')[0]}`);
+		}
+		else {
+			await sleep(400);
+			step('首启弹窗', `已关闭（${how}）—— 开头：${String(blocking.text).split('\n')[0]}`);
+		}
+	}
 
 	// 设置入口不写死选择器：DSH 换代时类名会变，而这几条是语义线索。
 	const candidates = [
@@ -543,7 +576,7 @@ async function openSettings(session, result) {
 		'[title*="设置"]',
 		'button[aria-label*="Settings"]',
 	];
-	const found = await session.evaluate(`(() => {
+	const findEntry = async () => await session.evaluate(`(() => {
 		const candidates = ${JSON.stringify(candidates)};
 		for (const selector of candidates) {
 			const nodes = [...document.querySelectorAll(selector)];
@@ -552,18 +585,48 @@ async function openSettings(session, result) {
 		}
 		return null;
 	})()`);
+	let found = await findEntry();
 	if (found === null) {
-		step('找入口', '没找到设置入口（候选选择器都没命中）');
-		return false;
+		// 侧栏收起时，设置不在侧栏上，而在左下角「更多」的菜单里（本插件给那个按钮
+		// 定过 252×36 的宽度 —— 就是它）。先开菜单，再按文字找「设置」。
+		const openedMenu = await session.evaluate(`(() => {
+			const triggers = [...document.querySelectorAll('[aria-haspopup="menu"]')]
+				.filter(node => node.getBoundingClientRect().width > 0);
+			const trigger = triggers.find(node => (node.innerText || '').includes('更多')) ?? triggers[triggers.length - 1];
+			if (trigger === undefined) return null;
+			trigger.click();
+			return (trigger.innerText || trigger.getAttribute('aria-label') || '').trim().split('\\n')[0].slice(0, 20);
+		})()`);
+		if (openedMenu === null) {
+			step('找入口', '没找到设置入口：侧栏上没有，也没有可打开的「更多」菜单');
+			return false;
+		}
+		await sleep(400);
+		const picked = await session.evaluate(`(() => {
+			const items = [...document.querySelectorAll('[role="menuitem"]')]
+				.filter(node => node.getBoundingClientRect().width > 0);
+			const item = items.find(node => (node.innerText || '').includes('设置'));
+			if (item === undefined) return null;
+			item.click();
+			// 菜单项里还有快捷键（Ctrl + Alt + ,），取首行就够了。
+			return (item.innerText || '').trim().split('\\n')[0].slice(0, 20);
+		})()`);
+		if (picked === null) {
+			step('找入口', `打开了「更多」菜单（${openedMenu}），里面没有「设置」`);
+			return false;
+		}
+		step('找入口', `「更多」菜单（${openedMenu}）→ ${picked}`);
+		found = { selector: 'role=menuitem（文字含「设置」）', tag: 'button', text: picked };
 	}
-	step('找入口', `${found.selector} → <${found.tag}> ${found.text}`);
-
-	await session.evaluate(`(() => {
-		const node = document.querySelector(${JSON.stringify(found.selector)});
-		if (node) node.click();
-		return true;
-	})()`);
-	await new Promise(resolve => setTimeout(resolve, 900));
+	else {
+		step('找入口', `${found.selector} → <${found.tag}> ${found.text}`);
+		await session.evaluate(`(() => {
+			const node = document.querySelector(${JSON.stringify(found.selector)});
+			if (node) node.click();
+			return true;
+		})()`);
+	}
+	await sleep(900);
 
 	const panel = await session.evaluate(`(() => {
 		const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]');

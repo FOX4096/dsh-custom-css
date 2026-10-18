@@ -370,6 +370,33 @@ async function waitForPort(port, timeoutMs) {
 }
 
 /**
+ * 等那行带令牌的入口 URL 出现。
+ *
+ * **端口绑上不等于 URL 已经打印**：dsh 先把端口听上，再建 web 包、再打印入口 ——
+ * CI 上第一次跑就栽在这三秒的缝里：端口 3 秒就通了，日志还是空的，于是「起了但找不到
+ * 入口」。本机因为别的事情慢一点，这行往往已经落盘，所以这个 bug 只在干净机器上显形。
+ *
+ * 轮询而不是 `tail -f`：日志由子进程直写文件，父进程只需重复读；退避到 1s 是为了不把
+ * 一个几百 KB 的日志每秒读二十遍。
+ * @param port - 期望的端口
+ * @param timeoutMs - 超时（与端口同一份预算）
+ * @param child - 子进程；它退出了就不必再等，早失败一次比等满四分钟诚实
+ * @returns URL，找不到时 undefined
+ */
+async function waitForLaunchUrl(port, timeoutMs, child) {
+	const deadline = Date.now() + timeoutMs;
+	let delay = 200;
+	while (Date.now() < deadline) {
+		const found = findLaunchUrl(readLog(), port);
+		if (found !== undefined) return found;
+		if (child !== undefined && child.exitCode !== null) return undefined;
+		await new Promise(resolve => setTimeout(resolve, delay));
+		delay = Math.min(1000, Math.round(delay * 1.5));
+	}
+	return findLaunchUrl(readLog(), port);
+}
+
+/**
  * 起开发实例。
  * @param {object} options - `{ port, timeoutMs }`
  */
@@ -427,9 +454,9 @@ async function up(options) {
 		return;
 	}
 
-	const launchUrl = findLaunchUrl(readLog(), port);
+	const launchUrl = await waitForLaunchUrl(port, options.timeoutMs ?? 120_000, child);
 	if (launchUrl === undefined) {
-		log('error', '端口起来了，但日志里没有带令牌的入口 URL —— 探针需要它才进得去。日志末尾：');
+		log('error', '端口起来了，但日志里一直没有带令牌的入口 URL —— 探针需要它才进得去。日志末尾：');
 		process.stderr.write(`${readLog(2000)}\n`);
 		process.exitCode = 1;
 		return;
