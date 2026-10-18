@@ -2,6 +2,28 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.4.0 — 写 CSS 用的页面 API（window.dshCss）
+
+页面里多了一个对象，把插件已有的能力摆到控制台：读/写样式表、查命中数与规则归属、
+找死选择器、反查令牌、点选元素。文档见 [docs/authoring-api.md](./docs/authoring-api.md)。
+
+```js
+dshCss.css.selectorHits('[class*="_panelRow"]')   // 7
+dshCss.css.deadSelectors()                        // 当前页面匹配 0 个元素的选择器
+await dshCss.sheets.read('custom.css')
+await dshCss.pick()                               // { selector, declarations }
+```
+
+- 六组接口：`sheets`（11 个方法）、`css`（apply/remove/list + 三个查询）、`tokens`（all/get/find）、
+  `inspect`、`pick`、`on/off`，外加 `host` 裸接口与 `ui` 组件库；`apiVersion = 1`。
+- `deadSelectors` 的口径：只报「静止页面上也匹配不到」的 —— 状态伪类（`:hover`…）、状态类
+  （`.active`…）、`@media`/`@supports` 内的选择器、伪元素全部跳过。实测同一天的手工审计是 49 条，
+  修好口径后剩 14 条（都是别的标签页里才出现的元素）。
+- 拾取器改成可注入结果：面板还是插进编辑器，`dshCss.pick()` 只是把结果交回去。
+- 新增设置项「开发者 · 控制台写盘」（默认允许）：关掉后写盘类方法抛错，查询与临时表照旧。
+- 测试：loader-smoke 新增一组 —— 入口存在且版本正确、方法齐全、临时表 apply/list/remove 往返、
+  `deadSelectors` 的解析与跳过规则；真机（3080）实测命中数、令牌、读写与死选择器审计。
+
 ## 0.3.12 — 弹出菜单跟随触发器宽度（侧栏「更多」按钮）
 
 侧栏左下「更多」的按钮宽度随侧栏走，但它的下拉菜单是挂到 body 的 **portal**：inline 只给

@@ -25,6 +25,7 @@
 | [规则面板](./rule-panel.md) | 点选择器展开的那块：属性字典 112 条、值写错了会怎样、声明模板 |
 | [格式校验](./validation.md) | 状态行那行红字怎么读、变量体检在查什么 |
 | [控件](./controls.md) | 表头那几个按钮与菜单、窄窗口下谁先让位、强调显示 |
+| [写 CSS 用的页面 API](./authoring-api.md) | 控制台里的 `window.dshCss`：读写样式表、查命中数、找死选择器、反查令牌、点选元素 |
 | [`examples/acrylic.css`](../examples/acrylic.css) | 可直接导入的**亚克力皮肤**：渐变壁纸 + 玻璃面板 + 背景模糊 |
 | [`examples/showcase.css`](../examples/showcase.css) | 60 行的最小示例（想学怎么写就看它） |
 
@@ -54,4 +55,3 @@
 | 文档 | 解决什么 |
 | --- | --- |
 | [预览块](./preview.md) | **尚未实现**。代码区与规则面板之间那块预览的设计（含全屏视图） |
-| [写 CSS 用的页面 API](./authoring-api.md) | **尚未实现**。`window.dshCss` 的接口形状、把已有能力（拾取 / 令牌 / 命中数 / 死选择器审计）统一到一个入口、分四期做 |

@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6454,6 +6454,48 @@ async function main() {
     'switching the clock off removes it rather than hiding it — body: ' + probe.bodyList(),
   );
 
+
+  // --- 23d. window.dshCss: the authoring API --------------------------------
+  //
+  // The API is the console's way to reach what the plugin already does. What is assertable here
+  // is the shape (a stable entry point with a version) and the parts that do not need a real
+  // browser: transient sheets and the selector parser behind `deadSelectors`.
+  const authoring = host.mod.__probe.authoringApi();
+  assert.ok(authoring, 'window.dshCss is installed at load');
+  assert.strictEqual(authoring.apiVersion, 1, 'with an API version');
+  for (const path of ['sheets.list', 'sheets.read', 'sheets.write', 'sheets.activate', 'sheets.history',
+    'css.apply', 'css.remove', 'css.list', 'css.selectorHits', 'css.computed', 'css.rulesFor',
+    'css.deadSelectors', 'tokens.all', 'tokens.get', 'tokens.find', 'inspect', 'pick', 'on', 'off', 'help']) {
+    const owner = path.split('.')[0];
+    const name = path.split('.')[1];
+    assert.strictEqual(typeof (name === undefined ? authoring[owner] : authoring[owner]?.[name]), 'function', path + ' exists');
+  }
+  // Transient sheets: apply → list → remove, and the tag really is in the head.
+  const appliedId = authoring.css.apply('.probe-only{color:red}', { id: 'probe' });
+  assert.strictEqual(appliedId, 'probe', 'apply returns the id it stored under');
+  assert.deepStrictEqual(Array.from(authoring.css.list(), entry => entry.id), ['probe'], 'list reports it');
+  assert.ok(
+    host.styleTags.some(tag => tag.dataset.authoringId === 'probe' && String(tag.textContent).includes('.probe-only')),
+    'and the style tag is in the document',
+  );
+  assert.strictEqual(authoring.css.remove('probe'), true, 'remove finds it');
+  assert.deepStrictEqual(Array.from(authoring.css.list()), [], 'and it is gone');
+  assert.strictEqual(authoring.css.remove('probe'), false, 'removing twice is a no-op');
+
+  // deadSelectors: parses the stylesheet, skips at-rules and keyframes, and reports only the
+  // selectors that match nothing.
+  const dead = authoring.css.deadSelectors(
+    '.definitely-missing{color:red}\n'
+    + '.hover-missing:hover{color:green}\n'
+    + '@media (min-width:1px){.also-missing{color:blue}}\n'
+    + '@keyframes spin{from{opacity:0}to{opacity:1}}\n'
+    + '.V1MMBW_tableWrap{box-shadow:none}',
+  );
+  // Only "never matches, on a resting page" counts: the hover rule is skipped (state-dependent),
+  // the @media one too (a non-matching viewport says nothing about the rule), and keyframes are not
+  // selectors at all. The real-looking stale class IS reported — that is the case that matters.
+  assert.deepStrictEqual(Array.from(dead), ['.definitely-missing', '.V1MMBW_tableWrap'], 'got: ' + JSON.stringify(dead));
+
   // --- 23c. the account menu follows its trigger -----------------------------
   //
   // The menu is a portal on `body` with JS-positioned `left`/`top` (no CSS anchor
@@ -6522,8 +6564,8 @@ async function main() {
   assert.ok(kitSwitches.length >= 2, 'the section has its two switches');
   assert.deepStrictEqual(
     kitSwitches.map((node) => node.props['aria-checked']),
-    [false, true],
-    'with their state on aria-checked (clock off, line numbers on)',
+    [false, true, true],
+    'with their state on aria-checked (clock off, line numbers on, console writes allowed)',
   );
   // The busy state is three things at once: disabled, aria-busy, and a spinner node.
   const busy = kitBoot.mod.__probe.ui.button({ busy: true }, '保存中');
