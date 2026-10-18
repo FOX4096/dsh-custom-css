@@ -950,6 +950,20 @@ async function main() {
     hostFix[0].textContent.includes('[class*="_imageButton_"]'),
     'and targets markdown image buttons by their module-name prefix (the hash suffix changes per build)',
   );
+
+  // 上游装了修好的版本（规则里带 `:not(:has(img…))`）时，本插件不该再注入这段补丁 ——
+  // 补丁的寿命应该止于上游修复，而不是永久成为本插件的一部分。
+  const upstreamFixed = await boot({
+    dom: {
+      styleSheets: [{ cssRules: [{ selectorText: '._root :is(p, h1):not(:has(img, video))' }] }],
+    },
+  });
+  assert.strictEqual(
+    upstreamFixed.styleTags.filter(tag => tag.dataset.pluginCss === 'dsh-custom-css/host-fix.css').length,
+    0,
+    'the host fix is not injected when the upstream stylesheet already excludes image paragraphs',
+  );
+
   assert.ok(
     hostFix[0].textContent.includes('display:block'),
     'with the one declaration that makes the wrapper participate in block layout — got: '
