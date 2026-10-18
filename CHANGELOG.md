@@ -2,6 +2,30 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.3.10 — 修宿主：聊天里的图片压住后面内容
+
+**这是「用扩展修 DSH」的一次性补丁**，不是这个插件自己的 UI 问题。
+
+现象：消息里的图片会盖住下一块内容（256px 图标压住下面的 callout），看着像图片样式写坏了。
+
+根因在包图片的那个 `<button>`：DSH 把 markdown 图片渲染成
+`<p><button class="_imageButton_…"><img class="_image_…" loading="lazy"></button></p>`，
+该按钮是 `display:inline-block` 且不贡献高度。同页实测：
+
+| 状态 | 按钮 display | `<p>` 高 | 图片高 |
+| --- | --- | --- | --- |
+| 修复前 | `inline-block` | 19px | 256px（溢出） |
+| 修复后 | `block` | 256px | 256px |
+
+补丁只有一条规则，注入成独立的 `<style data-plugin-css=\"dsh-custom-css/host-fix.css\">`：
+
+```css
+[class*="_imageButton_"] { display: block; width: fit-content; max-width: 100% }
+```
+
+选择器用模块名前缀而不是完整类名（哈希每构建都变）；`width: fit-content` 不能省，否则按钮撑满整行。
+DSH 修好之后这段可整块删除。详见 [已知坑](./docs/known-issues.md)。
+
 ## 0.3.9 — UI 组件库（`ui`）+ 状态补齐
 
 界面元素全部收进 `lib/client.js` 里的一个 `ui` 对象，类名统一成 `dshUi_*`。加功能只调用

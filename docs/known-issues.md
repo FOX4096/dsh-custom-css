@@ -25,7 +25,35 @@
 | **`inset` 放大固定尺寸元素 → 渐变跑出视口** | 给壁纸伪元素写 `inset: -20%`（想给动画留余量）后，`radial-gradient(… at 82% …)` 的右边缘落到**视口之外**，右半边只剩 `transparent` —— 看起来像"只铺了左半边" | 渐变盒与视口同尺寸（`inset: 0`），色斑用百分比在盒内展开。要留余量就调渐变的尺寸百分比，而不是放大盒子 |
 | **自己画的层和皮肤打平 → 图没画上，面板还说「已保存」** | 自定义壁纸的 `body::before` 与亚克力皮肤的 `body::before` **特异性相同**，皮肤的表后注入 → 皮肤赢，页面仍是渐变，而面板状态是「已保存」（看起来像壁纸功能坏了） | 插件自己的图片层写成 `html body::before,html body[data-ds-dark-theme]::before`（高一档）并给关键几何带 `!important`；界面底色那几个令牌**不带** `!important`，让皮肤赢并给出一行说明。详见 [自定义壁纸 · 三个设计决定](./wallpaper.md#三个设计决定) |
 | **窄栏里 `flex-wrap` 会悄悄把布局撑坏** | 设置对话框右侧开一个面板后只剩 198px：260px 的预览单独占一行，控件列被压到 0 宽又各自溢出 96–124px，整块涨到 691px 高 | 用 `container-type: inline-size` + `@container` 在阈值处切换方向（宽了并排、窄了堆叠），并且**窄时每一行自己也要改成纵向** —— 96px 的标签 + 滑块放不进同一行 |
-| 跨代插件 | 插件加载失败：`client-modules: require("…") missed the module table` | 那是给**旧一代 DSH** 编译的 bundle：它把平台包硬写进了产物（如 `@deepseek-ai/dsh-client-runtime/client`、`dsh-client-ui-primitives`），而当前代已删掉这些包。只能等插件作者更新；本插件运行时 require 数为 0，不受这类漂移影响 |
+| 跨代插件 | 插件加载失败：`client-modules: require("…") missed the module table` | 那是给**旧一代 DSH** 编译的 bundle：它把平台包硬写进了产物（如 `@deepseek-ai/dsh-client-runtime/client`、`dsh-ui-primitives`），而当前代已删掉这些包。只能等插件作者更新；本插件运行时 require 数为 0，不受这类漂移影响 |
+
+### 宿主缺陷：聊天气泡里的图片压住后面的内容（本插件已打补丁）
+
+**现象**：消息里的图片会盖住下一块内容（截图里那张 256px 图标压住了下面的 callout），看起来像「图片样式写错了」。
+
+**根因不在图片，在包图片的那个 `<button>`**。DSH 把 markdown 图片渲染成：
+
+```html
+<p><button class="_imageButton_1ypvv_446"><img class="_image_1ypvv_287" loading="lazy"></button></p>
+```
+
+那个按钮是 `display:inline-block`，而它在该 `<p>` 里**不贡献高度**。实测（同一页三张 256px 图）：
+
+| 状态 | 按钮 display | `<p>` 高度 | 图片高度 |
+| --- | --- | --- | --- |
+| 修复前 | `inline-block` | **19px** | 256px（溢出） |
+| 加上 `display:block` | `block` | **256px** | 256px |
+
+**本插件的补丁**（`lib/client.js` 的 `HOST_FIX_CSS`，注入成独立的 `<style data-plugin-css="dsh-custom-css/host-fix.css">`）：
+
+```css
+[class*="_imageButton_"] { display: block; width: fit-content; max-width: 100% }
+```
+
+选择器用**模块名前缀**（`_imageButton_`）而不是完整类名：哈希后缀每次构建都变，而这段来自 CSS module 文件名，跨版本稳定；DSH 哪天改了这个模块名，规则会静默失效（退回原状），不会误伤别的元素。`width: fit-content` 不能省 —— 只写 `display:block` 会让按钮撑满整行、点整行都开大图。
+
+**副作用**：无（只在 markdown 图片按钮上生效）。DSH 修好这件事之后，这段可以整块删掉。
+
 
 > 最后一条的判别方式见 [兼容性 · 两种失效模式的判别](./compat.md#两种失效模式的判别)。
 

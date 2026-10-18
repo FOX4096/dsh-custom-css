@@ -909,6 +909,21 @@ async function main() {
   assert.strictEqual(rowSheets.length, 1, 'the row stylesheet is injected exactly once');
   assert.ok(rowSheets[0].textContent.includes('--dsw-alias-label-primary'), 'row styles consume DSH tokens');
 
+  // The host fix: a one-rule sheet that makes DSH's markdown image buttons block-level.
+  // It is a patch for the HOST, not for this plugin's UI, so it gets its own tag — one that
+  // can be found (and removed) without touching the two sheets above.
+  const hostFix = host.styleTags.filter(element => element.dataset.pluginCss === 'dsh-custom-css/host-fix.css');
+  assert.strictEqual(hostFix.length, 1, 'the host-fix stylesheet is injected exactly once');
+  assert.ok(
+    hostFix[0].textContent.includes('[class*="_imageButton_"]'),
+    'and targets markdown image buttons by their module-name prefix (the hash suffix changes per build)',
+  );
+  assert.ok(
+    hostFix[0].textContent.includes('display:block'),
+    'with the one declaration that makes the wrapper participate in block layout — got: '
+      + hostFix[0].textContent,
+  );
+
   // A stylesheet with an unbalanced brace is dropped from that point on by the
   // browser while still looking fine as text — an orphaned declaration block from
   // a deleted selector did exactly that once. Count the braces too.
