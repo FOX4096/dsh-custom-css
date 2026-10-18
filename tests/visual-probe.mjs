@@ -642,11 +642,12 @@ async function openSettings(session, result) {
 		const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
 			.filter(node => node.getBoundingClientRect().width > 0);
 		if (dialogs.length === 0) return { present: false };
-		// 页面上可能还压着别的对话框（首启通知之类），所以认「正文里有设置」的那个；
-		// 认不出来再退到最后一个 —— 后开的在上面。CI 第一次跑就记成了「Preview Notice
-		// 已打开」，而设置其实就在它下面开着。
+		// 页面上可能还压着别的对话框（首启通知之类），而 CI 上那张通知的正文里**也有**
+		// 「Settings」字样 —— 按文字认会认错。认「里面有本插件那行」的那张：设置面板
+		// 是这行唯一的家，这个判据不会说谎。认不出来才退到最后一个可见的（后开的在上面）。
 		const textOf = (node) => (node.innerText || '').trim();
-		const target = dialogs.find(node => /设置|Settings/i.test(textOf(node))) ?? dialogs[dialogs.length - 1];
+		const host = dialogs.find(node => node.querySelector('[class*="dshCc_"]') !== null);
+		const target = host ?? dialogs[dialogs.length - 1];
 		return { present: true, text: textOf(target).slice(0, 120) };
 	})()`);
 	step('面板', panel.present ? `已打开，正文开头：${String(panel.text).split('\\n')[0]}` : '点了入口但没看到对话框');
