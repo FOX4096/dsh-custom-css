@@ -2,6 +2,41 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.4.4 — 图片按钮补丁会自己退休；行组件再瘦两段
+
+**1. 上游修好就停手（真问题）。** 从某个版本起，`dsh-smooth-stream` 会把消息里带嵌套内容的按钮压扁
+—— 实测图片按钮只剩一条。扩展为此注入过一条补丁：
+
+```css
+[class*="_imageButton_"] { display: block; width: fit-content; max-width: 100% }
+```
+
+问题在于它是**无条件**注入的：上游 `0.8.0-rc.1` 已经修了（`text-box-trim` 只作用于叶子元素，
+`:not(:has(img, video, canvas, iframe, object, embed, code))`），插件升级后补丁仍在，等于永远盖着
+别人的样式。现在注入前先看证据：任一样式表里出现带 `:not(:has(img` 的规则即认定上游已修，不注入；
+晚到的（样式表按需加载）在 1500ms / 4000ms 两个复查点发现后自行撤掉。
+
+- 判断依据是**样式表里写了什么**，不是版本号：分不清「用户装了 rc」还是「用户改了自己的表」时，
+  看规则本身最实在。
+- 补丁仍然是独立的一张表（`data-plugin-css="dsh-custom-css/host-fix.css"`），撤掉时整张移除。
+- 上游 issue：Laplace-bit/dsh-smooth-stream#45（另有 #34 下的实测评论）。
+
+**2. 行组件再瘦两段（重构，无行为变化）。** 查找/替换栏 → `FindBar`（约 140 行 / 14 个 props），
+单条规则的属性面板 → `RulePanel`（199 行 / 13 个 props）。`CustomCssRow` **2,340 → 1,908 行**。
+
+两处都是整体搬移 + 函数内解构，JSX 里的标识符一个都不改 —— 名单是脚本按声明缩进扫出来的
+（模块级的 `React` / `Dropdown` / `PropertyInput` 等不进 props，行内闭包才进），所以出错面是「一张
+名单」而不是「几十处替换」。假 React 不展开函数组件，两处都用 `Xxx({…})` 直接调用，返回同一棵树，
+40 项 loader-smoke 断言**一行都没改**仍然全过。
+
+**3. CI 视觉回归。** 新增 `.github/workflows/visual.yml`：手动触发 + 每日 03:00 UTC，在 windows-latest
+上装 DSH、起开发实例、打开设置页量几何并截图、上传 artifact。**目前只测量不判定** —— 断言等阈值
+稳定后再加，否则等于用今天的排版约束明天的设计。
+
+> 本机数据（不在包里，记在这里免得下次找不到原因）：`~/.dsh/custom-css/custom.css` 删掉了对
+> `--dsw-alias-label-primary` 的 `:root` 覆盖（深色主题下黑底黑字的根因），哈希类名选择器改成
+> `[class*="_footArea"]` 这类属性选择器，死规则清掉；备份 `custom.css.bak-20261019-001844`。
+
 ## 0.4.3 — 扩展自己的样式抽公共层：Base.module.css
 
 插件的样式原来是一张 `ROW_CSS` 混合了控件（`dshUi_*`）与编辑器（`dshCc_*`）。现在拆成：
