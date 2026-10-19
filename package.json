@@ -54,7 +54,7 @@
     "appearance"
   ],
   "scripts": {
-    "test": "node tests/loader-smoke.cjs && node tests/host-api-smoke.mjs",
+    "test": "node tests/loader-smoke.cjs && node tests/host-api-smoke.mjs && node tests/probe-strict-smoke.mjs",
     "compat": "node tests/compat-matrix.mjs",
     "compat:check": "node tests/update-compat.mjs",
     "compat:update": "node tests/update-compat.mjs --write",

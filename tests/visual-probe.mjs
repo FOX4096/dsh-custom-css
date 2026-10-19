@@ -78,6 +78,7 @@ function parseArgs(argv) {
 		shot: false,
 		show: false,
 		openSettings: false,
+		strict: false,
 		width: 1440,
 		height: 900,
 	};
@@ -92,6 +93,7 @@ function parseArgs(argv) {
 		else if (arg === '--shot') options.shot = true;
 		else if (arg === '--show') options.show = true;
 		else if (arg === '--open-settings') options.openSettings = true;
+		else if (arg === '--strict') options.strict = true;
 		else if (arg === '--help' || arg === '-h') options.help = true;
 		else throw new Error(`不认识的参数：${arg}`);
 	}
@@ -493,6 +495,16 @@ async function run(options) {
 			process.exitCode = 1;
 		}
 
+		// `--strict`：只判那几条「无论设计怎么变都不该成立」的事（见 judgeStrict）。
+		if (options.strict === true) {
+			const failures = judgeStrict(result.selectors);
+			for (const failure of failures) log('error', `[strict] ${failure.selector}：${failure.reason}`);
+			if (failures.length === 0 && result.selectors.length > 0) {
+				log('info', `strict 通过：${result.selectors.length} 个选择器都在、都有面积、都不是「布局盒子溢出」`);
+			}
+			if (failures.length > 0) process.exitCode = 1;
+		}
+
 		// 截图：视觉确认用。结论不靠它 —— PNG 是给人看的，数字是给判断用的。
 		if (options.shot) {
 			const name = `probe-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
@@ -681,6 +693,9 @@ async function measureSelector(session, selector) {
 			rect: { x: round(rect.x), y: round(rect.y), width: round(rect.width), height: round(rect.height) },
 			overflowX: round(node.scrollWidth - node.clientWidth),
 			overflowY: round(node.scrollHeight - node.clientHeight),
+			// 「它自己是不是滚动容器」决定了溢出要不要报：textarea / overflow:auto 溢出是
+			// 设计，布局盒子悄悄溢出是 bug。
+			overflowStyle: { x: style.overflowX, y: style.overflowY },
 			visible: rect.width > 0 && rect.height > 0,
 			styles: {
 				display: style.display,
@@ -697,15 +712,56 @@ async function measureSelector(session, selector) {
 	})()`);
 }
 
-const options = parseArgs(process.argv.slice(2));
-if (options.help === true) {
-	process.stdout.write(`
+/**
+ * `--strict` 下必须成立的事。
+ *
+ * 只判「一定不该发生」的三条，**不判像素阈值** —— 行高 381px 是今天的排版，不是契约；
+ * 而「元素找不到」「被压成 0 面积」「布局盒子悄悄溢出」三条，无论设计怎么变都不该成立。
+ * 阈值等每日数据攒够再谈，那时才有资格说「这个数字变了就是坏事」。
+ * @param measured - 本次量到的结果数组
+ * @returns 失败清单（`{ selector, reason }`）
+ */
+function judgeStrict(measured) {
+	const failures = [];
+	for (const entry of measured) {
+		if (entry.found !== true) {
+			failures.push({ selector: entry.selector, reason: '页面上没有这个元素' });
+			continue;
+		}
+		if (entry.visible !== true) {
+			failures.push({ selector: entry.selector, reason: '元素占了 0 面积（display:none 或被压成 0）' });
+			continue;
+		}
+		// 滚动容器允许滚动 —— 那不叫溢出；布局盒子悄悄溢出才叫。
+		const scrolls = (axis) => ['auto', 'scroll'].includes(String(entry.overflowStyle?.[axis] ?? ''));
+		const over = [];
+		if (entry.overflowX > 0 && !scrolls('x')) over.push(`横向 ${entry.overflowX}px`);
+		if (entry.overflowY > 0 && !scrolls('y')) over.push(`纵向 ${entry.overflowY}px`);
+		if (over.length > 0) {
+			failures.push({ selector: entry.selector, reason: `内容溢出（${over.join(' / ')}），而它不是滚动容器` });
+		}
+	}
+	return failures;
+}
+
+// 判定逻辑单独可测：`strict` 是这个文件里唯一会「下结论」的代码，而它的分支（找不到 /
+// 0 面积 / 溢出 / 滚动容器豁免 / 单轴豁免）在真页面上凑不齐。守卫住入口，import 就只拿函数。
+export { judgeStrict };
+
+const invokedDirectly = process.argv[1] !== undefined
+	&& path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+	const options = parseArgs(process.argv.slice(2));
+	if (options.help === true) {
+		process.stdout.write(`
 用法：node tests/visual-probe.mjs [选项]
 
 选项
   --sel <选择器>     量这个选择器（可出现多次）
   --open-settings    先点开设置面板，再量
   --shot             存一张 PNG 到 temp/probe/（CI 上传的就是这个目录）
+  --strict           判三条一定不该发生的事：找不到 / 0 面积 / 布局盒子溢出（滚动容器不算）
   --wait <ms>        页面就绪后额外等多久，默认 1200（前端渲染是异步的）
   --timeout <ms>    等页面加载的上限，默认 120000
   --width/--height   视口尺寸，默认 1440x900
@@ -714,7 +770,8 @@ if (options.help === true) {
 前置：先跑 \`npm run dev\` —— 探针读 dev/state/url.txt 里的带令牌入口，
 自己拼不出能进的地址。
 `);
-}
-else {
-	await run(options);
+	}
+	else {
+		await run(options);
+	}
 }

@@ -46,10 +46,13 @@ jobs:
 
       # 打开设置页里的这一行，量它的几何并截图。选择器写在这里而不是脚本里，
       # 是为了以后加一个面（面板、壁纸节）只需要改这一行。
+      #
+      # `--strict` 判三条「无论设计怎么变都不该成立」的事：找不到 / 0 面积 / 布局盒子溢出
+      # （滚动容器不算）。不判像素阈值 —— 行高 381px 是今天的排版，不是契约。
       - name: Probe the settings row
         shell: pwsh
         run: |
-          node tests/visual-probe.mjs --open-settings `
+          node tests/visual-probe.mjs --open-settings --strict `
             --sel .dshCc_row --sel .dshCc_editorWrap --sel .dshCc_fileBar --shot
 
       - name: Upload probe artifacts
