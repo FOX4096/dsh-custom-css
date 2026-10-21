@@ -559,111 +559,174 @@ async function openSettings(session, result) {
 	};
 	const sleep = async (ms) => { await new Promise(resolve => setTimeout(resolve, ms)); };
 
-	// 全新 profile 会先弹「开始使用」（登录 / 加 API Key），它盖在页面正中。
-	// 这张卡片不是本插件的地盘，但它是**干净的实例 vs 能用的实例**之间那道门：
-	// 不关掉它，截图里只有它，设置入口也点不着。CI 上第一次跑就是这么栽的。
-	const blocking = await session.evaluate(`(() => {
-		const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]');
-		if (dialog === null) return null;
-		return { text: (dialog.innerText || '').trim().slice(0, 60) };
-	})()`);
-	if (blocking !== null) {
-		const how = await session.evaluate(`(() => {
-			const dialog = document.querySelector('[role="dialog"], [aria-modal="true"]');
-			if (dialog === null) return 'already gone';
-			const close = dialog.querySelector('button[aria-label*="关闭"], button[aria-label*="Close" i], button[aria-label*="close" i]');
-			if (close !== null) { close.click(); return 'clicked the close button'; }
-			return 'no close button';
+	// 全新 profile 会先弹一张通知（「开始使用」/「Preview Notice」），它盖住页面正中。
+	// 这张卡片不是本插件的地盘，但不关掉它，截图里只有它，设置入口也点不着。
+	//
+	// 它换过三副面孔：有关闭按钮的、能 Esc 关掉的、只剩一个「Continue」主按钮的。CI 上
+	// 第二次栽就栽在第三种 —— 当时只试了前两条路。现在依次试：主按钮 → 关闭按钮 → Esc，
+	// 每步都把看到的按钮文字记进 steps，下次再变，日志里就有线索。
+	const dismissBlocking = async () => {
+		const seen = await session.evaluate(`(() => {
+			const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+				.filter(node => node.getBoundingClientRect().width > 0);
+			// 设置面板本身不算「挡住页面的弹窗」—— 认「里面已经有本插件那行」的那张。
+			const dialog = dialogs.find(node => node.querySelector('[class*="dshCc_"]') === null);
+			if (dialog === undefined) return null;
+			return {
+				text: (dialog.innerText || '').trim().split('\\n')[0].slice(0, 40),
+				buttons: [...dialog.querySelectorAll('button')]
+					.map(node => ((node.innerText || node.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim()))
+					.filter(label => label !== '')
+					.slice(0, 6),
+			};
 		})()`);
-		if (how !== 'clicked the close button' && how !== 'already gone') {
-			// 没有可点的关闭按钮时用 Esc：DSH 的对话框都会响应它。
+		if (seen === null) return false;
+		const how = await session.evaluate(`(() => {
+			const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+				.filter(node => node.getBoundingClientRect().width > 0);
+			const dialog = dialogs.find(node => node.querySelector('[class*="dshCc_"]') === null);
+			if (dialog === undefined) return 'already gone';
+			// 主按钮优先：Continue / 继续 / OK / 确定 / Got it / 知道了。DSH 的通知卡片只有
+			// 这一条出路 —— 点它才是「确认读过了」，Esc 和 × 在那一版里都不存在。
+			const buttons = [...dialog.querySelectorAll('button')];
+			const primary = buttons.find(node => /^(Continue|继续|Got it|知道了|OK|确定|Close|关闭)$/i.test((node.innerText || '').trim()));
+			if (primary !== undefined) {
+				primary.click();
+				return 'clicked “' + (primary.innerText || '').trim() + '”';
+			}
+			const labelled = buttons.find(node => /关闭|Close/i.test(node.getAttribute('aria-label') || ''));
+			if (labelled !== undefined) {
+				labelled.click();
+				return 'clicked the close button';
+			}
+			return 'no button';
+		})()`);
+		if (how === 'no button') {
 			for (const type of ['keyDown', 'keyUp']) {
-				await session.send('Input.dispatchKeyEvent', {
-					type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27,
-				});
+				await session.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
 			}
 			await sleep(400);
-			step('首启弹窗', `${how}，改发 Esc —— 开头：${String(blocking.text).split('\n')[0]}`);
+			step('挡住页面的弹窗', `${how}，改发 Esc —— 正文：${seen.text}；按钮：${seen.buttons.join(' / ') || '（无）'}`);
+			return true;
 		}
-		else {
-			await sleep(400);
-			step('首启弹窗', `已关闭（${how}）—— 开头：${String(blocking.text).split('\n')[0]}`);
-		}
+		await sleep(500);
+		step('挡住页面的弹窗', `${how} —— 正文：${seen.text}；按钮：${seen.buttons.join(' / ') || '（无）'}`);
+		return true;
+	};
+	// 一次关不干净是常态（通知关掉后可能又浮出提示），最多试三轮，之后不再纠缠。
+	for (let round = 0; round < 3; round += 1) {
+		if ((await dismissBlocking()) === false) break;
 	}
 
-	// 设置入口不写死选择器：DSH 换代时类名会变，而这几条是语义线索。
+	/** 设置面板真的开了吗 —— 认「里面有本插件那行」的那张对话框。 */
+	const settingsOpen = async () => await session.evaluate(`(() => {
+		const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+			.filter(node => node.getBoundingClientRect().width > 0);
+		return dialogs.some(node => node.querySelector('[class*="dshCc_"]') !== null);
+	})()`);
+
+	/** 成功之后把面板正文记一笔（只为了日志好读）。 */
+	const reportPanel = async () => {
+		const panel = await session.evaluate(`(() => {
+			const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+				.filter(node => node.getBoundingClientRect().width > 0);
+			const host = dialogs.find(node => node.querySelector('[class*="dshCc_"]') !== null);
+			if (host === undefined) return { present: false };
+			return { present: true, text: (host.innerText || '').trim().slice(0, 120) };
+		})()`);
+		step('面板', panel.present ? `已打开，正文开头：${String(panel.text).split('\n')[0]}` : '面板里有本插件那行，但读不出正文');
+		return panel.present;
+	};
+
+	/** 把菜单收掉，免得挡住下一条路。 */
+	const closeMenu = async () => {
+		for (const type of ['keyDown', 'keyUp']) {
+			await session.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+		}
+		await sleep(300);
+	};
+
+	// 设置入口每换代都挪窝：有一版在侧栏底部直接写着 Settings，有一版折进左下角「更多」的
+	// 菜单里，还有一版只在菜单里露出快捷键（Ctrl + Alt + ,）。所以按「三条路、每条都验证」
+	// 来做 —— 点完不看结果就往下走，等于把「点到了别的菜单」当成成功。
 	const candidates = [
 		'[data-slot="sidebar.settings"]',
 		'[aria-label*="设置"]',
 		'[title*="设置"]',
-		'button[aria-label*="Settings"]',
+		'button[aria-label*="Settings" i]',
 	];
-	const findEntry = async () => await session.evaluate(`(() => {
+	const direct = await session.evaluate(`(() => {
 		const candidates = ${JSON.stringify(candidates)};
 		for (const selector of candidates) {
-			const nodes = [...document.querySelectorAll(selector)];
-			const visible = nodes.find(node => node.getBoundingClientRect().width > 0);
-			if (visible !== undefined) return { selector, tag: visible.tagName.toLowerCase(), text: (visible.innerText || visible.getAttribute('aria-label') || '').trim().slice(0, 40) };
+			const visible = [...document.querySelectorAll(selector)].find(node => node.getBoundingClientRect().width > 0);
+			if (visible !== undefined) {
+				visible.click();
+				return { selector, tag: visible.tagName.toLowerCase(), text: (visible.innerText || visible.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim().slice(0, 30) };
+			}
 		}
 		return null;
 	})()`);
-	let found = await findEntry();
-	if (found === null) {
-		// 侧栏收起时，设置不在侧栏上，而在左下角「更多」的菜单里（本插件给那个按钮
-		// 定过 252×36 的宽度 —— 就是它）。先开菜单，再按文字找「设置」。
-		const openedMenu = await session.evaluate(`(() => {
-			const triggers = [...document.querySelectorAll('[aria-haspopup="menu"]')]
-				.filter(node => node.getBoundingClientRect().width > 0);
-			const trigger = triggers.find(node => (node.innerText || '').includes('更多')) ?? triggers[triggers.length - 1];
-			if (trigger === undefined) return null;
-			trigger.click();
-			return (trigger.innerText || trigger.getAttribute('aria-label') || '').trim().split('\\n')[0].slice(0, 20);
-		})()`);
-		if (openedMenu === null) {
-			step('找入口', '没找到设置入口：侧栏上没有，也没有可打开的「更多」菜单');
-			return false;
+	if (direct !== null) {
+		await sleep(900);
+		if (await settingsOpen()) {
+			step('找入口', `${direct.selector} → <${direct.tag}> ${direct.text}（已核对：面板里有本插件那行）`);
+			return await reportPanel();
 		}
-		await sleep(400);
-		const picked = await session.evaluate(`(() => {
-			const items = [...document.querySelectorAll('[role="menuitem"]')]
-				.filter(node => node.getBoundingClientRect().width > 0);
-			const item = items.find(node => (node.innerText || '').includes('设置'));
-			if (item === undefined) return null;
-			item.click();
-			// 菜单项里还有快捷键（Ctrl + Alt + ,），取首行就够了。
-			return (item.innerText || '').trim().split('\\n')[0].slice(0, 20);
-		})()`);
-		if (picked === null) {
-			step('找入口', `打开了「更多」菜单（${openedMenu}），里面没有「设置」`);
-			return false;
-		}
-		step('找入口', `「更多」菜单（${openedMenu}）→ ${picked}`);
-		found = { selector: 'role=menuitem（文字含「设置」）', tag: 'button', text: picked };
+		step('找入口', `${direct.selector} 点了，但面板里没有本插件那行 —— 继续找下一条路`);
 	}
-	else {
-		step('找入口', `${found.selector} → <${found.tag}> ${found.text}`);
-		await session.evaluate(`(() => {
-			const node = document.querySelector(${JSON.stringify(found.selector)});
-			if (node) node.click();
-			return true;
-		})()`);
-	}
-	await sleep(900);
 
-	const panel = await session.evaluate(`(() => {
-		const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+	// 第二条路：左下角「更多」菜单。选 trigger 先看文字、再看位置（最靠下的那个），
+	// 因为侧栏里还有别的菜单（工作区列表也声明 `aria-haspopup="menu"`）—— CI 上「取最后一个」
+	// 点到了 Choose workspace，那是上一次栽的地方。
+	const viaMenu = await session.evaluate(`(() => {
+		const triggers = [...document.querySelectorAll('[aria-haspopup="menu"]')]
 			.filter(node => node.getBoundingClientRect().width > 0);
-		if (dialogs.length === 0) return { present: false };
-		// 页面上可能还压着别的对话框（首启通知之类），而 CI 上那张通知的正文里**也有**
-		// 「Settings」字样 —— 按文字认会认错。认「里面有本插件那行」的那张：设置面板
-		// 是这行唯一的家，这个判据不会说谎。认不出来才退到最后一个可见的（后开的在上面）。
-		const textOf = (node) => (node.innerText || '').trim();
-		const host = dialogs.find(node => node.querySelector('[class*="dshCc_"]') !== null);
-		const target = host ?? dialogs[dialogs.length - 1];
-		return { present: true, text: textOf(target).slice(0, 120) };
+		const label = (node) => ((node.innerText || node.getAttribute('aria-label') || '') + ' ' + (node.getAttribute('aria-label') || '')).replace(/\\s+/g, ' ').trim();
+		const named = triggers.find(node => /更多|More/.test(label(node)));
+		const bottom = triggers.slice().sort((left, right) => right.getBoundingClientRect().y - left.getBoundingClientRect().y)[0];
+		const trigger = named ?? bottom;
+		if (trigger === undefined) return null;
+		trigger.click();
+		return { label: label(trigger).split(' ')[0].slice(0, 20), others: triggers.map(node => label(node).split(' ')[0].slice(0, 16)) };
 	})()`);
-	step('面板', panel.present ? `已打开，正文开头：${String(panel.text).split('\\n')[0]}` : '点了入口但没看到对话框');
-	return panel.present;
+	if (viaMenu !== null) {
+		await sleep(500);
+		const picked = await session.evaluate(`(() => {
+			const nodes = [...document.querySelectorAll('[role="menuitem"], [role="menu"] button, [role="menu"] [role="option"], [role="menu"] a')]
+				.filter(node => node.getBoundingClientRect().width > 0);
+			const target = nodes.find(node => /设置|Settings/i.test(node.innerText || ''));
+			const labels = nodes.map(node => ((node.innerText || '').replace(/\\s+/g, ' ').trim() || '?').slice(0, 18)).slice(0, 8);
+			if (target === undefined) return { found: false, labels };
+			target.click();
+			// 菜单项里还带快捷键（Ctrl + Alt + ,），取首行就够。
+			return { found: true, label: ((target.innerText || '').replace(/\\s+/g, ' ').trim() || '?').slice(0, 24) };
+		})()`);
+		await sleep(900);
+		if (picked.found === true && await settingsOpen()) {
+			step('找入口', `「${viaMenu.label}」菜单 → ${picked.label}（已核对：面板里有本插件那行）`);
+			return await reportPanel();
+		}
+		step('找入口', picked.found === false
+			? `打开的是「${viaMenu.label}」菜单，里面没有「设置」项：${picked.labels.join(' / ') || '（空）'}；侧栏的菜单按钮：${viaMenu.others.join(' / ')}`
+			: `点了「${picked.label}」，但面板里没有本插件那行`);
+		await closeMenu();
+	}
+
+	// 第三条路：菜单里写着的那个快捷键。它比任何选择器都稳，但只有菜单可见时才知道它存在，
+	// 所以放最后 —— 前面两条路都失败时，它是最后的证人。
+	await session.send('Input.dispatchKeyEvent', {
+		type: 'keyDown', key: ',', code: 'Comma', windowsVirtualKeyCode: 188, modifiers: 3,
+	});
+	await session.send('Input.dispatchKeyEvent', {
+		type: 'keyUp', key: ',', code: 'Comma', windowsVirtualKeyCode: 188, modifiers: 3,
+	});
+	await sleep(900);
+	if (await settingsOpen()) {
+		step('找入口', 'Ctrl + Alt + , 直接打开（已核对：面板里有本插件那行）');
+		return await reportPanel();
+	}
+	step('找入口', '侧栏、菜单、快捷键三条路都没打开设置面板');
+	return false;
 }
 
 /**
