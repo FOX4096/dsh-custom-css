@@ -1174,7 +1174,7 @@ async function main() {
   renderedText.length = 0;
   renderedClasses.length = 0;
   const menuView = renderRow();
-  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '历史版本', '重命名', '打开目录', '删除']) {
+  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '选择器体检', '历史版本', '重命名', '打开目录', '删除']) {
     assert.ok(renderedText.includes(label), 'the menu renders the ' + label + ' action');
   }
   // The order is a decision, not an accident: the file actions together, the whole-sheet
@@ -1188,7 +1188,7 @@ async function main() {
       if (current.type === 'button' && typeof current.props?.title === 'string') order.push(textOf(current));
       for (const child of current.children ?? []) walk(child);
     })(menuView);
-    const wanted = ['打开文件', '导入', '导出', '格式化', '历史版本', '重命名', '打开目录', '删除', '重置'];
+    const wanted = ['打开文件', '导入', '导出', '格式化', '选择器体检', '历史版本', '重命名', '打开目录', '删除', '重置'];
     const seen = order
       .map(entry => wanted.find(label => entry.startsWith(label)))
       .filter(label => label !== undefined);
@@ -5428,6 +5428,126 @@ const injected = { textContent: ownSheet };
     'Ctrl+Z after a restore does not undo it — applied: ' + JSON.stringify(historic.userStyle().textContent),
   );
 
+  // --- 选择器体检 (the audit page of the actions menu) ----------------------
+  // 自定义 CSS 里大量选择器依赖 DSH 的构建哈希类名。换代改名之后规则不报错、也不消失，只是永远
+  // 不再命中 ——「我明明写了却没生效」。这张页面把「没生效」变成一份可以逐条处理的清单，所以它要
+  // 同时守住三件事：真的把命不中的规则列出来、**不把状态样式报成死规则**（否则第一次打开就是一屏
+  // 红色）、点一下能把那条整条注释掉且原文还在。
+  const AUDIT_SHEET = [
+    '.live-row{color:red}',                    // 命得中（dom.nodes 里有一个）
+    '.gone-shape{color:blue}',                 // 命不中 —— 该报
+    '.tab:hover{color:green}',                 // 状态伪类 —— 不报
+    '.tab.active{color:green}',                // 状态类 —— 不报
+    '@media (min-width: 9999px){ .narrow-only{color:red} }', // 嵌套 —— 不报
+    '.gone-with-comment{color:red;/* keep */}', // 命不中，块里还带一条注释
+  ].join('\n');
+  const auditWrites = [];
+  let auditSheet = AUDIT_SHEET;
+  const auditor = await boot({
+    dom: { nodes: [{ tagName: 'DIV', className: 'live-row', children: [] }] },
+    fetchImpl: async (url, init) => {
+      if (url.endsWith('/list')) {
+        return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      }
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: auditSheet });
+      if (url.endsWith('/write')) {
+        const body = JSON.parse(init.body);
+        auditWrites.push(body.css);
+        auditSheet = body.css;
+        return jsonResponse({ ok: true, name: 'custom.css', bytes: body.css.length });
+      }
+      if (url.includes('/history')) return jsonResponse({ ok: true, name: 'custom.css', entries: [] });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  let auditView = auditor.registrations[0].component();
+  await auditor.runEffects();
+  buttonWith(auditView, '更多操作').props.onClick();
+  hookIndex = 0;
+  renderedText.length = 0;
+  auditView = auditor.registrations[0].component();
+  const auditEntry = buttonWith(auditView, '选择器体检');
+  assert.ok(auditEntry !== null, 'the actions menu offers 选择器体检 — menu: ' + JSON.stringify(renderedText));
+  auditEntry.props.onClick();
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  auditView = auditor.registrations[0].component();
+  assert.ok(renderedClasses.includes('dshCc_versionsHead'), 'the audit page has a header of its own');
+  assert.ok(buttonWith(auditView, '返回') !== null, 'and a way back to the actions');
+  assert.ok(
+    renderedText.some(text => text.includes('2 条规则当前命不中')),
+    'it counts what is dead — status: ' + JSON.stringify(renderedText),
+  );
+  assert.ok(
+    renderedText.some(text => text.includes('.gone-shape')) && renderedText.some(text => text.includes('.gone-with-comment')),
+    'and lists both dead rules by selector — list: ' + JSON.stringify(renderedText),
+  );
+  // The exclusions are the whole reason this page is usable: a first run that reports every hover
+  // style as dead teaches the user to ignore the list.
+  for (const noisy of ['.tab:hover', '.tab.active', '.narrow-only', '.live-row']) {
+    assert.ok(
+      !renderedText.some(text => text === noisy),
+      'it does not report ' + noisy + ' as dead — list: ' + JSON.stringify(renderedText),
+    );
+  }
+  assert.ok(
+    renderedText.some(text => text.startsWith('第 2 行')),
+    'each entry says where it is in the sheet — list: ' + JSON.stringify(renderedText),
+  );
+
+  // One click comments that rule out, with the original text still readable inside the comment.
+  buttonWith(auditView, '第 2 行').props.onClick();
+  await settle();
+  // The editor's writes are debounced (`WRITE_TICK`); a click alone only arms the timer.
+  await auditor.runTimers();
+  assert.strictEqual(
+    auditWrites.length, 1,
+    'the row edit is written once — writes: ' + JSON.stringify(auditWrites),
+  );
+  assert.ok(
+    auditWrites[0].includes('/* .gone-shape{color:blue} */'),
+    'the dead rule is commented out in place — wrote: ' + JSON.stringify(auditWrites[0]),
+  );
+  assert.ok(auditWrites[0].includes('.live-row{color:red}'), 'and nothing else moved');
+  hookIndex = 0;
+  renderedText.length = 0;
+  auditView = auditor.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('1 条规则当前命不中')),
+    'the list shrinks by itself after the edit — list: ' + JSON.stringify(renderedText),
+  );
+
+  // A rule whose block already holds a comment must not be able to END the outer comment early:
+  // a closing marker inside would leave the rest of the rule live, which is worse than not
+  // commenting it at all — the sheet would silently change meaning. (`.gone-with-comment` is the
+  // sixth line of AUDIT_SHEET; commenting the second line out adds no newlines, so it stays there.)
+  buttonWith(auditView, '第 6 行').props.onClick();
+  await settle();
+  await auditor.runTimers();
+  const lastCommentWrite = auditWrites[auditWrites.length - 1];
+  assert.ok(
+    lastCommentWrite.includes('/* .gone-with-comment{color:red;/* keep * /} */'),
+    'the inner closing marker is defused so the outer comment cannot close early — wrote: ' + JSON.stringify(lastCommentWrite),
+  );
+  // Only the CLOSING marker needs defusing: CSS comments do not nest, so an inner opening marker is
+  // just text inside the outer comment. Defusing `/*` as well would mangle the preserved source
+  // without making anything safer.
+  assert.ok(
+    !lastCommentWrite.includes('*/ keep */') && !lastCommentWrite.includes('*/} */'),
+    'and no closing marker survives inside the comment',
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  auditView = auditor.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => text.includes('当前都命得中')),
+    'with nothing dead left the page says so — list: ' + JSON.stringify(renderedText),
+  );
+
   // --- 查找 / 替换 与格式化 ---------------------------------------------------
   // The find bar is one of the few things here with a right answer that does not need a
   // browser: what counts as a hit, and where a hit is marked in the colour layer. The first
@@ -6757,7 +6877,7 @@ const injected = { textContent: ownSheet };
     'nothing was reset merely by rendering the section',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified, selector audit verified');
 }
 
 main().catch((error) => {
