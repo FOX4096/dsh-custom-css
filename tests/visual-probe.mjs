@@ -485,13 +485,26 @@ async function run(options) {
 			result.selectors.push(await measureSelector(session, selector));
 		}
 
-		// 一个都没量到，说明插件根本没被加载（或者设置没打开）—— 这不是「阈值还没定」，
-		// 是这次采集没有意义。0 命中让它红，部分命中只记一行：CI 交一张空表比红更糟，
-		// 因为空的几何看起来和「没变化」一模一样。
+		// 失败分两类，因为两类的处置完全不同：
+		//   · **环境**（exit 2）：设置面板根本没打开 —— 多半是 DSH 换代把入口/首启通知又改了。
+		//     这不是本插件的回归，谁去看都不该去翻 CSS。
+		//   · **回归**（exit 1）：面板开着，可里面找不到本插件那行，或者几何坏掉了。
+		// 之前两类都是 exit 1，红邮件看起来一模一样，得点进 artifact 才知道该找谁。
 		const missed = result.selectors.filter(entry => entry.found !== true);
 		if (missed.length > 0) log('info', `没量到：${missed.map(entry => entry.selector).join('、')}`);
-		if (options.selectors.length > 0 && missed.length === options.selectors.length) {
-			log('error', '请求的选择器一个都没命中 —— 插件大概没加载，这次采集没有意义。');
+		const verdict = classifyRun({
+			settingsRequested: options.openSettings === true,
+			settingsOpened: result.settings.opened === true,
+			selectors: result.selectors,
+		});
+		if (verdict.kind === 'environment') {
+			result.failureKind = 'environment';
+			log('error', '环境：设置面板没有打开 —— 多半是 DSH 改了入口或首启通知（看 steps 最后一条）。这不是本插件的回归。');
+			process.exitCode = 2;
+		}
+		else if (verdict.kind === 'regression') {
+			result.failureKind = 'regression';
+			log('error', '请求的选择器一个都没命中，而设置面板是开着的 —— 插件没挂上，这次采集没有意义。');
 			process.exitCode = 1;
 		}
 
@@ -502,7 +515,11 @@ async function run(options) {
 			if (failures.length === 0 && result.selectors.length > 0) {
 				log('info', `strict 通过：${result.selectors.length} 个选择器都在、都有面积、都不是「布局盒子溢出」`);
 			}
-			if (failures.length > 0) process.exitCode = 1;
+			// 环境问题已经写明原因了，别让第二行错误信息把它盖住，也别把 exit 2 降级成 1。
+			if (failures.length > 0 && verdict.kind === 'ok') {
+				result.failureKind = 'regression';
+				process.exitCode = 1;
+			}
 		}
 
 		// 截图：视觉确认用。结论不靠它 —— PNG 是给人看的，数字是给判断用的。
@@ -776,6 +793,21 @@ async function measureSelector(session, selector) {
 }
 
 /**
+ * 一次采集的「失败分级」。
+ *
+ * 两种红要分清楚，因为处置完全不同：**环境**（DSH 改了入口/通知 → 面板压根没打开）不该让人
+ * 去翻 CSS；**回归**（面板开着但没有本插件那行）才是本插件的问题。分级写成纯函数是为了能单测 ——
+ * 真页面上只可能遇到其中一种，而 CI 每天都在用这套判断。
+ * @param input - `{ settingsRequested, settingsOpened, selectors }`
+ * @returns `{ kind: 'ok' | 'environment' | 'regression', exitCode }`
+ */
+function classifyRun({ settingsRequested, settingsOpened, selectors }) {
+	if (settingsRequested === true && settingsOpened !== true) return { kind: 'environment', exitCode: 2 };
+	if (selectors.length > 0 && selectors.every(entry => entry.found !== true)) return { kind: 'regression', exitCode: 1 };
+	return { kind: 'ok', exitCode: 0 };
+}
+
+/**
  * `--strict` 下必须成立的事。
  *
  * 只判「一定不该发生」的三条，**不判像素阈值** —— 行高 381px 是今天的排版，不是契约；
@@ -809,7 +841,7 @@ function judgeStrict(measured) {
 
 // 判定逻辑单独可测：`strict` 是这个文件里唯一会「下结论」的代码，而它的分支（找不到 /
 // 0 面积 / 溢出 / 滚动容器豁免 / 单轴豁免）在真页面上凑不齐。守卫住入口，import 就只拿函数。
-export { judgeStrict };
+export { classifyRun, judgeStrict };
 
 const invokedDirectly = process.argv[1] !== undefined
 	&& path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
@@ -825,6 +857,11 @@ if (invokedDirectly) {
   --open-settings    先点开设置面板，再量
   --shot             存一张 PNG 到 temp/probe/（CI 上传的就是这个目录）
   --strict           判三条一定不该发生的事：找不到 / 0 面积 / 布局盒子溢出（滚动容器不算）
+
+退出码
+  0 一切正常
+  1 回归：面板开着但没有本插件那行，或几何坏掉了
+  2 环境：设置面板根本没打开（多半是 DSH 改了入口/首启通知）
   --wait <ms>        页面就绪后额外等多久，默认 1200（前端渲染是异步的）
   --timeout <ms>    等页面加载的上限，默认 120000
   --width/--height   视口尺寸，默认 1440x900

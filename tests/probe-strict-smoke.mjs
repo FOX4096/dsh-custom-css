@@ -1,14 +1,15 @@
 /**
- * `strict` 判定的单元测试。
+ * `strict` 判定与失败分级的单元测试。
  *
- * 为什么单独一个文件：`judgeStrict` 是探针里唯一「下结论」的代码，而它的分支在真页面上
- * 凑不齐 —— 找不到元素、0 面积、布局盒子溢出、滚动容器溢出豁免、单轴豁免，五个里能自然
- * 遇到的只有一个。留证的工作流天天跑，判定逻辑本身却没人测，那是本末倒置。
+ * 为什么单独一个文件：`judgeStrict` 与 `classifyRun` 是探针里唯一「下结论」的代码，而它们的
+ * 分支在真页面上凑不齐 —— 找不到元素、0 面积、布局盒子溢出、滚动容器溢出豁免、单轴豁免、
+ * 环境问题 vs 回归，这些里能自然遇到的只有一两种。留证的工作流天天跑，判定逻辑本身却没人测，
+ * 那是本末倒置。
  *
  *   node tests/probe-strict-smoke.mjs
  */
 import assert from 'node:assert';
-import { judgeStrict } from './visual-probe.mjs';
+import { classifyRun, judgeStrict } from './visual-probe.mjs';
 
 /** 一个「一切正常」的测量结果，各用例只改它的一两个字段。 */
 const healthy = {
@@ -49,4 +50,40 @@ assert.match(mixedAxis[0].reason, /纵向 40px/, '而且是纵向那一轴');
 const mixed = judgeStrict([healthy, { ...healthy, selector: '.dshCc_editorWrap', overflowX: 3 }]);
 assert.deepStrictEqual(mixed.map(entry => entry.selector), ['.dshCc_editorWrap']);
 
-console.log('probe-strict-smoke: OK — 正常 / 找不到 / 0 面积 / 溢出 / 滚动容器豁免 / 单轴豁免 / 多选择器');
+// --- 失败分级：环境问题 ≠ 本插件回归 ----------------------------------------
+//
+// 这两种红在 CI 邮件里看起来一样，处置却相反：一个要去改探针/跟进 DSH 换代，一个才是本插件
+// 真的坏了。分级错了比不分级更浪费人。
+
+// 8. 一切正常。
+assert.deepStrictEqual(
+	classifyRun({ settingsRequested: true, settingsOpened: true, selectors: [healthy] }),
+	{ kind: 'ok', exitCode: 0 },
+);
+
+// 9. 要求打开设置，但面板没打开 —— 环境（退出码 2，与人熟知的「命令失败」区分开）。
+assert.deepStrictEqual(
+	classifyRun({ settingsRequested: true, settingsOpened: false, selectors: [] }),
+	{ kind: 'environment', exitCode: 2 },
+	'面板没打开就是环境问题，哪怕一个选择器都没量',
+);
+
+// 10. 面板开着，但一个选择器都没命中 —— 回归。
+assert.deepStrictEqual(
+	classifyRun({ settingsRequested: true, settingsOpened: true, selectors: [{ selector: '.dshCc_row', found: false }] }),
+	{ kind: 'regression', exitCode: 1 },
+);
+
+// 11. 部分命中算正常：个别选择器量不到不说明插件没挂上（`--strict` 会另外把它判死）。
+assert.deepStrictEqual(
+	classifyRun({ settingsRequested: true, settingsOpened: true, selectors: [healthy, { selector: '.gone', found: false }] }),
+	{ kind: 'ok', exitCode: 0 },
+);
+
+// 12. 没要求打开设置时，不该把「面板没开」算成环境问题。
+assert.deepStrictEqual(
+	classifyRun({ settingsRequested: false, settingsOpened: false, selectors: [healthy] }),
+	{ kind: 'ok', exitCode: 0 },
+);
+
+console.log('probe-strict-smoke: OK — 正常 / 找不到 / 0 面积 / 溢出 / 滚动容器豁免 / 单轴豁免 / 多选择器 / 环境 vs 回归');
