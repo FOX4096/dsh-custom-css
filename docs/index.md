@@ -25,6 +25,7 @@
 | [规则面板](./rule-panel.md) | 点选择器展开的那块：属性字典 112 条、值写错了会怎样、声明模板 |
 | [格式校验](./validation.md) | 状态行那行红字怎么读、变量体检在查什么 |
 | [控件](./controls.md) | 表头那几个按钮与菜单、窄窗口下谁先让位、强调显示 |
+| [国际化](./i18n.md) | 跟着 DSH 的语言走：哪些已双语、哪些还是中文、加一条文案的正确姿势 |
 | [写 CSS 用的页面 API](./authoring-api.md) | 控制台里的 `window.dshCss`：读写样式表、查命中数、找死选择器、反查令牌、点选元素 |
 | [`examples/acrylic.css`](../examples/acrylic.css) | 可直接导入的**亚克力皮肤**：渐变壁纸 + 玻璃面板 + 背景模糊 |
 | [`examples/showcase.css`](../examples/showcase.css) | 60 行的最小示例（想学怎么写就看它） |

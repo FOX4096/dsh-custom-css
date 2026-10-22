@@ -425,7 +425,7 @@ function nameOfRequest(url, init) {
  * test bed is the wrong shape of solution. Those assertions are scoped to the half that needs
  * no engine, and the rest of that behaviour is verified in the browser.
  */
-async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, serviceMissing = false, seatsIdle = false }) {
+async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, serviceMissing = false, seatsIdle = false, locale = null }) {
   const styleTags = [];
   const storage = new Map(stored);
   const calls = [];
@@ -732,6 +732,8 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, service
       // clickable — a REQUIRED dependency on that service would take the plugin out of such a
       // composition entirely, which is the mistake this flag exists to catch.
       if (serviceMissing) return undefined;
+      // 语言服务：字典注册与绑定都经由它，测试传一个假实现就能渲染另一种语言。
+      if (name === 'locale') return locale ?? undefined;
       if (name !== 'pluginNavigation') return undefined;
       return { openBundle: (id) => navigationCalls.push(id) };
     },
@@ -3165,14 +3167,14 @@ async function main() {
     );
     // The icon-only find-bar buttons are the ones this was written for; named here so the
     // assertion says which controls it is talking about when it fails.
-    assert.ok(
-      code.includes("'aria-label': '上一个命中'") && code.includes("'aria-label': '下一个命中'"),
-      'the find bar\'s chevron buttons are named',
-    );
-    assert.ok(
-      code.includes("'aria-label': '关闭查找'") && code.includes("'aria-label': '区分大小写'"),
-      'so are its close and case buttons',
-    );
+    //
+    // 名字现在来自 `t()`（国际化），而查找栏只有打开时才在树里 —— 这一处只能按源码断言：
+    // 每个名字既要有 `t('键')` 的调用点，也要在词典里（两份语言各一条，所以出现两次）。
+    for (const key of ['find.prevAria', 'find.nextAria', 'find.close', 'find.case']) {
+      assert.ok(code.includes(`t('${key}')`), 'the find bar translates ' + key);
+      const defined = code.split(`'${key}':`).length - 1;
+      assert.ok(defined === 2, 'the dictionary defines ' + key + ' in both locales — got ' + defined);
+    }
   }
 
   // --- the rule-highlight toggle --------------------------------------------
@@ -3614,8 +3616,8 @@ async function main() {
       'and it is refreshed on every commit rather than only when the selector text changes',
     );
     assert.ok(
-      code.includes('highlightCount === 0 ? \'无命中\' : highlightCount + \' 个命中\''),
-      'the toggle renders that count',
+      code.includes("t('panel.labelNone')") && code.includes("t('panel.labelCount', { count: highlightCount })"),
+      'the toggle renders that count (through the dictionary, so both locales show it)',
     );
     assert.ok(
       !code.includes("highlight.nodes.length + ' 个命中'"),
@@ -5428,6 +5430,100 @@ const injected = { textContent: ownSheet };
     'Ctrl+Z after a restore does not undo it — applied: ' + JSON.stringify(historic.userStyle().textContent),
   );
 
+  // --- 国际化：有 locale 服务时按当前语言渲染 --------------------------------
+  //
+  // 机制是「两份词典交给 DSH 的 locale 服务，再绑成 t」；没有该服务的组合（默认那种 boot）
+  // 保持中文 —— 上面那一整段断言跑的就是这条路径。这一节守另外两件事：英文词典真的被用上了，
+  // 以及**两份词典的键集完全一致**（少一条就会在英文界面里漏出中文，而单测抓不到）。
+  const localeCalls = [];
+  const dictionaries = {};
+  /** 当前语言，测试可以改它并触发订阅者 —— 模拟用户在设置里切换语言。 */
+  let activeLocale = 'en';
+  const localeListeners = [];
+  const fakeLocale = {
+    register(namespace, tag, dict) {
+      localeCalls.push({ namespace, tag });
+      dictionaries[tag] = dict;
+      return () => {};
+    },
+    // 假 `t`：查当前语言那一份，占位符替换与真的实现同样处理。
+    bind() {
+      return (key, vars) => String(dictionaries[activeLocale]?.[key] ?? key).replace(/\{(\w+)\}/g, (whole, name) => (
+        vars !== undefined && Object.hasOwn(vars, name) ? String(vars[name]) : whole
+      ));
+    },
+    subscribe(listener) {
+      localeListeners.push(listener);
+      return () => {};
+    },
+  };
+  /**
+   * 切换语言：和真的服务一样，只通知订阅者 —— 换字靠插件自己订阅后让组件重渲染。
+   */
+  const switchLocale = (tag) => {
+    activeLocale = tag;
+    for (const listener of localeListeners) listener();
+  };
+  const localized = await boot({
+    locale: fakeLocale,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  assert.deepStrictEqual(
+    localeCalls.map(entry => entry.tag).sort(), ['en', 'zh'],
+    'both dictionaries are handed to the locale service — got: ' + JSON.stringify(localeCalls),
+  );
+  assert.ok(
+    localeCalls.every(entry => entry.namespace === 'custom-css'),
+    'under this plugin namespace — got: ' + JSON.stringify(localeCalls),
+  );
+  const zhKeys = Object.keys(dictionaries.zh).sort();
+  const enKeys = Object.keys(dictionaries.en).sort();
+  assert.deepStrictEqual(
+    enKeys, zhKeys,
+    'the two dictionaries carry exactly the same keys — only in zh: '
+      + JSON.stringify(zhKeys.filter(key => !enKeys.includes(key)))
+      + ', only in en: ' + JSON.stringify(enKeys.filter(key => !zhKeys.includes(key))),
+  );
+  hookIndex = 0;
+  renderedText.length = 0;
+  const localizedRow = localized.registrations[0].component();
+  for (const english of ['Custom CSS', 'More actions', 'Pick element', 'Find']) {
+    assert.ok(renderedText.includes(english), 'the row renders English chrome (' + english + ') — got: ' + JSON.stringify(renderedText.slice(0, 12)));
+  }
+  for (const chinese of ['自定义 CSS', '更多操作', '拾取元素']) {
+    assert.ok(!renderedText.includes(chinese), 'and no Chinese chrome leaks through (' + chinese + ')');
+  }
+  // 菜单里也是英文：一条键漏翻译时这里会露出来。点的是**这一遍渲染**的节点 —— 再渲染一遍去点，
+  // hook 槽位会写到新槽里，菜单永远不会开（这一行第一版就是这么写错的）。
+  buttonWith(localizedRow, 'More actions').props.onClick();
+  hookIndex = 0;
+  renderedText.length = 0;
+  const localizedMenu = localized.registrations[0].component();
+  for (const label of ['Check selectors', 'Versions', 'Rename', 'Delete', 'Reset']) {
+    assert.ok(renderedText.includes(label), 'the menu is translated too (' + label + ') — got: ' + JSON.stringify(renderedText));
+  }
+  assert.ok(buttonWith(localizedMenu, 'Check selectors') !== null, 'and the entries stay clickable');
+
+  // 切语言：服务只通知订阅者，换字靠插件自己订阅后让 store 前进一步、组件重渲染。
+  // 「重渲染就够了、不必重新挂载」是这套接法的全部承诺，所以这里直接验它。
+  switchLocale('zh');
+  hookIndex = 0;
+  renderedText.length = 0;
+  const localizedAgain = localized.registrations[0].component();
+  assert.ok(
+    renderedText.includes('自定义 CSS') && renderedText.includes('更多操作'),
+    '切回中文后同一份组件重渲染即换字 — got: ' + JSON.stringify(renderedText.slice(0, 8)),
+  );
+  assert.ok(
+    !renderedText.includes('Custom CSS'),
+    'and the English copy is gone',
+  );
+
   // --- 选择器体检 (the audit page of the actions menu) ----------------------
   // 自定义 CSS 里大量选择器依赖 DSH 的构建哈希类名。换代改名之后规则不报错、也不消失，只是永远
   // 不再命中 ——「我明明写了却没生效」。这张页面把「没生效」变成一份可以逐条处理的清单，所以它要
@@ -6877,7 +6973,7 @@ const injected = { textContent: ownSheet };
     'nothing was reset merely by rendering the section',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified, selector audit verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified, selector audit verified, i18n verified');
 }
 
 main().catch((error) => {
