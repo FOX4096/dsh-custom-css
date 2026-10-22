@@ -34,6 +34,9 @@ let fenceVerdict;
  */
 const effectCleanups = [];
 
+/** The DSH release the fake composition claims to run under (see the `/about` assertions). */
+const fakeRelease = { version: '0.2.1-rc.2', commit: 'abc1234' };
+
 const ctx = {
   inject(services, body) {
     assert.deepStrictEqual(services, ['webServer'], 'the plugin mounts on webServer');
@@ -52,6 +55,10 @@ const ctx = {
     });
   },
   get(name) {
+    // The DSH release the composition runs under. `/about` reports it so a bug report can say which
+    // release broke something — the browser half has no way to learn it on its own. A canned answer
+    // here is enough: what matters is that the plugin asks for the RIGHT service by name.
+    if (name === 'clientModules') return { release: fakeRelease };
     if (name !== 'connection') return undefined;
     return { requestRejection: () => fenceVerdict };
   },
@@ -249,7 +256,7 @@ apply({
       webServer: { register(registration) { secondRoute = registration; return () => {}; } },
     });
   },
-  get: () => undefined,
+  get: (name) => (name === 'clientModules' ? { release: fakeRelease } : undefined),
 }, { watch: false });
 const req = Readable.from([]);
 req.method = 'GET';
@@ -638,6 +645,11 @@ assert.strictEqual(about.payload.name, manifest.name, 'under the package name');
 assert.strictEqual(about.payload.license, manifest.license, 'with its license');
 assert.strictEqual(about.payload.dir, stylesDir, 'and where the sheets are, so the section can say');
 assert.strictEqual(typeof about.payload.platform, 'string', 'plus what the Host half is running on');
+// The running DSH release is the one number a bug report needs and the browser half cannot learn on
+// its own. It comes from DSH's `clientModules` service, asked once at mount — so this asserts the
+// plugin asks for the RIGHT service by name, not just that a key exists.
+assert.strictEqual(about.payload.dsh, '0.2.1-rc.2', 'about names the DSH release it runs under');
+assert.strictEqual(about.payload.dshCommit, 'abc1234', 'and the commit that release was built from');
 
 // --- rename / delete / open-dir ---------------------------------------------
 //

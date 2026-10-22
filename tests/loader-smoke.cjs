@@ -425,7 +425,7 @@ function nameOfRequest(url, init) {
  * test bed is the wrong shape of solution. Those assertions are scoped to the half that needs
  * no engine, and the rest of that behaviour is verified in the browser.
  */
-async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, serviceMissing = false }) {
+async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, serviceMissing = false, seatsIdle = false }) {
   const styleTags = [];
   const storage = new Map(stored);
   const calls = [];
@@ -738,6 +738,10 @@ async function boot({ fetchImpl, stored = new Map(), supports, dom = {}, service
     slots: {
       inject(name, factory) {
         waits.push(name);
+        // `seatsIdle` models the composition where DSH never serves the seat — a renamed slot after
+        // a DSH upgrade. The factory is simply never called, which is exactly the failure the
+        // client half's watchdog exists to make visible; nothing else about it is observable.
+        if (seatsIdle) return () => {};
         return factory();
       },
       register(options, component) {
@@ -1000,6 +1004,62 @@ async function main() {
   ]) {
     assert.ok(ownSheet.includes(guard), 'overflow guard is present: ' + guard);
   }
+
+  // --- 一个永远不会就位的设置槽位，必须变成一条能搜索的 warn -----------------
+  //
+  // DSH 换代改了槽位名时，插件不报错：`slots.inject` 的回调永远不被调用，于是「设置 → 通用」里
+  // 少了一行，用户以为插件没装，作者这边零信号。这是这个插件最后一个盲区，所以那条 warn 要有
+  // 用例守着 —— 顺手也守「正常情况下不许出现这条警告」，否则兜底日志会把真问题淹掉。
+  const seatWarnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => { seatWarnings.push(args.join(' ')); };
+  try {
+    let idleReply;
+    const idleHost = await boot({
+      seatsIdle: true,
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [], active: null });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '', rev: null, absent: true });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: '0.2.1-rc.2', dshCommit: 'abc1234' });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    assert.deepStrictEqual(idleHost.registrations, [], 'with an idle seat the row is never registered');
+    assert.ok(
+      idleHost.timers.some(entry => entry.ms === 3000 && !entry.cancelled),
+      'the watchdog is armed with a 3s timer',
+    );
+    assert.deepStrictEqual(seatWarnings, [], 'and says nothing while the seat may still arrive');
+    await idleHost.runTimers();
+    idleReply = seatWarnings.join('\n');
+    assert.ok(idleReply.includes('settings.general.item'), 'the warning names the slot that never arrived');
+    assert.ok(idleReply.includes('known-issues'), 'and points at the known-issues page');
+    assert.ok(idleReply.includes('0.2.1-rc.2'), 'and carries the DSH release from /about — the number a report needs');
+    assert.ok(idleReply.includes('9.9.9'), 'plus this plugin\'s own version');
+
+    // 正常路径：槽位立刻到位，定时器被撤掉，一条警告都不该有。
+    seatWarnings.length = 0;
+    const healthySeat = await boot({
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [], active: null });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '', rev: null, absent: true });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    assert.strictEqual(healthySeat.registrations.length, 3, 'a live seat registers the row and the two detail sections');
+    assert.strictEqual(healthySeat.registrations[0].options.id, 'custom-css', 'the row keeps its seat id');
+    assert.ok(
+      healthySeat.timers.every(entry => entry.ms !== 3000 || entry.cancelled),
+      'and the watchdog is cleared the moment the seat arrives',
+    );
+    await healthySeat.runTimers();
+    assert.deepStrictEqual(seatWarnings, [], 'no warning on the healthy path');
+  }
+  finally {
+    console.warn = originalWarn;
+  }
+
 
   // --- radii come from DSH's ladder, not from literals ----------------------
   // A regression guard with a specific history: every control in this row used to carry
@@ -6697,7 +6757,7 @@ const injected = { textContent: ownSheet };
     'nothing was reset merely by rendering the section',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified');
 }
 
 main().catch((error) => {
