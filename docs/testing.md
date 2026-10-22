@@ -84,6 +84,11 @@
 
 无头 Edge + CDP，只测量不断言。见 [开发 · 视觉探针](./development.md#视觉探针在真-chromium-里量不靠看)。
 
+**能先点开页面里的面**：`--click "text=更多操作" --click "text=选择器体检"`（`text=` 前缀按文字找，
+其余按 CSS 选择器）。没有这一步，探针只能看设置行本身；有了它，规则面板、体检页、历史版本页这些
+「藏在菜单下面」的地方也能量。**点不开就是失败**（`failureKind: 'regression'`）—— 静默跳过会让
+「面没打开」伪装成「里面没有元素」。
+
 ---
 
 ## CI：三个工作流
@@ -92,7 +97,7 @@
 | --- | --- | --- |
 | [`ci.yml`](../.github/workflows/ci.yml) | 每个 push / PR | Node 20 / 22 两档：语法自检、两套冒烟测试、令牌 / 圆角 / 字体 / 可访问名巡检、跨版本兼容断言 |
 | [`publish.yml`](../.github/workflows/publish.yml) | 推 `v*` tag | 跑测试 → **OIDC 受信发布**（带 provenance 签名，不需要任何长期令牌）→ 自动建 GitHub Release |
-| [`compat-watch.yml`](../.github/workflows/compat-watch.yml) | 每 6 小时 + 手动 | DSH 换代检查：发现新版本 → 断言 → 通过则提交文档更新 |
+| [`compat-watch.yml`](../.github/workflows/compat-watch.yml) | 每 6 小时 + 手动 | DSH 换代检查：发现新版本 → 断言 → 通过则提交文档更新，**并补跑一次 `visual.yml`**（换代那一刻最容易出事，契约检查证明不了「界面还能用」） |
 
 **发布只需一个 tag**：
 

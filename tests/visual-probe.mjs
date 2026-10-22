@@ -73,6 +73,7 @@ function log(level, message) {
 function parseArgs(argv) {
 	const options = {
 		selectors: [],
+		clicks: [],
 		waitMs: 1200,
 		timeoutMs: 120_000,
 		shot: false,
@@ -86,6 +87,7 @@ function parseArgs(argv) {
 		const arg = argv[index];
 		const next = () => argv[++index];
 		if (arg === '--sel') options.selectors.push(next());
+		else if (arg === '--click') options.clicks.push(next());
 		else if (arg === '--wait') options.waitMs = Number(next());
 		else if (arg === '--timeout') options.timeoutMs = Number(next());
 		else if (arg === '--width') options.width = Number(next());
@@ -391,6 +393,7 @@ async function run(options) {
 		pageErrors: [],
 		failedRequests: [],
 		settings: { opened: false, steps: [] },
+		clicks: [],
 		selectors: [],
 	};
 
@@ -481,8 +484,23 @@ async function run(options) {
 			await new Promise(resolve => setTimeout(resolve, options.waitMs));
 		}
 
+		// 「页面里的某个面」也能打开：菜单、面板、第二层分页。没有这一步，探针就只能看设置行，
+		// 而那行的内部（规则面板、体检页）恰恰是改版最多的地方。
+		for (const target of options.clicks) {
+			result.clicks.push(await clickTarget(session, target));
+			await new Promise(resolve => setTimeout(resolve, 350));
+		}
+
 		for (const selector of options.selectors) {
 			result.selectors.push(await measureSelector(session, selector));
+		}
+
+		// 一次没点开就不是「里面没有元素」：先把这次采集判红，再照常量（截图仍然有用）。
+		const failedClicks = result.clicks.filter(entry => entry.clicked !== true);
+		if (failedClicks.length > 0) {
+			result.failureKind = 'regression';
+			log('error', `有 ${failedClicks.length} 个控件没点开（${failedClicks.map(entry => entry.target).join('、')}）—— 后面量到的数不能当证据。`);
+			process.exitCode = 1;
 		}
 
 		// 失败分两类，因为两类的处置完全不同：
@@ -747,6 +765,48 @@ async function openSettings(session, result) {
 }
 
 /**
+ * 点开页面里的一个控件，为「量里面的东西」铺路。
+ *
+ * 支持两种写法：
+ *   · `text=更多操作` —— 在 button / menuitem / tab / a 里按文字找（最稳：DSH 的类名是构建哈希）；
+ *   · 其余按 CSS 选择器找。
+ * 只点**可见**的第一个命中；找不到就记下来并让整次采集红 —— 静默跳过会让「面没打开」伪装成
+ * 「里面没有元素」。
+ * @param session - CDP 会话
+ * @param target - `text=…` 或 CSS 选择器
+ * @returns `{ target, clicked, text }`
+ */
+async function clickTarget(session, target) {
+	const outcome = await session.evaluate(`(() => {
+		const target = ${JSON.stringify(target)};
+		const visible = (node) => node.getBoundingClientRect().width > 0;
+		let node;
+		if (target.startsWith('text=')) {
+			const needle = target.slice(5);
+			node = [...document.querySelectorAll('button, [role="menuitem"], [role="tab"], [role="button"], a')]
+				.filter(visible)
+				.find(candidate => (candidate.innerText || '').includes(needle));
+		}
+		else {
+			node = [...document.querySelectorAll(target)].find(visible);
+		}
+		if (node === undefined) return { clicked: false };
+		node.click();
+		return {
+			clicked: true,
+			tag: node.tagName.toLowerCase(),
+			text: (node.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
+		};
+	})()`);
+	if (outcome.clicked !== true) {
+		log('error', `找不到要点的控件：${target}`);
+		return { target, clicked: false };
+	}
+	log('debug', `已点开 ${target} → <${outcome.tag}> ${outcome.text}`);
+	return { target, clicked: true, text: outcome.text };
+}
+
+/**
  * 量一个选择器。
  *
  * 返回的每个字段都是可以直接下结论的数字：`rect` 用来定位、`overflowX/Y` 用来看
@@ -855,6 +915,7 @@ if (invokedDirectly) {
 选项
   --sel <选择器>     量这个选择器（可出现多次）
   --open-settings    先点开设置面板，再量
+  --click <目标>      先点开一个控件：text=文字 或 CSS 选择器（可多次，按顺序点）
   --shot             存一张 PNG 到 temp/probe/（CI 上传的就是这个目录）
   --strict           判三条一定不该发生的事：找不到 / 0 面积 / 布局盒子溢出（滚动容器不算）
   --wait <ms>        页面就绪后额外等多久，默认 1200（前端渲染是异步的）

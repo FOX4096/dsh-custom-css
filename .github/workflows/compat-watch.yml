@@ -21,6 +21,9 @@ on:
 
 permissions:
   contents: write
+  # 发现新版本时要 dispatch 一次视觉探针（下方最后一步）。`gh workflow run` 需要这个权限，
+  # 只给 `contents: write` 会 403。
+  actions: write
 
 concurrency:
   group: dsh-compat-watch
@@ -58,10 +61,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 提交文档更新
+        id: compat-commit
         run: |
           set -euo pipefail
           if git diff --quiet; then
             echo "DSH 没有新版本，文档无需改动"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -77,9 +82,23 @@ jobs:
           COUNT="$(node -p "require('./compat.json').knownGood.length")"
           if git diff --cached --quiet; then
             echo "只有工作区改动，没有暂存内容 —— 不动"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git commit -m "docs(compat): 自动更新 DSH 版本适配矩阵（最新 ${NEWEST}，已断言 ${COUNT} 个版本）"
           git pull --rebase --autostash origin main
           git push origin HEAD:main
           echo "已提交并推送"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # 换代那一刻才是最容易出事的时刻：契约检查能证明「槽位还在」，证明不了「界面还能用」。
+      # 所以每发现一个新版本就补跑一次视觉探针，给 DSH 的每个版本留一张当时的截图与几何，
+      # 而不是等每天八点那次（它会漂移好几个小时）。
+      #
+      # 为什么不用 `workflow_run` 串起来：那个触发器要单独写一个 workflow 文件，还会因为
+      # 「上游提交是 bot 推的」这类细节绕一圈。一次 dispatch 就够，而且失败互不牵连。
+      - name: DSH 有新版就补一张视觉证据
+        if: steps.compat-commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run visual.yml --ref main --repo "$GITHUB_REPOSITORY"
