@@ -811,12 +811,14 @@ async function openSettings(session, result) {
  * 三种写法：
  *   · `text=更多操作` —— 按文字找，优先 button / menuitem / tab / a，找不到再退到「包含这段文字的
  *     最深的那个元素」（插件列表的行是 div + onClick，按钮容器有时只是外层壳）；
- *   · `nav=插件` —— 同上，但**这是 DSH 自己的导航**：点不开算环境问题（退出码 2），不是本插件回归；
+ *   · `nav=插件|Plugins` —— 同上，但**这是 DSH 自己的导航**：点不开算环境问题（退出码 2），不是本
+ *     插件回归。`|` 分隔多个候选文字：CI 的界面是英文，本机是中文，同一套采集要两边都能用；
  *   · 其余按 CSS 选择器找。
  * 只点**可见**的命中；找不到就记下来并让整次采集红 —— 静默跳过会让「面没打开」伪装成
  * 「里面没有元素」。
  * @param session - CDP 会话
  * @param target - `text=…` / `nav=…` / CSS 选择器
+ * @param attemptMs - 轮询多久（毫秒）
  * @returns `{ target, clicked, text, navigation }`
  */
 async function clickTarget(session, target, attemptMs = 8000) {
@@ -832,10 +834,13 @@ async function clickTarget(session, target, attemptMs = 8000) {
 		const labelOf = (node) => (node.innerText || node.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
 		let node;
 		if (target.startsWith('text=') || target.startsWith('nav=')) {
-			const needle = target.slice(4);
+			// 「|」分隔多个候选：CI 是英文界面、本机是中文，同一套采集要两边都能用。
+			// （注意：这段是注入浏览器的模板字符串，注释里不能再出现反引号 —— 会提前结束模板。）
+			const needles = target.slice(4).split('|').map(part => part.trim()).filter(part => part !== '');
+			const matches = (candidate) => needles.some(needle => (candidate.innerText || '').includes(needle));
 			const controls = [...document.querySelectorAll('button, [role="menuitem"], [role="tab"], [role="button"], a')]
 				.filter(visible)
-				.filter(candidate => (candidate.innerText || '').includes(needle));
+				.filter(matches);
 			// Shortest label that still contains the needle: the row rather than the page.
 			node = controls.sort((left, right) => labelOf(left).length - labelOf(right).length)[0];
 			if (node === undefined) {
@@ -843,7 +848,7 @@ async function clickTarget(session, target, attemptMs = 8000) {
 				// bubbles to whatever handler the row installed).
 				node = [...document.querySelectorAll('div, li, span, h1, h2, h3, p')]
 					.filter(visible)
-					.filter(candidate => (candidate.innerText || '').includes(needle))
+					.filter(matches)
 					.sort((left, right) => (left.innerText || '').length - (right.innerText || '').length)[0];
 			}
 		}

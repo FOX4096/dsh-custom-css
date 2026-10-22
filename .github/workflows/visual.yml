@@ -67,11 +67,12 @@ jobs:
       #
       # `nav=` 前缀标的是 DSH 自己的导航（侧栏「插件」→ 列表里的这一行）：这两步点不开属于
       # 环境问题（退出码 2），不是本插件回归 —— 分级写在 tests/visual-probe.mjs 的 classifyRun 里。
+      # `|` 分隔多个候选文字：runner 上是英文界面（Plugins），本机是中文（插件）。
       - name: Probe the wallpaper panel
         shell: pwsh
         run: |
           node tests/visual-probe.mjs --strict `
-            --click "nav=插件" --click "nav=dsh-custom-css" `
+            --click "nav=插件|Plugins" --click "nav=dsh-custom-css" `
             --sel .dshWp_root --sel .dshWp_columns --sel .dshWp_preview --shot
 
       - name: Upload probe artifacts
