@@ -393,6 +393,7 @@ async function run(options) {
 		pageErrors: [],
 		failedRequests: [],
 		settings: { opened: false, steps: [] },
+		dismissed: [],
 		clicks: [],
 		selectors: [],
 	};
@@ -479,6 +480,32 @@ async function run(options) {
 		result.authenticated = true;
 		result.title = await session.evaluate('document.title');
 
+		// 「页面根本没加载」和「界面里找不到控件」是两件事，但长得一模一样：实例没起来时浏览器
+		// 显示的是自己的错误页，正文里一个控件都没有，后面的每一步都会以「找不到」告终，而报告会
+		// 把人引向「DSH 改了入口」。先认这一刻：正文太短、或带着浏览器的错误文案，就是环境问题。
+		const appPage = await session.evaluate(`(() => {
+			const text = (document.body?.innerText ?? '').trim();
+			return { length: text.length, head: text.replace(/\\s+/g, ' ').slice(0, 80) };
+		})()`);
+		const browserError = /拒绝连接|无法访问此页面|ERR_CONNECTION_REFUSED|This page isn.t working|ERR_EMPTY_RESPONSE/i
+			.test(String(appPage.head) + ' ' + String(result.title));
+		if (browserError || appPage.length < 40) {
+			result.failureKind = 'environment';
+			log('error', `页面没加载出来（正文 ${appPage.length} 字符，开头：${JSON.stringify(appPage.head)}）—— 先确认开发实例在跑（node dev/instance.mjs status）。`);
+			process.exitCode = 2;
+			throw new Error('page-not-loaded');
+		}
+
+		// 先把挡住页面的通知关掉：它盖在正中，截图里只有它，而它下面的一切（插件的两个节、
+		// 插件列表）都点不着。设置流程自己也会调一次，这里调是为了「不打开设置」的采集。
+		for (let round = 0; round < 3; round += 1) {
+			const closed = await dismissBlockingDialogs(session, (name, detail) => {
+				result.dismissed.push({ name, detail });
+				log('debug', `${name} —— ${detail}`);
+			});
+			if (closed === false) break;
+		}
+
 		if (options.openSettings) {
 			result.settings.opened = await openSettings(session, result);
 			await new Promise(resolve => setTimeout(resolve, options.waitMs));
@@ -496,11 +523,17 @@ async function run(options) {
 		}
 
 		// 一次没点开就不是「里面没有元素」：先把这次采集判红，再照常量（截图仍然有用）。
+		// 分级看目标本身：`nav=` 是 DSH 自己的导航，点不开说明界面变了（环境）；点我们自己的
+		// 控件（`text=`）点不开才是回归。
+		//
+		// 三处判定都写 `Math.max(...)` 而不是直接赋值：环境（2）压过回归（1），一个「面板没打开」
+		// 的事实比它引出的「所以选择器都没量到」更根本 —— 先判到的那条不该被后判到的覆盖。
 		const failedClicks = result.clicks.filter(entry => entry.clicked !== true);
 		if (failedClicks.length > 0) {
-			result.failureKind = 'regression';
+			const navigationFailed = failedClicks.every(entry => entry.navigation === true);
+			result.failureKind = navigationFailed ? 'environment' : 'regression';
 			log('error', `有 ${failedClicks.length} 个控件没点开（${failedClicks.map(entry => entry.target).join('、')}）—— 后面量到的数不能当证据。`);
-			process.exitCode = 1;
+			process.exitCode = Math.max(process.exitCode ?? 0, navigationFailed ? 2 : 1);
 		}
 
 		// 失败分两类，因为两类的处置完全不同：
@@ -518,12 +551,12 @@ async function run(options) {
 		if (verdict.kind === 'environment') {
 			result.failureKind = 'environment';
 			log('error', '环境：设置面板没有打开 —— 多半是 DSH 改了入口或首启通知（看 steps 最后一条）。这不是本插件的回归。');
-			process.exitCode = 2;
+			process.exitCode = Math.max(process.exitCode ?? 0, 2);
 		}
 		else if (verdict.kind === 'regression') {
-			result.failureKind = 'regression';
-			log('error', '请求的选择器一个都没命中，而设置面板是开着的 —— 插件没挂上，这次采集没有意义。');
-			process.exitCode = 1;
+			result.failureKind = result.failureKind ?? 'regression';
+			log('error', '请求的选择器一个都没命中 —— 插件没挂上，这次采集没有意义。');
+			process.exitCode = Math.max(process.exitCode ?? 0, 1);
 		}
 
 		// `--strict`：只判那几条「无论设计怎么变都不该成立」的事（见 judgeStrict）。
@@ -535,8 +568,8 @@ async function run(options) {
 			}
 			// 环境问题已经写明原因了，别让第二行错误信息把它盖住，也别把 exit 2 降级成 1。
 			if (failures.length > 0 && verdict.kind === 'ok') {
-				result.failureKind = 'regression';
-				process.exitCode = 1;
+				result.failureKind = result.failureKind ?? 'regression';
+				process.exitCode = Math.max(process.exitCode ?? 0, 1);
 			}
 		}
 
@@ -579,6 +612,67 @@ async function run(options) {
 }
 
 /**
+ * 关掉挡住页面的那类通知卡片（「开始使用」/「Preview Notice」）。
+ *
+ * 它换过三副面孔：有关闭按钮的、能 Esc 关掉的、只剩一个「Continue」主按钮的 —— 第三种连 Esc
+ * 都不理，CI 上为此红过两次。所以依次试：主按钮 → 带 aria-label 的关闭按钮 → Esc，并把看到的
+ * 卡片正文与按钮文字交给调用方记进 steps：下次它再变，日志里就有线索，而不是只剩一句「点不开」。
+ *
+ * 设置面板**不算**挡路：认「里面已经有本插件那行」的那张，别把自己的面板关掉。
+ * @param session - CDP 会话
+ * @param onStep - `(name, detail) => void`，没传就只打日志
+ * @returns 是否关掉了什么（调用方据此决定要不要再来一轮）
+ */
+async function dismissBlockingDialogs(session, onStep) {
+	const step = typeof onStep === 'function' ? onStep : (name, detail) => log('debug', `${name} —— ${detail}`);
+	const sleep = async (ms) => { await new Promise(resolve => setTimeout(resolve, ms)); };
+	const seen = await session.evaluate(`(() => {
+		const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+			.filter(node => node.getBoundingClientRect().width > 0);
+		const dialog = dialogs.find(node => node.querySelector('[class*="dshCc_"]') === null);
+		if (dialog === undefined) return null;
+		return {
+			text: (dialog.innerText || '').trim().split('\\n')[0].slice(0, 40),
+			buttons: [...dialog.querySelectorAll('button')]
+				.map(node => ((node.innerText || node.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim()))
+				.filter(label => label !== '')
+				.slice(0, 6),
+		};
+	})()`);
+	if (seen === null) return false;
+	const how = await session.evaluate(`(() => {
+		const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
+			.filter(node => node.getBoundingClientRect().width > 0);
+		const dialog = dialogs.find(node => node.querySelector('[class*="dshCc_"]') === null);
+		if (dialog === undefined) return 'already gone';
+		// 主按钮优先：Continue / 继续 / OK / 确定 / Got it / 知道了。那一版的卡片只有这一条出路。
+		const buttons = [...dialog.querySelectorAll('button')];
+		const primary = buttons.find(node => /^(Continue|继续|Got it|知道了|OK|确定|Close|关闭)$/i.test((node.innerText || '').trim()));
+		if (primary !== undefined) {
+			primary.click();
+			return 'clicked “' + (primary.innerText || '').trim() + '”';
+		}
+		const labelled = buttons.find(node => /关闭|Close/i.test(node.getAttribute('aria-label') || ''));
+		if (labelled !== undefined) {
+			labelled.click();
+			return 'clicked the close button';
+		}
+		return 'no button';
+	})()`);
+	if (how === 'no button') {
+		for (const type of ['keyDown', 'keyUp']) {
+			await session.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+		}
+		await sleep(400);
+		step('挡住页面的弹窗', `${how}，改发 Esc —— 正文：${seen.text}；按钮：${seen.buttons.join(' / ') || '（无）'}`);
+		return true;
+	}
+	await sleep(500);
+	step('挡住页面的弹窗', `${how} —— 正文：${seen.text}；按钮：${seen.buttons.join(' / ') || '（无）'}`);
+	return true;
+}
+
+/**
  * 打开设置面板。
  *
  * 这一步是「开发实例到底能不能用」的核心证据：设置面板是本插件那一行唯一的家，
@@ -594,63 +688,10 @@ async function openSettings(session, result) {
 	};
 	const sleep = async (ms) => { await new Promise(resolve => setTimeout(resolve, ms)); };
 
-	// 全新 profile 会先弹一张通知（「开始使用」/「Preview Notice」），它盖住页面正中。
-	// 这张卡片不是本插件的地盘，但不关掉它，截图里只有它，设置入口也点不着。
-	//
-	// 它换过三副面孔：有关闭按钮的、能 Esc 关掉的、只剩一个「Continue」主按钮的。CI 上
-	// 第二次栽就栽在第三种 —— 当时只试了前两条路。现在依次试：主按钮 → 关闭按钮 → Esc，
-	// 每步都把看到的按钮文字记进 steps，下次再变，日志里就有线索。
-	const dismissBlocking = async () => {
-		const seen = await session.evaluate(`(() => {
-			const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
-				.filter(node => node.getBoundingClientRect().width > 0);
-			// 设置面板本身不算「挡住页面的弹窗」—— 认「里面已经有本插件那行」的那张。
-			const dialog = dialogs.find(node => node.querySelector('[class*="dshCc_"]') === null);
-			if (dialog === undefined) return null;
-			return {
-				text: (dialog.innerText || '').trim().split('\\n')[0].slice(0, 40),
-				buttons: [...dialog.querySelectorAll('button')]
-					.map(node => ((node.innerText || node.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim()))
-					.filter(label => label !== '')
-					.slice(0, 6),
-			};
-		})()`);
-		if (seen === null) return false;
-		const how = await session.evaluate(`(() => {
-			const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"]')]
-				.filter(node => node.getBoundingClientRect().width > 0);
-			const dialog = dialogs.find(node => node.querySelector('[class*="dshCc_"]') === null);
-			if (dialog === undefined) return 'already gone';
-			// 主按钮优先：Continue / 继续 / OK / 确定 / Got it / 知道了。DSH 的通知卡片只有
-			// 这一条出路 —— 点它才是「确认读过了」，Esc 和 × 在那一版里都不存在。
-			const buttons = [...dialog.querySelectorAll('button')];
-			const primary = buttons.find(node => /^(Continue|继续|Got it|知道了|OK|确定|Close|关闭)$/i.test((node.innerText || '').trim()));
-			if (primary !== undefined) {
-				primary.click();
-				return 'clicked “' + (primary.innerText || '').trim() + '”';
-			}
-			const labelled = buttons.find(node => /关闭|Close/i.test(node.getAttribute('aria-label') || ''));
-			if (labelled !== undefined) {
-				labelled.click();
-				return 'clicked the close button';
-			}
-			return 'no button';
-		})()`);
-		if (how === 'no button') {
-			for (const type of ['keyDown', 'keyUp']) {
-				await session.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
-			}
-			await sleep(400);
-			step('挡住页面的弹窗', `${how}，改发 Esc —— 正文：${seen.text}；按钮：${seen.buttons.join(' / ') || '（无）'}`);
-			return true;
-		}
-		await sleep(500);
-		step('挡住页面的弹窗', `${how} —— 正文：${seen.text}；按钮：${seen.buttons.join(' / ') || '（无）'}`);
-		return true;
-	};
-	// 一次关不干净是常态（通知关掉后可能又浮出提示），最多试三轮，之后不再纠缠。
+	// 挡住页面的通知（「开始使用」/「Preview Notice」）先关掉：它不在本插件的地盘里，但截图里
+	// 只有它，而它下面的一切都点不着。三副面孔、三轮重试，理由见 dismissBlockingDialogs。
 	for (let round = 0; round < 3; round += 1) {
-		if ((await dismissBlocking()) === false) break;
+		if ((await dismissBlockingDialogs(session, step)) === false) break;
 	}
 
 	/** 设置面板真的开了吗 —— 认「里面有本插件那行」的那张对话框。 */
@@ -767,43 +808,61 @@ async function openSettings(session, result) {
 /**
  * 点开页面里的一个控件，为「量里面的东西」铺路。
  *
- * 支持两种写法：
- *   · `text=更多操作` —— 在 button / menuitem / tab / a 里按文字找（最稳：DSH 的类名是构建哈希）；
+ * 三种写法：
+ *   · `text=更多操作` —— 按文字找，优先 button / menuitem / tab / a，找不到再退到「包含这段文字的
+ *     最深的那个元素」（插件列表的行是 div + onClick，按钮容器有时只是外层壳）；
+ *   · `nav=插件` —— 同上，但**这是 DSH 自己的导航**：点不开算环境问题（退出码 2），不是本插件回归；
  *   · 其余按 CSS 选择器找。
- * 只点**可见**的第一个命中；找不到就记下来并让整次采集红 —— 静默跳过会让「面没打开」伪装成
+ * 只点**可见**的命中；找不到就记下来并让整次采集红 —— 静默跳过会让「面没打开」伪装成
  * 「里面没有元素」。
  * @param session - CDP 会话
- * @param target - `text=…` 或 CSS 选择器
- * @returns `{ target, clicked, text }`
+ * @param target - `text=…` / `nav=…` / CSS 选择器
+ * @returns `{ target, clicked, text, navigation }`
  */
-async function clickTarget(session, target) {
-	const outcome = await session.evaluate(`(() => {
+async function clickTarget(session, target, attemptMs = 8000) {
+	const navigation = target.startsWith('nav=');
+	// 目标可能还在加载（插件列表先是骨架再出来），所以轮询而不是「找一次找不到就放弃」：
+	// 一次采样失败就判红，会让探针的稳定性完全取决于机器的快慢。
+	const deadline = Date.now() + attemptMs;
+	let outcome = { clicked: false };
+	while (Date.now() < deadline) {
+		outcome = await session.evaluate(`(() => {
 		const target = ${JSON.stringify(target)};
 		const visible = (node) => node.getBoundingClientRect().width > 0;
+		const labelOf = (node) => (node.innerText || node.getAttribute('aria-label') || '').replace(/\\s+/g, ' ').trim();
 		let node;
-		if (target.startsWith('text=')) {
-			const needle = target.slice(5);
-			node = [...document.querySelectorAll('button, [role="menuitem"], [role="tab"], [role="button"], a')]
+		if (target.startsWith('text=') || target.startsWith('nav=')) {
+			const needle = target.slice(4);
+			const controls = [...document.querySelectorAll('button, [role="menuitem"], [role="tab"], [role="button"], a')]
 				.filter(visible)
-				.find(candidate => (candidate.innerText || '').includes(needle));
+				.filter(candidate => (candidate.innerText || '').includes(needle));
+			// Shortest label that still contains the needle: the row rather than the page.
+			node = controls.sort((left, right) => labelOf(left).length - labelOf(right).length)[0];
+			if (node === undefined) {
+				// Nothing button-shaped: the deepest element whose text contains it (a click there
+				// bubbles to whatever handler the row installed).
+				node = [...document.querySelectorAll('div, li, span, h1, h2, h3, p')]
+					.filter(visible)
+					.filter(candidate => (candidate.innerText || '').includes(needle))
+					.sort((left, right) => (left.innerText || '').length - (right.innerText || '').length)[0];
+			}
 		}
 		else {
 			node = [...document.querySelectorAll(target)].find(visible);
 		}
 		if (node === undefined) return { clicked: false };
 		node.click();
-		return {
-			clicked: true,
-			tag: node.tagName.toLowerCase(),
-			text: (node.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 40),
-		};
+		return { clicked: true, tag: node.tagName.toLowerCase(), text: labelOf(node).slice(0, 40) };
 	})()`);
+		if (outcome.clicked === true) break;
+		await new Promise(resolve => setTimeout(resolve, 300));
+	}
 	if (outcome.clicked !== true) {
-		log('error', `找不到要点的控件：${target}`);
-		return { target, clicked: false };
+		log('error', `等了 ${Math.round(attemptMs / 1000)} 秒也没找到要点的控件：${target}`);
+		return { target, clicked: false, navigation };
 	}
 	log('debug', `已点开 ${target} → <${outcome.tag}> ${outcome.text}`);
-	return { target, clicked: true, text: outcome.text };
+	return { target, clicked: true, text: outcome.text, navigation };
 }
 
 /**

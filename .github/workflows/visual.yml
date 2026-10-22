@@ -62,6 +62,18 @@ jobs:
           node tests/visual-probe.mjs --open-settings --strict `
             --sel .dshCc_row --sel .dshCc_editorWrap --sel .dshCc_fileBar --shot
 
+      # 第二个面：本插件自己的详情页（壁纸面板 + 壁纸设置）。这是插件里最大、也是唯一一块
+      # 完全没有视觉证据的界面 —— 两节加起来 500 多行 CSS。
+      #
+      # `nav=` 前缀标的是 DSH 自己的导航（侧栏「插件」→ 列表里的这一行）：这两步点不开属于
+      # 环境问题（退出码 2），不是本插件回归 —— 分级写在 tests/visual-probe.mjs 的 classifyRun 里。
+      - name: Probe the wallpaper panel
+        shell: pwsh
+        run: |
+          node tests/visual-probe.mjs --strict `
+            --click "nav=插件" --click "nav=dsh-custom-css" `
+            --sel .dshWp_root --sel .dshWp_columns --sel .dshWp_preview --shot
+
       - name: Upload probe artifacts
         if: always()
         uses: actions/upload-artifact@v4
