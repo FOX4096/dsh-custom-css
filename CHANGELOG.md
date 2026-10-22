@@ -2,6 +2,31 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.4.9 — 界面的最后一块也双语了：属性字典、校验提示、拾取器
+
+0.4.7 / 0.4.8 把界面翻完了，这一版补上「内容」—— 也就是写 CSS 时真正在看的那些字：
+
+| 面 | 内容 |
+| --- | --- |
+| 属性字典 | 112 个属性名 + 约 90 个下拉值名（`Text color`、`Border box`、`Space between`……）+ 10 个分组 |
+| 声明模板 | 14 个模板名与提示（`Container` / `Column stack`、`Truncate` / `One-line ellipsis`……） |
+| 格式校验与变量体检 | `Line 3: Invalid value for prefers: notacolor`、`Missing 1 closing brace(s)`、`Unclosed comment`、变量读不到 |
+| 元素拾取器 | 面板文案、快捷键四条、层级滑块、五种候选类型与说明、命中数（`the only one` / `N match(es)` / `match count unknown`） |
+| 图片上传与重命名页的其余提示 | 不是图片、超过 32 MB、宿主拒绝、上传失败 |
+
+**两层词典，有意分开**：界面文案走 `t(key)`（注册进 DSH 的 locale 服务，将来加语言包也吃得到）；
+属性字典这类「内容」走 `content('中文原文')` —— 一张中文优先的 CSS 教学表不需要 242 个 key，
+它需要的是同一张表的两种语言。代价写在 [国际化](./docs/i18n.md)：这一层只服务英文。
+
+**顺手修掉一个只有翻译之后才会暴露的 bug**：历史版本页原来的「成功 / 失败」配色是靠
+`versionsNote.startsWith('已恢复')` 猜的 —— 译成英文后每条提示都会被当成失败。现在改用独立的
+`versionsNoteBad` 标志。
+
+唯一仍是中文的是 `window.dshCss` 的控制台帮助（开发者用，且 `docs/authoring-api.md` 有对应说明）。
+
+真机验证（3081，profile 设 en）：打开一条规则后面板显示 `Text color` / `Border radius` /
+`Top left…` / `Padding` / `＋ Add property…` / `Insert a template` / `Container`（截图见 temp/probe）。
+
 ## 0.4.8 — 壁纸面板也说英文了：界面全部双语
 
 0.4.7 先把设置行那一块双语的，这一版补上插件详情页的两个节 —— 到现在**界面上的字全都是双语的**：

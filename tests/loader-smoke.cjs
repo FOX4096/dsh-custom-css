@@ -5456,6 +5456,10 @@ const injected = { textContent: ownSheet };
       localeListeners.push(listener);
       return () => {};
     },
+    // 内容词典（属性名 / 值名 / 模板名）按当前 tag 选表，所以真服务也有这一项。
+    getLocale() {
+      return { active: activeLocale, locales: [], revision: 0 };
+    },
   };
   /**
    * 切换语言：和真的服务一样，只通知订阅者 —— 换字靠插件自己订阅后让组件重渲染。
