@@ -2,6 +2,39 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 0.7.0 — 效果预设（亚克力 / 毛玻璃 / 云母 / 细描边卡片）
+
+规则面板顶部新增 **效果预设** 一排：点一下，把一组声明写进**当前这条规则**。
+
+- **写的是令牌**：`background-color: var(--dsh-material-mica-bg)`、
+  `backdrop-filter: blur(var(--dsh-material-mica-blur)) saturate(…)` —— 于是「更多操作 → 令牌」里
+  调一次材质，所有用了它的规则一起变。
+- **一次编辑**：几条声明在内存里连起来写完，最后只写盘一次 → **一次 `Ctrl+Z` 整体撤回**（与面板里
+  其它写入同一个口径）。
+- **不写 `border` / `background` 简写**：简写会把 `border-radius`、`background-image` 一起重置
+  （`examples/acrylic.css` 文件头原则 3，是踩出来的）。
+- **先检查，再写入**，三种结论：命中了插件自己的界面 → 拒绝；规则一个元素都没命中 → 拒绝并说明；
+  透明底 / 元素太小 → **照写**，但在下面留一行提醒（一个点了没反应的按钮比一个报错的按钮更糟）。
+
+**组件样式统一**（这次一并做掉）：
+
+| 新功能原来 | 现在 |
+| --- | --- |
+| 令牌页的搜索框自绘 `.dshCc_tokenSearch`（边框、底色、圆角全写一遍） | 走共享字段组件 `ui.field`（`.dshUi_field`），本地类只剩布局 |
+| 「接管 / 撤销」自绘 `.dshCc_tokenBtn` | 复用「强调显示」那个胶囊按钮 `.dshCc_hlToggle`（撤销态带 `aria-pressed`） |
+| 覆盖值输入框自绘 | 同样走 `ui.field` |
+| 预设那排按钮（原设计为 `.dshCc_presets`） | **直接复用声明模板那排**：`.dshCc_panelSection` + `.dshCc_tplGrid` + `.dshCc_tpl`；说明那行复用 `.dshCc_versionsNote` |
+
+结果：这一批新功能**没有新增一套按钮 / 字段样式**，删掉了两条自绘 CSS 规则，面板里同一套按钮
+（4 预设 + 14 模板）共用同一个类。
+
+顺带修了两个只有真机/测试床才暴露的问题：预设的「是不是插件自己的控件」判断写成
+`target.closest?.(…) !== null`（`closest` 不存在时 `undefined !== null` 为真 → 永远拒绝）；
+`getComputedStyle` / `getBoundingClientRect` 在拿不到时没有兜底（现在检查项退化成「判断不了」而不是抛错）。
+
+真机验证（3081）：`.demo-bubble`（命中 0）→ 点亚克力给出「这条规则当前一个元素都没命中」；
+`body`（命中）→ 点亚克力，六条声明一次写进去，全部引用材质令牌。
+
 ## 0.6.1 — 材质令牌：云母 / 亚克力 / 毛玻璃的参数
 
 三套材质的参数作为**令牌**随插件发布，出现在「更多操作 → 令牌」最上面的一组

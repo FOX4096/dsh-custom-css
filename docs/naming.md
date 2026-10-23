@@ -167,9 +167,9 @@
 | **令牌值** | `.dshCc_tokenValue` / `.dshCc_tokenInput` | 解析值（解析不到时显示定义值）；接管后变成输入框 | 已实现 |
 | **令牌来源** | `.dshCc_tokenSource` | 哪张样式表定义的（如 `ext/theme.css`） | 已实现 |
 | **令牌用量** | `.dshCc_tokenMeta` | `· 31 条规则`；警告色与明细待做 | 已实现 |
-| **接管开关** | `.dshCc_tokenBtn` | 开 = 写进 `tokens.css`（「接管」）；关 = 删掉那一条（「撤销」） | 已实现 |
-| **重置钮** | `.dshCc_tokenBtn` | 就是「撤销」：删掉覆盖，回到来源值（与接管同一个类） | 已实现 |
-| **令牌搜索框** | `.dshCc_tokenSearch` | 按名字 / 值 / 来源过滤 | 已实现 |
+| **接管开关** | `.dshCc_hlToggle` | 开 = 写进 `tokens.css`（「接管」）；关 = 删掉那一条（「撤销」，`aria-pressed`）—— **复用强调显示那个胶囊按钮** | 已实现 |
+| **重置钮** | `.dshCc_hlToggle` | 就是「撤销」：删掉覆盖，回到来源值（与接管同一个类） | 已实现 |
+| **令牌搜索框** | `.dshUi_field` + `.dshCc_tokenSearch` | 按名字 / 值 / 来源过滤（**共享字段组件**，本地类只管布局） | 已实现 |
 | **令牌列表** | `.dshCc_tokenList` | 限高 260px 自己滚的那一列 | 已实现 |
 | **材质区** | `.dshCc_materialTokens` | 置顶那一块：`--dsh-material-*`（云母 / 亚克力 / 毛玻璃） | 规划中 |
 | **材质令牌** | `--dsh-material-{acrylic,frost,mica}-{bg,blur,saturate,border,grain}` | 预设引用的材质参数 | 规划中 |
@@ -252,10 +252,10 @@
 
 | 名字 | 标识 | 说明 | 状态 |
 | --- | --- | --- | --- |
-| **预设栏** | `.dshCc_presets` | 规则面板上面那一排 | 规划中 |
-| **预设按钮** | `.dshCc_preset` | 一个效果：亚克力 / 毛玻璃 / 云母 / 细描边卡片 | 规划中 |
+| **预设栏** | `.dshCc_panelSection` + `.dshCc_tplGrid` | 规则面板顶部、声明区上方（**复用声明模板那排**） | 已实现 |
+| **预设按钮** | `.dshCc_tpl` | 一个效果：亚克力 / 毛玻璃 / 云母 / 细描边卡片 | 已实现 |
 | **预设检查** | `.dshCc_presetCheck` | 应用前对目标元素的检查（结果三种：可应用 / 有提醒 / 拒绝） | 规划中 |
-| **预设说明** | `.dshCc_presetNote` | 拒绝或降级时那一行原因，以及「仍然应用」 | 规划中 |
+| **预设说明** | `.dshCc_versionsNote` | 拒绝或提醒时那一行原因（**复用历史版本页的说明样式**） | 已实现 |
 
 > 预设**合并**而不是覆盖：只写它负责的那几个属性；**不写 `!important`**、**不动几何**、
 > **不覆盖 `--dsw-*` 令牌**。详见 [预设](./presets.md)。

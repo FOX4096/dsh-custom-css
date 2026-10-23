@@ -5628,6 +5628,82 @@ const injected = { textContent: ownSheet };
     'and the defaults are injected before the user sheet, so the user can override them',
   );
 
+  // --- 效果预设：一排按钮，一次编辑 ------------------------------------------
+  // 预设写的是**这一条规则**的一组声明，用的是材质令牌；它必须是**一次编辑**（一次 Ctrl+Z 撤回
+  // 整批），而且检查不通过时要说原因，不是点了没反应。
+  {
+    const presetHost = await boot({
+      dom: {
+        nodes: [{ tagName: 'DIV', className: 'card', children: [] }],
+        computed: {
+          backgroundColor: 'rgba(0, 0, 0, 0)',
+          getPropertyValue: name => (name === 'background-color' ? 'rgba(0, 0, 0, 0)' : ''),
+        },
+      },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 40, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }' });
+        if (url.includes('/write')) return jsonResponse({ ok: true, name: 'custom.css', rev: 2 });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    findNode(presetHost.registrations[0].component(), 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    const panelWithPresets = presetHost.registrations[0].component();
+    assert.ok(renderedText.includes('效果预设'), 'the panel offers effect presets — got: ' + JSON.stringify(renderedText.slice(0, 12)));
+    for (const label of ['亚克力', '毛玻璃', '云母', '细描边卡片']) {
+      assert.ok(renderedText.includes(label), 'preset ' + label + ' is offered');
+    }
+    // 它们复用模板按钮那套类名：这正是「组件样式统一」要的效果 —— 不再为一排按钮发明新样式。
+    const presetButtons = [];
+    (function collect(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'button' && String(node.props?.className ?? '') === 'dshCc_tpl') presetButtons.push(node);
+      for (const child of node.children ?? []) collect(child);
+    })(panelWithPresets);
+    assert.strictEqual(presetButtons.length, 18, '4 presets + 14 templates share one button style — got ' + presetButtons.length);
+    // 点「云母」：一次编辑写进 7 条声明，且引用材质令牌而不是写死数字。
+    const micaButton = presetButtons.find(node => JSON.stringify(node.children ?? []).includes('云母'));
+    assert.ok(micaButton !== undefined, 'the mica preset is clickable');
+    micaButton.props.onClick();
+    // 预设走的是编辑器的防抖保存（和打字同一条路），所以要把 400ms 的定时器推一下。
+    await presetHost.runTimers();
+    await settle();
+    const presetWrite = presetHost.calls.filter(call => String(call.url).includes('/write'));
+    assert.strictEqual(presetWrite.length, 1, 'one edit, one write — got ' + presetWrite.length);
+    const written = JSON.parse(String(presetWrite[0].init.body)).css;
+    for (const [property, value] of [
+      ['background-color', 'var(--dsh-material-mica-bg)'],
+      ['backdrop-filter', 'blur(var(--dsh-material-mica-blur)) saturate(var(--dsh-material-mica-saturate))'],
+      ['border-width', '0.5px'],
+      ['border-style', 'solid'],
+      ['border-color', 'var(--dsw-alias-border-l1)'],
+    ]) {
+      assert.ok(
+        written.includes(property + ': ' + value),
+        'the mica preset writes ' + property + ' — got: ' + written.slice(0, 260),
+      );
+    }
+    assert.ok(
+      !/\n\s*border:/.test(written),
+      'it never writes the `border` shorthand (that resets border-radius) — got: ' + written.slice(0, 200),
+    );
+    // 元素是透明底（假 DOM 没有计算样式）：应当写进去，但在下面留一行提醒。
+    // 提醒是写完之后的渲染，所以要先重画一次再找它。
+    hookIndex = 0;
+    renderedText.length = 0;
+    presetHost.registrations[0].component();
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('已写入')),
+      'a transparent target still gets the preset, with a note explaining the caveat — got: '
+        + JSON.stringify(renderedText.slice(-6)),
+    );
+  }
+
   // --- 令牌页（只读清单）-----------------------------------------------------
   // 这张页面回答三件事：这条令牌叫什么、现在是什么、从哪来 —— 外加「被多少条规则用到」，
   // 因为那才是「我改这个会不会炸」的依据。这一节同时守住「跨域表读不到要计数」：
@@ -5751,11 +5827,15 @@ const injected = { textContent: ownSheet };
     for (const child of node.children ?? []) tokenValueInputs(child, found);
     return found;
   };
-  const tokenInput = tokenValueInputs(tokenEditing).find(node => node.props.className === 'dshCc_tokenInput');
+  const tokenInput = tokenValueInputs(tokenEditing).find(node => String(node.props.className ?? '').includes('dshCc_tokenInput'));
   assert.ok(
     tokenInput !== undefined && tokenInput.props.defaultValue === '#ffffff',
-    'the overridden row shows an input seeded with the value — inputs: '
-      + JSON.stringify(tokenValueInputs(tokenEditing).map(node => node.props.className)),
+    'the overridden row shows an input seeded with the value — '
+      + JSON.stringify(tokenValueInputs(tokenEditing).map(node => ({ cls: node.props.className, value: node.props.defaultValue }))),
+  );
+  assert.ok(
+    String(tokenInput.props.className ?? '').includes('dshUi_field'),
+    'and that input is the shared field, not a bespoke control — class: ' + tokenInput.props.className,
   );
   tokenInput.props.onKeyDown({ key: 'Enter', target: { value: '#000000' } });
   await settle();
