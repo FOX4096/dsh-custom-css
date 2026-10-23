@@ -5602,6 +5602,32 @@ const injected = { textContent: ownSheet };
   // 而这里只关心「设置行能展开的面」。那两节由视觉探针在真机上按英文采集（见 docs/testing.md）。
   assert.deepStrictEqual(leaks, [], '英文界面里漏出中文的地方：\n' + leaks.join('\n'));
 
+  // --- 材质令牌：默认值随插件发布 -------------------------------
+  // 为什么默认值必须由插件给：预设只写 `var(--dsh-material-mica-bg)` 这类引用，而 `var()` 没有
+  // 回退值时，令牌缺失会让**整条声明被丢弃**（不报错）—— 等用户先填就等于预设点了没反应。
+  const materialTag = host.styleTags.find(element => element.id === 'dsh-custom-css-material-style');
+  assert.ok(materialTag !== undefined, 'the material tokens ship with the plugin — tags: '
+    + JSON.stringify(host.styleTags.map(element => element.id)));
+  assert.ok(
+    materialTag.textContent.includes('body,\nbody[data-ds-dark-theme] {'),
+    'with the same `body, body[data-ds-dark-theme]` prelude as the overrides (a bare `body` loses in dark mode)',
+  );
+  for (const name of [
+    '--dsh-material-acrylic-bg', '--dsh-material-acrylic-blur', '--dsh-material-acrylic-saturate', '--dsh-material-acrylic-border',
+    '--dsh-material-frost-bg', '--dsh-material-frost-blur', '--dsh-material-frost-saturate',
+    '--dsh-material-mica-bg', '--dsh-material-mica-blur', '--dsh-material-mica-saturate', '--dsh-material-mica-grain',
+  ]) {
+    assert.ok(materialTag.textContent.includes(name + ':'), 'material token ' + name + ' is defined');
+  }
+  assert.ok(
+    materialTag.textContent.includes('--dsh-material-mica-bg: light-dark('),
+    'the fills are light-dark() pairs, so one value is right in both themes',
+  );
+  assert.ok(
+    host.styleTags.indexOf(materialTag) < host.styleTags.indexOf(host.userStyle()),
+    'and the defaults are injected before the user sheet, so the user can override them',
+  );
+
   // --- 令牌页（只读清单）-----------------------------------------------------
   // 这张页面回答三件事：这条令牌叫什么、现在是什么、从哪来 —— 外加「被多少条规则用到」，
   // 因为那才是「我改这个会不会炸」的依据。这一节同时守住「跨域表读不到要计数」：
