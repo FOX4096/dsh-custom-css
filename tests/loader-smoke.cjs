@@ -5528,6 +5528,62 @@ const injected = { textContent: ownSheet };
     'and the English copy is gone',
   );
 
+
+  // --- 英文界面里不该出现一个汉字 --------------------------------------------
+  //
+  // 国际化最容易漏的地方不是「翻错」，而是「漏翻」：新加一条文案、忘了在词典里补英文，界面就混进
+  // 一句中文 —— 而这件事在中文界面下肉眼完全看不见。这一节用自己的一遍 boot（状态干净）把设置行
+  // 能展开的每个面都用英文渲染一次，逐字找汉字，同时守住两种漏法：`t('key')` 漏键、`content()` 漏条。
+  const HAN = /[\u4e00-\u9fff]/;
+  const leaks = [];
+  const sweep = (label) => {
+    for (const text of renderedText) {
+      if (typeof text === 'string' && HAN.test(text)) leaks.push(label + ' → ' + text.slice(0, 50));
+    }
+  };
+  const sweepHost = await boot({
+    locale: fakeLocale,
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      if (url.includes('/history')) return jsonResponse({ ok: true, name: 'custom.css', entries: [] });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.demo { color: red; border-radius: 8px; }' });
+      if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: '0.2.1-rc.2', dshCommit: 'abc1234' });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  const renderEnglish = () => {
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    return sweepHost.registrations[0].component();
+  };
+  // 切到英文：上一段结尾把语言切回了中文（它验的正是「切回去也能换字」）。
+  switchLocale('en');
+  renderEnglish();
+  sweep('row');
+  // 更多操作菜单
+  buttonWith(renderEnglish(), 'More actions').props.onClick();
+  const sweepMenu = renderEnglish();
+  sweep('menu');
+  // 历史版本页（这条 boot 的 Host 回答「没有历史」，正好走空状态那句）
+  buttonWith(sweepMenu, 'Versions').props.onClick();
+  await settle();
+  sweep('versions');
+  // 选择器体检页：先从历史版本页的「返回」回到操作列表
+  buttonWith(renderEnglish(), 'Back').props.onClick();
+  buttonWith(renderEnglish(), 'Check selectors').props.onClick();
+  await settle();
+  sweep('audit');
+  // 规则面板：点高亮层里的选择器（假 React 不渲染 dangerouslySetInnerHTML，直接调 onClick）
+  findNode(renderEnglish(), 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+  sweep('rule panel');
+  // 查找栏
+  findNode(renderEnglish(), 'textarea').props.onKeyDown({ key: 'f', ctrlKey: true, preventDefault() {} });
+  sweep('find bar');
+  // 插件详情页的两节（壁纸面板 / 壁纸设置）这一遍不扫：它们要的是一份完整的壁纸记录才能渲染，
+  // 而这里只关心「设置行能展开的面」。那两节由视觉探针在真机上按英文采集（见 docs/testing.md）。
+  assert.deepStrictEqual(leaks, [], '英文界面里漏出中文的地方：\n' + leaks.join('\n'));
+
   // --- 选择器体检 (the audit page of the actions menu) ----------------------
   // 自定义 CSS 里大量选择器依赖 DSH 的构建哈希类名。换代改名之后规则不报错、也不消失，只是永远
   // 不再命中 ——「我明明写了却没生效」。这张页面把「没生效」变成一份可以逐条处理的清单，所以它要
@@ -6977,7 +7033,7 @@ const injected = { textContent: ownSheet };
     'nothing was reset merely by rendering the section',
   );
 
-  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified, selector audit verified, i18n verified');
+  console.log('loader-smoke: OK — shape, slots, host apply, offline fallback, seeding, highlighting, completion, validation, rule panel, property dropdowns, sheet switch, shorthand parts, save state machine, editor undo, sheet outline, variable check, capped scroll containers, picker write handoff, rule reopen handoff, string-aware scanning, comments in a declaration head, opaque url()s and nested blocks, comments in every scanner, panel binding, click targets, completion guards, element picker, selector escaping, picker label gate, no orphan CSS, honest DOM stubs, caret reveal, token scope and kind, unmount flush verified, history versions verified, find and replace verified, format verified, external sync verified, wallpaper verified, wallpaper settings verified, seat watchdog verified, selector audit verified, i18n verified, no Chinese in the English UI');
 }
 
 main().catch((error) => {
