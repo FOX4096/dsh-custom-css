@@ -155,6 +155,28 @@
 
 ---
 
+## A4. 令牌管理（新增）
+
+入口：设置行「更多操作 → 令牌」。版面与历史版本 / 选择器体检同一套分页版式。
+
+| 名字 | 标识 | 说明 | 状态 |
+| --- | --- | --- | --- |
+| **令牌页** | `.dshCc_tokens` | 那一页的整体 | 规划中 |
+| **令牌行** | `.dshCc_tokenRow` | 一条令牌：名字 · 当前值 · 来源 · 规则数 · 接管开关 | 规划中 |
+| **令牌名** | `.dshCc_tokenName` | `--dsw-alias-bg-base`（等宽字体，可点复制） | 规划中 |
+| **令牌值** | `.dshCc_tokenValue` | 当前解析值；点一下就地编辑 | 规划中 |
+| **令牌来源** | `.dshCc_tokenSource` | 哪张样式表定义的（`插件默认` / `DSH` / 某扩展的表名） | 规划中 |
+| **令牌用量** | `.dshCc_tokenUse` | `31 条规则`；≥10 时带警告色，点开列前 5 个选择器 | 规划中 |
+| **接管开关** | `.dshCc_tokenTakeover` | 开 = 写进 `tokens.css`；关 = 删掉那一条 | 规划中 |
+| **重置钮** | `.dshCc_tokenReset` | ↺ 删掉覆盖，回到来源值 | 规划中 |
+| **材质区** | `.dshCc_materialTokens` | 置顶那一块：`--dsh-material-*`（云母 / 亚克力 / 毛玻璃） | 规划中 |
+| **材质令牌** | `--dsh-material-{acrylic,frost,mica}-{bg,blur,saturate,border,grain}` | 预设引用的材质参数 | 规划中 |
+
+> **接管 = 一份插件自己的 `tokens.css`**，注入在**用户 `custom.css` 之前**、在 DSH 与其它扩展之后：
+> 覆盖它们，但用户自己的表仍然最后、仍然赢。写盘顺序见 [令牌管理](./token-manager.md)。
+
+---
+
 ## B. 编辑器
 
 | 名字 | 标识 | 说明 | 状态 |

@@ -33,7 +33,11 @@
 
 ## 预设目录
 
-每个预设写什么、检查什么、以及**它做不到什么**。全部用 `--dsw-*` 令牌，不写死颜色。
+每个预设写什么、检查什么、以及**它做不到什么**。
+
+**材质参数不写在预设里**：预设只引用 `--dsh-material-*` 令牌（云母 / 亚克力 / 毛玻璃的底色、模糊、
+饱和、颗粒），那些参数在 [令牌管理](./token-manager.md) 里调 —— 调一次，所有用了这套材质的规则一起变。
+默认值由插件自带（界面上显示来源为「插件默认」），所以预设第一下就能看见效果。
 
 ### 1. 亚克力（Acrylic）
 
@@ -41,15 +45,17 @@
 `backdrop-filter` 只加在**拥有底色的那个元素**上。
 
 ```css
-background-color: color-mix(in srgb, var(--dsw-alias-bg-base) 72%, transparent);
-backdrop-filter: blur(24px) saturate(150%);
+background-color: var(--dsh-material-acrylic-bg);
+backdrop-filter: blur(var(--dsh-material-acrylic-blur)) saturate(var(--dsh-material-acrylic-saturate));
 border-width: 0.5px;
 border-style: solid;
-border-color: var(--dsw-alias-border-l2);
+border-color: var(--dsh-material-acrylic-border);
 box-shadow:
   inset 0 1px 0 color-mix(in srgb, #ffffff 60%, transparent),
   var(--dsw-elevation-prominent);
 ```
+
+默认值：底色 72%、模糊 24px、饱和 150%（三个材质的对照表在下面 §3）。
 
 **不写 `border` / `background` 简写**：简写会把 `border-radius`、`background-image` 一起重置
 （`examples/acrylic.css` 的文件头原则 3，是踩出来的）。**不碰几何**：宽高、padding 一律不动。
@@ -59,12 +65,14 @@ box-shadow:
 比亚克力「更磨砂」：模糊更大、饱和更低、没有内高光（内高光会让它看起来像塑料）。
 
 ```css
-background-color: color-mix(in srgb, var(--dsw-alias-bg-base) 58%, transparent);
-backdrop-filter: blur(36px) saturate(120%);
+background-color: var(--dsh-material-frost-bg);
+backdrop-filter: blur(var(--dsh-material-frost-blur)) saturate(var(--dsh-material-frost-saturate));
 border-width: 0.5px;
 border-style: solid;
 border-color: var(--dsw-alias-border-l1);
 ```
+
+默认值：底色 58%、模糊 36px、饱和 120%。
 
 检查同上；**额外提醒**：如果元素在滚动容器里，大半径模糊会明显掉帧（移动端尤其）。
 
@@ -75,14 +83,16 @@ border-color: var(--dsw-alias-border-l1);
 噪声（`svg` turbulence 的 `data:` URI）、以及顶部一条内高光。
 
 ```css
-background-color: color-mix(in srgb, var(--dsw-alias-bg-base) 86%, transparent);
-backdrop-filter: blur(18px) saturate(115%);
-background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+background-color: var(--dsh-material-mica-bg);
+backdrop-filter: blur(var(--dsh-material-mica-blur)) saturate(var(--dsh-material-mica-saturate));
+background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='var(--dsh-material-mica-grain)'/%3E%3C/svg%3E");
 border-width: 0.5px;
 border-style: solid;
 border-color: var(--dsw-alias-border-l1);
 box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 34%, transparent);
 ```
+
+默认值：底色 86%、模糊 18px、饱和 115%、颗粒 0.035（想要更干净的云母就把颗粒设成 `0`）。
 
 **与亚克力 / 毛玻璃的区别**（三个都是半透明，但观感不同，参数也就不同）：
 
