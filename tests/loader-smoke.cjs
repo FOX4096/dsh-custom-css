@@ -5543,6 +5543,20 @@ const injected = { textContent: ownSheet };
   };
   const sweepHost = await boot({
     locale: fakeLocale,
+    dom: {
+      styleSheets: [{
+        ownerNode: { dataset: { pluginCss: 'ext/theme.css' } },
+        cssRules: [{
+          selectorText: ':root',
+          style: (() => {
+            const style = ['--dsw-alias-bg-base'];
+            style.getPropertyValue = () => '#ffffff';
+            return style;
+          })(),
+          cssText: ':root{--dsw-alias-bg-base:#ffffff}.a{background:var(--dsw-alias-bg-base)}',
+        }],
+      }],
+    },
     fetchImpl: async (url) => {
       if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
       if (url.includes('/history')) return jsonResponse({ ok: true, name: 'custom.css', entries: [] });
@@ -5577,12 +5591,97 @@ const injected = { textContent: ownSheet };
   // 规则面板：点高亮层里的选择器（假 React 不渲染 dangerouslySetInnerHTML，直接调 onClick）
   findNode(renderEnglish(), 'pre').props.onClick({ target: { getAttribute: () => '0' } });
   sweep('rule panel');
+  // 令牌页（更多操作 → 令牌）
+  buttonWith(renderEnglish(), 'Back').props.onClick();
+  buttonWith(renderEnglish(), 'Tokens').props.onClick();
+  await settle();
+  sweep('tokens');
   // 查找栏
   findNode(renderEnglish(), 'textarea').props.onKeyDown({ key: 'f', ctrlKey: true, preventDefault() {} });
   sweep('find bar');
   // 插件详情页的两节（壁纸面板 / 壁纸设置）这一遍不扫：它们要的是一份完整的壁纸记录才能渲染，
   // 而这里只关心「设置行能展开的面」。那两节由视觉探针在真机上按英文采集（见 docs/testing.md）。
   assert.deepStrictEqual(leaks, [], '英文界面里漏出中文的地方：\n' + leaks.join('\n'));
+
+  // --- 令牌页（只读清单）-----------------------------------------------------
+  // 这张页面回答三件事：这条令牌叫什么、现在是什么、从哪来 —— 外加「被多少条规则用到」，
+  // 因为那才是「我改这个会不会炸」的依据。这一节同时守住「跨域表读不到要计数」：
+  // 静默跳过会让人以为那几张表里没有令牌。
+  const sheetStyle = (values) => {
+    const style = Object.keys(values);
+    style.getPropertyValue = name => values[name] ?? '';
+    return style;
+  };
+  const tokenHost = await boot({
+    dom: {
+      styleSheets: [
+        {
+          ownerNode: { dataset: { pluginCss: 'ext/theme.css' } },
+          cssRules: [{
+            selectorText: ':root',
+            style: sheetStyle({ '--dsw-alias-bg-base': '#ffffff', '--dsw-alias-border-l2': 'var(--dsw-alias-bg-base)' }),
+            cssText: ':root{--dsw-alias-bg-base:#ffffff;--dsw-alias-border-l2:var(--dsw-alias-bg-base)}',
+          }],
+        },
+        // 跨域表：`cssRules` 直接抛，页面要把它算进「读不到」而不是当作没有令牌。
+        { get cssRules() { throw new Error('SecurityError'); } },
+      ],
+    },
+    fetchImpl: async (url) => {
+      if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+      if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+      if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+      throw new Error('unexpected request: ' + url);
+    },
+  });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const tokenRow = tokenHost.registrations[0].component();
+  buttonWith(tokenRow, '更多操作').props.onClick();
+  hookIndex = 0;
+  renderedText.length = 0;
+  const tokenMenu = tokenHost.registrations[0].component();
+  const tokensEntry = buttonWith(tokenMenu, '令牌');
+  assert.ok(tokensEntry !== null, 'the actions menu offers 令牌 — menu: ' + JSON.stringify(renderedText));
+  tokensEntry.props.onClick();
+  await settle();
+  hookIndex = 0;
+  renderedText.length = 0;
+  renderedClasses.length = 0;
+  const tokenPage = tokenHost.registrations[0].component();
+  assert.ok(renderedText.includes('--dsw-alias-bg-base'), 'the page lists the token name');
+  assert.ok(renderedText.includes('#ffffff'), 'with its value');
+  assert.ok(renderedText.includes('ext/theme.css'), 'and where it comes from');
+  assert.ok(
+    renderedText.some(text => typeof text === 'string' && text.includes('2 条令牌')),
+    'the header counts what it found — got: ' + JSON.stringify(renderedText.slice(0, 8)),
+  );
+  assert.ok(
+    renderedText.some(text => typeof text === 'string' && text.includes('1 张表读不到')),
+    'and says how many sheets could not be read',
+  );
+  assert.ok(
+    renderedText.some(text => typeof text === 'string' && text.includes('1 条规则')),
+    'and how many rules use a token (counted from the sheets text)',
+  );
+  assert.ok(renderedClasses.includes('dshCc_tokenRow'), 'rows carry their own class');
+  // 搜索：按名字过滤，别的行应该消失。
+  findNode(tokenPage, 'input').props.onChange({ target: { value: 'border-l2' } });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const tokenFiltered = tokenHost.registrations[0].component();
+  assert.ok(
+    renderedText.includes('--dsw-alias-border-l2') && !renderedText.includes('--dsw-alias-bg-base'),
+    'the search field narrows the list — got: ' + JSON.stringify(renderedText.slice(0, 8)),
+  );
+  findNode(tokenFiltered, 'input').props.onChange({ target: { value: 'nothing-matches-this' } });
+  hookIndex = 0;
+  renderedText.length = 0;
+  tokenHost.registrations[0].component();
+  assert.ok(
+    renderedText.some(text => typeof text === 'string' && text.includes('没有匹配')),
+    'and an empty result says so instead of showing nothing — got: ' + JSON.stringify(renderedText),
+  );
 
   // --- 选择器体检 (the audit page of the actions menu) ----------------------
   // 自定义 CSS 里大量选择器依赖 DSH 的构建哈希类名。换代改名之后规则不报错、也不消失，只是永远

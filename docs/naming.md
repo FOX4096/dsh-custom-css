@@ -161,14 +161,16 @@
 
 | 名字 | 标识 | 说明 | 状态 |
 | --- | --- | --- | --- |
-| **令牌页** | `.dshCc_tokens` | 那一页的整体 | 规划中 |
-| **令牌行** | `.dshCc_tokenRow` | 一条令牌：名字 · 当前值 · 来源 · 规则数 · 接管开关 | 规划中 |
-| **令牌名** | `.dshCc_tokenName` | `--dsw-alias-bg-base`（等宽字体，可点复制） | 规划中 |
-| **令牌值** | `.dshCc_tokenValue` | 当前解析值；点一下就地编辑 | 规划中 |
-| **令牌来源** | `.dshCc_tokenSource` | 哪张样式表定义的（`插件默认` / `DSH` / 某扩展的表名） | 规划中 |
-| **令牌用量** | `.dshCc_tokenUse` | `31 条规则`；≥10 时带警告色，点开列前 5 个选择器 | 规划中 |
+| **令牌页** | `.dshCc_tokens` | 那一页的整体 | 已实现 |
+| **令牌行** | `.dshCc_tokenRow` | 一条令牌，两行：名字 + 用量 / 值 + 来源 | 已实现 |
+| **令牌名** | `.dshCc_tokenName` | `--dsw-alias-bg-base`（等宽字体） | 已实现 |
+| **令牌值** | `.dshCc_tokenValue` | 当前解析值（解析不到时显示定义值）；就地编辑待做 | 已实现 |
+| **令牌来源** | `.dshCc_tokenSource` | 哪张样式表定义的（如 `ext/theme.css`） | 已实现 |
+| **令牌用量** | `.dshCc_tokenMeta` | `· 31 条规则`；警告色与明细待做 | 已实现 |
 | **接管开关** | `.dshCc_tokenTakeover` | 开 = 写进 `tokens.css`；关 = 删掉那一条 | 规划中 |
 | **重置钮** | `.dshCc_tokenReset` | ↺ 删掉覆盖，回到来源值 | 规划中 |
+| **令牌搜索框** | `.dshCc_tokenSearch` | 按名字 / 值 / 来源过滤 | 已实现 |
+| **令牌列表** | `.dshCc_tokenList` | 限高 260px 自己滚的那一列 | 已实现 |
 | **材质区** | `.dshCc_materialTokens` | 置顶那一块：`--dsh-material-*`（云母 / 亚克力 / 毛玻璃） | 规划中 |
 | **材质令牌** | `--dsh-material-{acrylic,frost,mica}-{bg,blur,saturate,border,grain}` | 预设引用的材质参数 | 规划中 |
 
