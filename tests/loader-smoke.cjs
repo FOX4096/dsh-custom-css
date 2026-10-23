@@ -911,14 +911,13 @@ async function main() {
   assert.ok(host.calls.some(call => call.url === '/dsh-custom-css/list'), 'bootstrap lists sheets');
   assert.ok(host.calls.some(call => call.url.startsWith('/dsh-custom-css/read')), 'bootstrap reads the active sheet');
 
-  // The two records are read through `/read` too, but with `optional=1`: on a fresh install they do
-  // not exist, and a plain GET shows up in DevTools as a 404 error on every page load. Asserting the
-  // URL (not just "some read happened") is what keeps that flag from being quietly dropped.
+  // 三条都走 `/read` 但带 `optional=1`：新装的机器上没有这些文件，普通 GET 会在每次加载时
+  // 在 DevTools 里留下一条 404。断言 URL（而不只是「发生过读」）才守得住这个标志不被悄悄去掉。
   const recordReads = host.calls.map(call => String(call.url)).filter(url => url.includes('optional=1'));
   assert.deepStrictEqual(
     recordReads.map(url => url.split('name=')[1].split('&')[0]).sort(),
-    ['settings.json.css', 'wallpaper.json.css'],
-    'both records are read as optional — got: ' + JSON.stringify(recordReads),
+    ['settings.json.css', 'tokens.css', 'wallpaper.json.css'],
+    'the two records and the token overrides are read as optional — got: ' + JSON.stringify(recordReads),
   );
 
   // 公共层：一张独立的样式表，先于用户表注入 —— 用户规则天然赢过它，不需要 !important。
@@ -1472,16 +1471,16 @@ async function main() {
   renderedClasses.length = 0;
   const withFree = renderRow();
   const freeInputs = [];
-  const collectInputs = (node) => {
+  const inputsIn = (node) => {
     if (node === null || typeof node !== 'object') return;
     // The value field is `PropValueInput` now, so it is recognised by its props rather than by
     // a className it only applies on the inside (see the note above).
     if (node.type !== 'input' && typeof node.props?.property === 'string' && node.props.value !== undefined) {
       freeInputs.push(node);
     }
-    for (const child of node.children ?? []) collectInputs(child);
+    for (const child of node.children ?? []) inputsIn(child);
   };
-  collectInputs(withFree);
+  inputsIn(withFree);
   const marginInput = freeInputs.find(input => input.props['aria-label'] === '上外边距');
   assert.ok(marginInput !== undefined, 'a free property carries its Chinese name');
   assert.strictEqual(
@@ -5681,6 +5680,81 @@ const injected = { textContent: ownSheet };
   assert.ok(
     renderedText.some(text => typeof text === 'string' && text.includes('没有匹配')),
     'and an empty result says so instead of showing nothing — got: ' + JSON.stringify(renderedText),
+  );
+
+  // --- 接管：写 tokens.css，并且排在用户样式表之前 ---------------------------
+  // 这一节守三件事：① 写入的是**一份正常的 CSS**（不是 JSON，也不是插件私有格式）；
+  // ② 选择器是 `body, body[data-ds-dark-theme]`（只写 `body` 在深色下会输，踩过）；
+  // ③ 注入位置在用户表**之前**，所以压得过往 DSH 与扩展，压不过用户自己。
+  findNode(tokenPage, 'input').props.onChange({ target: { value: '' } });
+  hookIndex = 0;
+  renderedText.length = 0;
+  const tokenList = tokenHost.registrations[0].component();
+  const takeover = buttonWith(tokenList, '接管');
+  assert.ok(takeover !== null, 'an unmodified token offers 接管 — got: ' + JSON.stringify(renderedText.slice(0, 10)));
+  takeover.props.onClick();
+  await settle();
+  const tokenWrite = tokenHost.calls.filter(call => String(call.url).includes('/write') && String(call.init?.body ?? '').includes('tokens.css'));
+  assert.ok(tokenWrite.length >= 1, 'the override is written to tokens.css — calls: ' + JSON.stringify(tokenHost.calls.map(c => c.url)));
+  const writtenBody = JSON.parse(String(tokenWrite[tokenWrite.length - 1].init.body));
+  assert.strictEqual(writtenBody.name, 'tokens.css', 'written under its own name');
+  assert.ok(
+    writtenBody.css.includes('body,\nbody[data-ds-dark-theme] {'),
+    'the prelude is `body, body[data-ds-dark-theme]` — a bare `body` loses in dark mode',
+  );
+  assert.ok(
+    writtenBody.css.includes('--dsw-alias-bg-base: #ffffff;'),
+    'the override carries the value it started from — got: ' + String(writtenBody.css).slice(0, 200),
+  );
+  const tokenTag = tokenHost.styleTags.find(element => element.id === 'dsh-custom-css-token-style');
+  assert.ok(tokenTag !== undefined, 'the overrides are injected as their own style tag');
+  assert.ok(tokenTag.textContent.includes('--dsw-alias-bg-base'), 'with the override inside');
+  const tagOrder = tokenHost.styleTags.map(element => element.id);
+  assert.ok(
+    tagOrder.indexOf('dsh-custom-css-token-style') < tagOrder.indexOf('dsh-custom-css-user-style'),
+    'and it sits BEFORE the user sheet, so the user still wins — order: ' + JSON.stringify(tagOrder),
+  );
+  // 改值：输入框里回车 → 再写一次，值是新的。
+  hookIndex = 0;
+  renderedText.length = 0;
+  const tokenEditing = tokenHost.registrations[0].component();
+  // 这一页有两个 input：顶上那个搜索框、行里那个覆盖值输入框。第一个不一定是想要的那个。
+  const tokenValueInputs = (node, found = []) => {
+    if (node === null || typeof node !== 'object') return found;
+    if (node.type === 'input') found.push(node);
+    for (const child of node.children ?? []) tokenValueInputs(child, found);
+    return found;
+  };
+  const tokenInput = tokenValueInputs(tokenEditing).find(node => node.props.className === 'dshCc_tokenInput');
+  assert.ok(
+    tokenInput !== undefined && tokenInput.props.defaultValue === '#ffffff',
+    'the overridden row shows an input seeded with the value — inputs: '
+      + JSON.stringify(tokenValueInputs(tokenEditing).map(node => node.props.className)),
+  );
+  tokenInput.props.onKeyDown({ key: 'Enter', target: { value: '#000000' } });
+  await settle();
+  const secondWrite = tokenHost.calls.filter(call => String(call.url).includes('/write') && String(call.init?.body ?? '').includes('tokens.css'));
+  assert.ok(
+    String(secondWrite[secondWrite.length - 1].init.body).includes('#000000'),
+    'Enter writes the new value — got: ' + String(secondWrite[secondWrite.length - 1].init.body).slice(0, 200),
+  );
+  // 撤销：删文件、撤注入，别留一个空表。
+  hookIndex = 0;
+  renderedText.length = 0;
+  const tokenReverting = tokenHost.registrations[0].component();
+  const revert = buttonWith(tokenReverting, '撤销');
+  assert.ok(revert !== null, 'an overridden token offers 撤销');
+  revert.props.onClick();
+  await settle();
+  assert.ok(
+    tokenHost.calls.some(call => String(call.url).includes('/delete') && String(call.init?.body ?? '').includes('tokens.css')),
+    'removing the last override deletes the file instead of leaving an empty sheet',
+  );
+  // 空标签留着、内容清空：撤掉最后一条时「标签还在但什么都没写」，比依赖 remove() 摘干净更稳。
+  assert.strictEqual(
+    String(tokenHost.styleTags.find(element => element.id === 'dsh-custom-css-token-style')?.textContent ?? ''),
+    '',
+    'and the injected overrides are emptied with it',
   );
 
   // --- 选择器体检 (the audit page of the actions menu) ----------------------

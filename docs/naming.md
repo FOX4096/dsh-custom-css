@@ -164,11 +164,11 @@
 | **令牌页** | `.dshCc_tokens` | 那一页的整体 | 已实现 |
 | **令牌行** | `.dshCc_tokenRow` | 一条令牌，两行：名字 + 用量 / 值 + 来源 | 已实现 |
 | **令牌名** | `.dshCc_tokenName` | `--dsw-alias-bg-base`（等宽字体） | 已实现 |
-| **令牌值** | `.dshCc_tokenValue` | 当前解析值（解析不到时显示定义值）；就地编辑待做 | 已实现 |
+| **令牌值** | `.dshCc_tokenValue` / `.dshCc_tokenInput` | 解析值（解析不到时显示定义值）；接管后变成输入框 | 已实现 |
 | **令牌来源** | `.dshCc_tokenSource` | 哪张样式表定义的（如 `ext/theme.css`） | 已实现 |
 | **令牌用量** | `.dshCc_tokenMeta` | `· 31 条规则`；警告色与明细待做 | 已实现 |
-| **接管开关** | `.dshCc_tokenTakeover` | 开 = 写进 `tokens.css`；关 = 删掉那一条 | 规划中 |
-| **重置钮** | `.dshCc_tokenReset` | ↺ 删掉覆盖，回到来源值 | 规划中 |
+| **接管开关** | `.dshCc_tokenBtn` | 开 = 写进 `tokens.css`（「接管」）；关 = 删掉那一条（「撤销」） | 已实现 |
+| **重置钮** | `.dshCc_tokenBtn` | 就是「撤销」：删掉覆盖，回到来源值（与接管同一个类） | 已实现 |
 | **令牌搜索框** | `.dshCc_tokenSearch` | 按名字 / 值 / 来源过滤 | 已实现 |
 | **令牌列表** | `.dshCc_tokenList` | 限高 260px 自己滚的那一列 | 已实现 |
 | **材质区** | `.dshCc_materialTokens` | 置顶那一块：`--dsh-material-*`（云母 / 亚克力 / 毛玻璃） | 规划中 |
