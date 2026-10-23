@@ -1,4 +1,4 @@
-# 预设（亚克力 / 毛玻璃 / 榆木 / 细描边卡片）
+# 预设（亚克力 / 毛玻璃 / 云母 / 细描边卡片）
 
 [← 返回 README](../README.md) · [文档索引](./index.md)
 
@@ -68,24 +68,33 @@ border-color: var(--dsw-alias-border-l1);
 
 检查同上；**额外提醒**：如果元素在滚动容器里，大半径模糊会明显掉帧（移动端尤其）。
 
-### 3. 榆木（Elm）
+### 3. 云母（Mica）
 
-**纯 CSS 的木纹**，不用图片文件。三层 `repeating-linear-gradient` 做纹理方向，加一层极淡的
-噪声遮罩（`svg` turbulence 的 `data:` URI）压住渐变的塑料感。
+**材质本身是半透明的**：它不自己画颜色，而是把**背后的东西**压成一层低饱和的薄纱，再补一点点
+极细的颗粒与顶部微光。CSS 里对应三件事：`backdrop-filter` 的 `saturate`（降饱和）、一层极淡的
+噪声（`svg` turbulence 的 `data:` URI）、以及顶部一条内高光。
 
 ```css
-background-color: color-mix(in srgb, #8a5a33 62%, var(--dsw-alias-bg-base));
-background-image:
-  repeating-linear-gradient(92deg, rgb(0 0 0 / 5%) 0 1px, transparent 1px 7px),
-  repeating-linear-gradient(88deg, rgb(255 255 255 / 4%) 0 2px, transparent 2px 11px),
-  linear-gradient(160deg, #9a683c, #7a4e2b);
+background-color: color-mix(in srgb, var(--dsw-alias-bg-base) 86%, transparent);
+backdrop-filter: blur(18px) saturate(115%);
+background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
 border-width: 0.5px;
 border-style: solid;
-border-color: color-mix(in srgb, #5c3a1f 40%, transparent);
+border-color: var(--dsw-alias-border-l1);
+box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 34%, transparent);
 ```
 
-**诚实说明（写进界面的 tooltip）**：这是**近似**，不是照片级木纹。它的价值是「暖色块 + 木纹暗示」，
-用在卡片、侧栏、标题栏这类面积上；面积太小或要求真实材质时不要用。
+**与亚克力 / 毛玻璃的区别**（三个都是半透明，但观感不同，参数也就不同）：
+
+| | 底色 | 模糊 | 饱和 | 颗粒 | 用在哪 |
+| --- | --- | --- | --- | --- | --- |
+| 亚克力 | 72% | 24px | 150% | 无 | 对话气泡、卡片：**透但清楚** |
+| 毛玻璃 | 58% | 36px | 120% | 无 | 浮层、面板：**糊得明显** |
+| **云母** | **86%** | **18px** | **115%** | **有（3.5%）** | 标题栏、侧栏、大块底：**几乎不糊，只换质感** |
+
+**诚实说明（写进界面的 tooltip）**：这是对「云母」这类**系统材质**的近似 —— 它靠的是背后有什么。
+放在**不透明**的底上时，它看起来只是一层很淡的纯色（这是材质本身的性质，不是 bug）；
+放在壁纸或图片之上才看得出那层薄纱。颗粒用的是 SVG 噪声，不是位图。
 
 ### 4. 细描边卡片（Hairline）
 
@@ -111,7 +120,7 @@ box-shadow: var(--dsw-elevation-soft);
 | --- | --- |
 | 不新建规则、不改选择器 | 预设是「给这条例加上一组声明」，换了作用对象就不是预设了 |
 | 不写 `!important` | 预设是设计，不是打架；需要压过别人时用户自己加 |
-| 不生成图片文件 | 榆木是纯 CSS；引入图片会让「导入/导出」与备份都变复杂 |
+| 不生成图片文件 | 云母的颗粒是 SVG 噪声（`data:` URI），不是位图；引入图片文件会让「导入/导出」与备份都变复杂 |
 | 不动几何（宽高 / padding / margin） | 动几何的预设会悄悄改掉布局，那不是「效果」 |
 | 不覆盖 `--dsw-*` 令牌 | 覆盖令牌是皮肤级的操作（见 `examples/acrylic.css`），不是单个元素的预设 |
 
