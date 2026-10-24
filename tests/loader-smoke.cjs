@@ -4613,7 +4613,10 @@ const injected = { textContent: ownSheet };
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
   assert.ok(info().includes('1200×800'), 'ArrowUp walks to the parent — got: ' + JSON.stringify(info()));
   picker.dispatch('keydown', { key: 'ArrowUp', preventDefault() {} });
-  assert.ok(info().includes('dsh-app'), 'and again to the grandparent — got: ' + JSON.stringify(info()));
+  assert.ok(
+    info().includes('排除名单'),
+    'and again to the grandparent, which is the tree root — the exclude list refuses it — got: ' + JSON.stringify(info()),
+  );
 
   // The reported bug: after going all the way up, coming back down must retrace the
   // route, not walk into the current node's first child (a different branch).
@@ -4646,7 +4649,7 @@ const injected = { textContent: ownSheet };
   assert.strictEqual(slider.value, '1', 'the slider keeps the position the user dragged it to');
   slider.value = '2';
   slider.fire('input');
-  assert.ok(info().includes('dsh-app'), 'and it reaches the grandparent');
+  assert.ok(info().includes('排除名单'), 'and it reaches the grandparent (refused by the exclude list)');
   slider.value = '0';
   slider.fire('input');
   assert.strictEqual(boxOf().dataset.label, '320×180', 'while its zero is always the element that was clicked');
@@ -4908,9 +4911,11 @@ const injected = { textContent: ownSheet };
   // throws, and a throw used to score as "one match", so the broken candidate took the
   // uniqueness bonus, won the default and was written into the sheet, where it styled
   // nothing at all. The engine rejects it here exactly like a browser does.
+  const newlineHost = node('div', { className: 'host-shell', rect: { top: 0, left: 0, width: 400, height: 200 } });
   const newlineNode = node('div', {
     className: 'dsh-two-line',
     attributes: { 'aria-label': '第一行\n第二行' },
+    parent: newlineHost,
     rect: { top: 10, left: 10, width: 200, height: 40 },
   });
   const newlineWrites = [];
@@ -4928,7 +4933,7 @@ const injected = { textContent: ownSheet };
     },
     // The pool does the hit testing; the matcher itself refuses a raw newline inside a
     // string, exactly like a browser's tokenizer, so this case needs no simulated probe.
-    dom: { nodes: [newlineNode] },
+    dom: { nodes: [newlineHost, newlineNode] },
   });
   await pickWith(newline, newlineNode);
   // The write goes through writeSheet, which reads the file first to confirm nobody moved
@@ -6072,6 +6077,116 @@ const injected = { textContent: ownSheet };
       String(boxes[0].children[0].tagName ?? '').toLowerCase(),
       'table',
       'the row clone is wrapped in a table so it can lay out — got: ' + String(boxes[0].children[0].tagName),
+    );
+  }
+
+  // --- 排除名单：根级元素不当样本、不被拾取 ------------------------------------
+  // 默认名单是 `:root, html, body`：写一条作用在 body 上的规则等于给整个界面换皮肤，那是皮肤的事；
+  // 预览把整页克隆进样本框也没有意义。这一节守住「默认存在、可改、命中时说明原因」。
+  {
+    const bodyLike = {
+      tagName: 'BODY',
+      className: '',
+      children: [],
+      parentElement: null,
+      // 只有 `body` 这一条选择器命中它 —— 真实浏览器里由引擎判断，测试床里由这个函数回答。
+      matches: selector => selector.trim() === 'body',
+      cloneNode() { return { tagName: 'BODY', className: '', children: [], style: {}, appendChild() {}, removeAttribute() {} }; },
+      getBoundingClientRect: () => ({ top: 0, left: 0, width: 1280, height: 800 }),
+    };
+    const excludeHost = await boot({
+      dom: { nodes: [bodyLike] },
+      fetchImpl: async (url, init) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read?name=settings.json.css')) return jsonResponse({ ok: true, name: 'settings.json.css', css: '{}' });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: 'body { color: red; }' });
+        if (url.includes('/write')) return jsonResponse({ ok: true, name: 'custom.css', rev: 2 });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    const excludeRow = excludeHost.registrations[0].component();
+    findNode(excludeRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    renderedText.length = 0;
+    const excludePanel = excludeHost.registrations[0].component();
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('排除名单')),
+      'the panel explains that the element is on the exclude list — got: ' + JSON.stringify({ text: renderedText.slice(0, 12), classes: renderedClasses.slice(0, 20) }),
+    );
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes(':root, html, body')),
+      'and shows the list it is using — got: ' + JSON.stringify(renderedText.filter(text => typeof text === 'string' && text.includes('排除'))),
+    );
+
+    // 样本必须是合成的那一个（不是整页克隆）。
+    const boxLike = (className) => ({
+      className,
+      children: [],
+      textContent: '',
+      appendChild(child) { this.children.push(child); return child; },
+    });
+    const boxes = [boxLike('dshCc_previewAfter'), boxLike('dshCc_previewCurrent')];
+    const fakePanel = { querySelectorAll: () => boxes };
+    const rowNode = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(excludePanel);
+    rowNode.props.ref.current = { querySelector: () => fakePanel };
+    await excludeHost.runEffects();
+    await settle();
+    assert.ok(boxes[0].children.length >= 1, 'a sample was painted for the excluded element');
+    assert.ok(
+      String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
+      'and it is the synthetic one — got: ' + String(boxes[0].children[0].className),
+    );
+
+    // 设置里的那一行：默认值就是这份名单，改完写回 settings.json.css。
+    await settle();
+    hookIndex = 0;
+    renderedText.length = 0;
+    const settingsSection = excludeHost.registrations[2].component({ subject: { kind: 'bundle', pkg: { name: 'dsh-custom-css' } } });
+    // 这一节把正文包在 <SettingsPanel /> 里 —— 那是「函数类型」的子节点，假 React 不会自动渲染它，
+    // 得手动展开一次（和壁纸面板的测试同一个做法），否则只能看到标题、徽标与描述。
+    // 只展开那一个包着正文的组件（SettingsPanel），不要递归展开所有函数节点 —— 展开每个
+    // Dropdown 之类的组件会把 hook 槽搅乱（它们各自用自己的 hook 序号）。
+    const findPanelComponent = (node) => {
+      if (node === null || typeof node !== 'object') return null;
+      if (typeof node.type === 'function' && node.type.name === 'SettingsPanel') return node;
+      for (const child of node.children ?? []) {
+        const hit = findPanelComponent(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    };
+    const panelElement = findPanelComponent(settingsSection);
+    hookSlots.length = 0;
+    hookIndex = 0;
+    const settingsTree = panelElement === null ? settingsSection : panelElement.type(panelElement.props ?? {});
+    const settingsText = renderedText.slice();
+    const excludeInputs = [];
+    (function collect(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'input' && String(node.props?.className ?? '').includes('dshCc_excludeField')) excludeInputs.push(node);
+      for (const child of node.children ?? []) collect(child);
+    })(settingsTree);
+    assert.strictEqual(excludeInputs.length, 1, 'the settings section offers one exclude field — text: ' + JSON.stringify(settingsText.slice(0, 20)));
+    assert.strictEqual(excludeInputs[0].props.value, ':root, html, body', 'seeded with the default list — got: ' + JSON.stringify(excludeInputs[0].props.value));
+    excludeInputs[0].props.onBlur({ target: { value: '.keep-me, [data-x]' } });
+    await settle();
+    const settingsWrites = excludeHost.calls.filter(call => String(call.url).includes('/write')
+      && String(call.init?.body ?? '').includes('settings.json.css'));
+    assert.ok(settingsWrites.length >= 1, 'changing the list writes the settings record — calls: '
+      + JSON.stringify(excludeHost.calls.map(call => call.url)));
+    assert.ok(
+      String(settingsWrites[settingsWrites.length - 1].init.body).includes('.keep-me, [data-x]'),
+      'with the new list in it',
     );
   }
 
