@@ -5666,8 +5666,31 @@ const injected = { textContent: ownSheet };
     const fullButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('全屏'));
     const listButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('列表'));
     assert.ok(fullButton?.props.disabled === true, 'the full-screen button is a placeholder this release');
-    assert.ok(listButton?.props.disabled === true, 'the list button is a placeholder too');
     assert.ok(String(fullButton?.props.title ?? '').includes('下一步'), 'and it says so instead of doing nothing silently');
+    // 列表（卡片导航）现在是真的：点一下出一排卡，一张对应一个命中元素。
+    assert.ok(listButton?.props.disabled !== true, 'the list button works now');
+    listButton.props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    // 这一次渲染的树留着：再调一次 component() 而不重置 hookIndex，状态槽会错位（卡片就不见了）。
+    const withCards = previewHost.registrations[0].component();
+    assert.ok(renderedClasses.includes('dshCc_sampleCards'), 'the list button opens card navigation');
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('· 1/1')),
+      'one card per match, labelled with its type and position — got: ' + JSON.stringify(renderedText.slice(0, 12)),
+    );
+    // 点卡片：选中态换到那一张，预览跟着换（只有一个命中时仍是第一张）。
+    const cards = [];
+    (function collectCards(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshCc_hlToggle') && String(node.props?.title ?? '') !== '') cards.push(node);
+      for (const child of node.children ?? []) collectCards(child);
+    })(withCards);
+    assert.ok(cards.length >= 1, 'the card is a button');
+    // 回到单屏 / 对比：卡片排仍然在，因为它是一个开关而不是第三种模式。
+    const compareFromCards = cards.find(node => JSON.stringify(node.children ?? []).includes('对比'));
+    assert.ok(compareFromCards !== undefined, 'the compare button is still reachable with cards open');
     // 单屏：只有「修改后」一块。
     assert.ok(renderedClasses.includes('dshCc_previewAfter'), 'single-screen shows the modified sample');
     assert.ok(!renderedClasses.includes('dshCc_previewCurrent'), 'and not the current one');
