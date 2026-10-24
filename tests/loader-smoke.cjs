@@ -6013,6 +6013,67 @@ const injected = { textContent: ownSheet };
     assert.ok(!renderedClasses.includes('dshCc_full'), 'closing removes the dialog');
   }
 
+  // --- 全屏头：上下文与出口 ------------------------------------------------
+  // 全屏里没有行内的「N 个命中」和卡片序号，也没有卡片导航 —— 这三件事要在头上补回来，
+  // 否则用户不知道自己在预览第几个元素、也不知道怎么退出。
+  {
+    const manyHost = await boot({
+      dom: {
+        nodes: [
+          { tagName: 'DIV', className: 'card', children: [] },
+          { tagName: 'DIV', className: 'card', children: [] },
+          { tagName: 'DIV', className: 'card', children: [] },
+        ],
+      },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    const walk = (node, predicate, found = []) => {
+      if (node === null || typeof node !== 'object') return found;
+      if (predicate(node)) found.push(node);
+      for (const child of node.children ?? []) walk(child, predicate, found);
+      return found;
+    };
+    hookIndex = 0;
+    const headRow = manyHost.registrations[0].component();
+    findNode(headRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    const panel = manyHost.registrations[0].component();
+    walk(panel, node => node.type === 'button' && node.props?.['aria-label'] === '全屏')[0].props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    const withDialog = manyHost.registrations[0].component();
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('3 个命中')),
+      'the dialog head carries the hit count — got: ' + JSON.stringify(renderedText.filter(t => typeof t === 'string' && t.includes('命中'))),
+    );
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('第 1 个')),
+      'and which element is being previewed',
+    );
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('Esc 退出')),
+      'plus the way out (Esc)',
+    );
+    const dialog = walk(withDialog, node => node.type === 'dialog')[0];
+    const navButtons = walk(dialog, node => node.type === 'button' && (node.props?.['aria-label'] === '上一个命中元素' || node.props?.['aria-label'] === '下一个命中元素'));
+    assert.strictEqual(navButtons.length, 2, 'a three-hit rule gets prev/next in the dialog — got: ' + navButtons.length);
+    // 下一张：索引前进（3 个命中时 0 → 1）。
+    navButtons.find(node => node.props['aria-label'] === '下一个命中元素').props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    manyHost.registrations[0].component();
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('第 2 个')),
+      'clicking › moves to the next matched element — got: ' + JSON.stringify(renderedText.filter(t => typeof t === 'string' && t.includes('第 '))),
+    );
+  }
+
   // --- 预览的样本本身是「插件自己的东西」，不能参与匹配 --------------------------
   // 用户写的 `[class*='_tableRow']` 曾经把预览里克隆出来的那几行也命中：样本一画出来，
   // 计数就跟着涨，看起来像「规则匹配了不存在的东西」。容器带上 data-dshcc-owned 之后，

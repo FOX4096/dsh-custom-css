@@ -178,6 +178,10 @@ dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 to
 
 全屏视图（0.11.x 的设计）：卡片 `min(1280px,96vw) × min(94vh,960px)`、内边距 20、间距 16；舞台至少 260px 并吃掉多出来的高度，正文留在下半屏（最多 42%）自己滚；两块视口带 `0.5px --dsw-alias-border-l2` 描边（§G 的「视口描边」），样本短的时候在视口里**居中**（用 `margin:auto` 而不是 `justify-content:center` —— 后者在内容溢出时会让头几行滚不到）。
 
+**顶栏是全屏里唯一的「我在哪」**：选择器（左）+ `N 个命中 · 第 i 个` + `‹ ›`（只在一个以上命中时出现，全屏里没有卡片导航，这对按钮是唯一的切换方式）+ `Esc 退出` + `×`。`‹ ›` 与 `×` 都是 28px 图标按钮（和面板右上角那个同一规格），不是 21px 的小胶囊 —— 一行里混两种控件高度，看起来像两条工具栏。
+
+**窄窗口（≤900px）两张视口改成上下堆叠**：并排各 330px 时两边都看不出样子。这条媒体查询必须排在基础规则**之后** —— 媒体查询不加特异性，写在前面会被后面的 `flex-wrap:nowrap` 覆盖（实测：760px 下还是并排，量到两块视口 x=34/384、y 相同）。
+
 **背景是毛玻璃**：`::backdrop{background:color-mix(in srgb,var(--dsw-alias-bg-overlay) 55%,transparent);backdrop-filter:blur(18px) saturate(1.15)}`。这里有个坑：`--dsw-alias-bg-overlay` 本身是**不透明**的 `#e9ecf2`，直接铺上去等于把页面盖死（模糊了什么都看不见），所以要先混成半透明。`prefers-reduced-transparency:reduce` 时退回不透明遮罩、去掉滤镜。进场 200ms ease-out（位移 12px），`prefers-reduced-motion` 时直接出现。
 
 规格：块本身与其它块同一套（`radius-md` + `bg-module-platform` + `0.5px border-l2`，内边距 10、间距 8），
