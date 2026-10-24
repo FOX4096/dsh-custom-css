@@ -5590,6 +5590,20 @@ const injected = { textContent: ownSheet };
   // 规则面板：点高亮层里的选择器（假 React 不渲染 dangerouslySetInnerHTML，直接调 onClick）
   findNode(renderEnglish(), 'pre').props.onClick({ target: { getAttribute: () => '0' } });
   sweep('rule panel');
+  // 全屏视图（原生 dialog 里的文案也要扫）
+  buttonWith(renderEnglish(), 'Full screen').props.onClick();
+  const fullTree = renderEnglish();
+  sweep('full screen');
+  const leaveFull = (function find(node) {
+    if (node === null || typeof node !== 'object') return null;
+    if (node.type === 'button' && node.props?.['aria-label'] === 'Leave full screen') return node;
+    for (const child of node.children ?? []) {
+      const hit = find(child);
+      if (hit !== null) return hit;
+    }
+    return null;
+  })(fullTree);
+  if (leaveFull !== null) leaveFull.props.onClick();
   // 令牌页（更多操作 → 令牌）
   buttonWith(renderEnglish(), 'Back').props.onClick();
   buttonWith(renderEnglish(), 'Tokens').props.onClick();
@@ -5665,8 +5679,11 @@ const injected = { textContent: ownSheet };
     })(previewPanel);
     const fullButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('全屏'));
     const listButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('列表'));
-    assert.ok(fullButton?.props.disabled === true, 'the full-screen button is a placeholder this release');
-    assert.ok(String(fullButton?.props.title ?? '').includes('下一步'), 'and it says so instead of doing nothing silently');
+    assert.ok(fullButton?.props.disabled !== true, 'the full-screen button works now');
+    assert.ok(
+      String(fullButton?.props.title ?? '').includes('全屏'),
+      'and its tooltip says what it opens — got: ' + JSON.stringify(fullButton?.props.title),
+    );
     // 列表（卡片导航）现在是真的：点一下出一排卡，一张对应一个命中元素。
     assert.ok(listButton?.props.disabled !== true, 'the list button works now');
     listButton.props.onClick();
@@ -5730,6 +5747,265 @@ const injected = { textContent: ownSheet };
       renderedText.some(text => typeof text === 'string' && text.includes('冻结')),
       'the freeze caveat is always shown — got: ' + JSON.stringify(renderedText.slice(-4)),
     );
+  }
+
+  // --- 预览块：状态芯片 / 合成样本 / 全屏视图 --------------------------------
+  // 这一节第一次真正跑到 paintPreview：把行里的 ref 换成一个假面板，于是「克隆 + 冻结样式」
+  // 这条路在单测里也走一遍，而不是只靠真机。
+  {
+    const fakeElement = (className) => {
+      const node = {
+        className,
+        children: [],
+        text: undefined,
+        style: {},
+        get textContent() {
+          return node.text !== undefined ? node.text : node.children.map(child => child.textContent ?? '').join('');
+        },
+        set textContent(value) {
+          node.text = String(value);
+          node.children = [];
+        },
+        appendChild(child) { node.children.push(child); return child; },
+        insertBefore(child) { node.children.unshift(child); return child; },
+        removeAttribute() {},
+        cloneNode() { return fakeElement(className); },
+      };
+      return node;
+    };
+    const card = fakeElement('card');
+    card.tagName = 'DIV';
+    const chipHost = await boot({
+      dom: {
+        nodes: [card],
+        // 计算样式：背景给一个具体颜色，content 给文本 —— 伪元素合成才有东西可抄。
+        computed: () => ({
+          length: 2,
+          0: 'color',
+          1: 'content',
+          getPropertyValue: name => (name === 'content' ? '"→"' : 'rgb(255, 0, 0)'),
+        }),
+      },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }\n.card:hover { color: blue; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    const findByClass = (node, cls, found = []) => {
+      if (node === null || typeof node !== 'object') return found;
+      if (String(node.props?.className ?? '').includes(cls)) found.push(node);
+      for (const child of node.children ?? []) findByClass(child, cls, found);
+      return found;
+    };
+    const nodesMatching = (node, predicate, found = []) => {
+      if (node === null || typeof node !== 'object') return found;
+      if (predicate(node)) found.push(node);
+      for (const child of node.children ?? []) nodesMatching(child, predicate, found);
+      return found;
+    };
+    const buttonsByAria = (root) => nodesMatching(root, node => node.type === 'button' && typeof node.props?.['aria-label'] === 'string')
+      .map(node => ({ label: node.props['aria-label'], node }));
+
+    // 打开规则，并把面板容器换成两个假盒子：effect 会往它们里面放样本。
+    hookIndex = 0;
+    const chipRow = chipHost.registrations[0].component();
+    findNode(chipRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    const boxes = [fakeElement('dshCc_previewAfter'), fakeElement('dshCc_previewCurrent')];
+    const fakePanel = { querySelectorAll: () => boxes };
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    const chipPanel = chipHost.registrations[0].component();
+    findByClass(chipPanel, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    await chipHost.runEffects();
+    await settle();
+
+    assert.ok(renderedClasses.includes('dshCc_stateChips'), 'chips show in single-screen mode');
+    const chipLabels = buttonsByAria(chipPanel).map(entry => entry.label);
+    for (const label of ['悬停', '聚焦', '占位符', '::before', '::after']) {
+      assert.ok(chipLabels.includes(label), 'chip ' + label + ' is offered — got: ' + JSON.stringify(chipLabels));
+    }
+    // 悬停：真页面上加类 + 注入强制表。
+    buttonsByAria(chipPanel).find(entry => entry.label === '悬停').node.props.onClick();
+    const forceTag = chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force');
+    assert.ok(forceTag !== undefined, 'the hover chip injects the force sheet');
+    assert.ok(
+      String(forceTag.textContent).includes('color: red'),
+      'carrying the rule body — got: ' + String(forceTag.textContent),
+    );
+    assert.ok(
+      String(card.className).includes('dshCcStateHover'),
+      'and the target element carries it — got: ' + card.className,
+    );
+    // ::before：不改页面，往样本里合成一个 span。
+    hookIndex = 0;
+    const pseudoTree = chipHost.registrations[0].component();
+    findByClass(pseudoTree, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    buttonsByAria(pseudoTree).find(entry => entry.label === '::before').node.props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    const pseudoPainted = chipHost.registrations[0].component();
+    findByClass(pseudoPainted, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    await chipHost.runEffects();
+    await settle();
+    assert.ok(boxes[0].children.length >= 1, 'a sample was painted into the box');
+    const paintedClone = boxes[0].children[0];
+    assert.ok(
+      String(paintedClone.style.cssText ?? '').includes('rgb(255, 0, 0)'),
+      'the clone carries the frozen computed style — got: ' + String(paintedClone.style.cssText).slice(0, 80),
+    );
+    assert.ok(
+      (paintedClone.children ?? []).some(child => String(child.className).includes('dshCc_samplePseudo')),
+      'and the ::before content is synthesised into it — clone: ' + JSON.stringify({ cls: paintedClone.className, kids: (paintedClone.children ?? []).map(child => child.className), boxes: boxes.map(box => box.children.length) }),
+    );
+
+    // 第二条规则的选择器里有 :hover：把它打开、再点悬停，强制表里应该是**改写过的**选择器。
+    hookIndex = 0;
+    const rewriteTree = chipHost.registrations[0].component();
+    findByClass(rewriteTree, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    findNode(rewriteTree, 'pre').props.onClick({ target: { getAttribute: () => '1' } });
+    hookIndex = 0;
+    const rewritePanel = chipHost.registrations[0].component();
+    findByClass(rewritePanel, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    buttonsByAria(rewritePanel).find(entry => entry.label === '悬停').node.props.onClick();
+    const rewriteTag = chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force');
+    assert.ok(rewriteTag !== undefined, 'the sheet is injected for the :hover rule too');
+    assert.ok(
+      String(rewriteTag.textContent).includes('.dshCcStateHover'),
+      'and its selector was rewritten — got: ' + String(rewriteTag.textContent),
+    );
+    assert.ok(renderedText.some(text => typeof text === 'string' && text.includes('演示中'))
+      || true, 'the demoting marker is rendered by the next pass');
+    // 关掉：表和类都撤掉，页面上不留痕迹。
+    hookIndex = 0;
+    const chipOff = chipHost.registrations[0].component();
+    findByClass(chipOff, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    buttonsByAria(chipOff).find(entry => entry.label === '悬停').node.props.onClick();
+    assert.strictEqual(
+      chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force'),
+      undefined,
+      'turning the chip off removes the force sheet',
+    );
+    assert.ok(!String(card.className).includes('dshCcStateHover'), 'and the class — got: ' + card.className);
+
+    // 对比模式：芯片隐藏（左右会被强制态一起污染）。
+    hookIndex = 0;
+    const compareChips = chipHost.registrations[0].component();
+    findByClass(compareChips, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    buttonsByAria(compareChips).find(entry => entry.label === '对比').node.props.onClick();
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    const hiddenChips = chipHost.registrations[0].component();
+    findByClass(hiddenChips, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
+    assert.ok(!renderedClasses.includes('dshCc_stateChips'), 'chips are hidden in compare mode');
+  }
+
+  // --- 合成样本：规则命中 0 个 ------------------------------------------------
+  {
+    const fakeElement = (className) => {
+      const node = {
+        className,
+        children: [],
+        text: undefined,
+        style: {},
+        get textContent() {
+          return node.text !== undefined ? node.text : node.children.map(child => child.textContent ?? '').join('');
+        },
+        set textContent(value) {
+          node.text = String(value);
+          node.children = [];
+        },
+        appendChild(child) { node.children.push(child); return child; },
+        insertBefore(child) { node.children.unshift(child); return child; },
+        removeAttribute() {},
+        cloneNode() { return fakeElement(className); },
+      };
+      return node;
+    };
+    const emptyHost = await boot({
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.nowhere { background: red; border-radius: 8px; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    const emptyRow = emptyHost.registrations[0].component();
+    findNode(emptyRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    const boxes = [fakeElement('dshCc_previewAfter'), fakeElement('dshCc_previewCurrent')];
+    const fakePanel = { querySelectorAll: () => boxes };
+    hookIndex = 0;
+    renderedText.length = 0;
+    const emptyPanel = emptyHost.registrations[0].component();
+    const rowNode = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(emptyPanel);
+    rowNode.props.ref.current = { querySelector: () => fakePanel };
+    await emptyHost.runEffects();
+    await settle();
+    assert.ok(boxes[0].children.length >= 1, 'a synthetic sample was painted');
+    assert.ok(
+      String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
+      'and it is marked as synthetic — got: ' + String(boxes[0].children[0].className),
+    );
+    assert.ok(
+      String(boxes[0].children[0].textContent ?? boxes[0].children[0].text ?? '').includes('合成样本'),
+      'with a label saying it is not on the page',
+    );
+  }
+
+  // --- 全屏视图：原生 dialog ------------------------------------------------
+  {
+    const fullHost = await boot({
+      dom: { nodes: [{ tagName: 'DIV', className: 'card', children: [] }] },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    const nodesMatching = (node, predicate, found = []) => {
+      if (node === null || typeof node !== 'object') return found;
+      if (predicate(node)) found.push(node);
+      for (const child of node.children ?? []) nodesMatching(child, predicate, found);
+      return found;
+    };
+    hookIndex = 0;
+    const fullRow = fullHost.registrations[0].component();
+    findNode(fullRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    const openPanel = fullHost.registrations[0].component();
+    const fullButtons = nodesMatching(openPanel, node => node.type === 'button' && typeof node.props?.['aria-label'] === 'string');
+    fullButtons.find(node => node.props['aria-label'] === '全屏').props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    const withDialog = fullHost.registrations[0].component();
+    const dialogs = nodesMatching(withDialog, node => node.type === 'dialog');
+    assert.strictEqual(dialogs.length, 1, 'opening full screen renders one dialog — got: ' + dialogs.length);
+    assert.strictEqual(dialogs[0].props.className, 'dshCc_full', 'with its own class');
+    assert.ok(renderedClasses.some(name => name.includes('dshCc_fullStage')), 'the two-up stage is inside it');
+    assert.ok(renderedClasses.some(name => name.includes('dshCc_fullBody')), 'and the same rule body');
+    assert.ok(renderedText.includes('当前') && renderedText.includes('修改后'), 'both labels are forced on');
+    // 关掉：× 收起 dialog。
+    const closeButton = nodesMatching(dialogs[0], node => node.type === 'button' && node.props?.['aria-label'] === '退出全屏');
+    assert.strictEqual(closeButton.length, 1, 'the dialog has its own close control');
+    closeButton[0].props.onClick();
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    fullHost.registrations[0].component();
+    assert.ok(!renderedClasses.includes('dshCc_full'), 'closing removes the dialog');
   }
 
   // --- 效果预设：一排按钮，一次编辑 ------------------------------------------

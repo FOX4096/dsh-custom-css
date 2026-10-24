@@ -90,6 +90,30 @@
 静默跳过会让「面没打开」伪装成「里面没有元素」。
 
 CI 目前采两个面：设置页里的这一行（`--open-settings`），和本插件详情页的壁纸面板
+
+**预览块的面怎么采**（0.10.0 起；`--sel` 只测量，`--shot` 出图）：
+
+```bash
+# 状态芯片：打开一条带 :hover 的规则，点「悬停」，再确认强制表与目标元素
+node tests/visual-probe.mjs --open-settings \
+  --click ".dshCc_highlight span[data-rule]" \
+  --click ".dshCc_stateChips button:nth-child(1)" \
+  --sel "#dsh-custom-css-preview-force" --sel ".dshCcStateHover" --shot
+
+# 全屏视图：dialog 必须真的是视口级尺寸（被祖先 transform 裁掉时会明显变小）
+node tests/visual-probe.mjs --height 1100 --open-settings \
+  --click ".dshCc_highlight span[data-rule]" \
+  --click ".dshCc_previewTools button:nth-child(1)" \
+  --sel "dialog.dshCc_full" --sel ".dshCc_fullStage" --shot
+
+# 命中 0 个：合成样本要真的出现，并且写着「不是页面上的元素」
+node tests/visual-probe.mjs --open-settings \
+  --click ".dshCc_highlight span[data-rule]" --sel ".dshCc_sampleSynthetic" --shot
+```
+
+全屏那条要**看尺寸**：原生 `<dialog>` + `showModal()` 进 top layer，实测 920×760；如果哪天有人把它换回
+`position:fixed` 的浮层，尺寸会掉到设置对话框那一档（≈ 430×700），探针的 `rect` 一眼就能看出来。
+
 （`--click "nav=插件" --click "nav=dsh-custom-css"`）—— 后者是插件里最大、原来完全没有视觉证据的界面。
 
 **「页面根本没加载」会先被认出来**（正文太短，或带着浏览器的「拒绝连接」文案），直接按环境问题
