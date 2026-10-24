@@ -20,6 +20,7 @@
 | 按钮语义色 | 中性按钮文字 `--dsw-alias-label-secondary`，hover 底色 `--dsw-alias-interactive-bg-hover`；**重置**用 `--dsw-alias-state-error-primary`（浅色 `#ec1313` / 深色 `#f25a5a`）+ hover 底色 `--dsw-alias-interactive-bg-hover-danger` | 破坏性操作与普通操作用色区分 |
 | 下拉与菜单 | 触发按钮：`--dsw-alias-bg-module-platform`、`36px` 高、圆角 `18px`、内边距 `0 14px`、`14px/22px`；菜单：`--dsw-specific-menu` 底 + `--dsw-elevation-prominent` 阴影、圆角 `20px`、`4px` 内边距；菜单项：圆角 `10px`、`min-height 40px`、hover `--dsw-alias-interactive-bg-hover` | 逐值照抄 DSH 设置行 selector（`oY77xG_selector` / `T1PP_q_selector` / `lats3W_selector` 三者**字节级相同**）与共享下拉 `_root_1nxmc_1` |
 | 编辑器 | 行号 gutter 与文本区共用一个等宽行高（`--dshCc-line: 19px`）；获得焦点时边框让位给 `--dsw-alias-brand-primary` 聚焦环；补全列表用共享菜单的紧凑规格（圆角 `7px`、项 `min-height 26px`、`12px/18px`） | DevTools 风格的代码编辑外观 + 共享菜单层级 |
+| 预览块 / 令牌页 / 全屏视图（0.8 起的新界面） | 与既有块同一套：块本身 `--dsw-radius-md` + `--dsw-alias-bg-module-platform` + `0.5px --dsw-alias-border-l2`；内层视口 `--dsw-radius-sm` + `--dsw-alias-bg-layer-1`；说明文字 `--dsw-font-xxs-12` + `--dsw-alias-label-caption`（与历史版本页那条一样的规格）；全屏卡片用 `--dsw-alias-settings-card-fill` / `-stroke` + `--dsw-elevation-prominent` | 这条是**事后统一**：新功能一开始各写各的字号与内边距，2026-10 按本页的阶梯与 DSH 卡片规格对齐了 |
 | 编辑器容器 | 圆角 `12px` + `--dsw-alias-border-l2` 描边、`--dsw-alias-bg-layer-1` 底：**表头（文件名 + `CSS` 徽章 + 开关）／正文（代码在上、属性面板在下，均占满宽度）／状态行** 三段同框；表头与状态行用 `--dsw-alias-bg-module-platform` 与 `0.5px` 分隔线区分 | 设置面板里成块控件的统一做法 |
 
 ---
@@ -44,6 +45,12 @@ DSH 的 Button 只有 **36px**（`14px` 字号、`0 14px` 内边距）与 **28px
 `--ds-font-family-code`（`"SF Mono", "JetBrains Mono", "Fira Code", Consolas, …, "PingFang SC", "Microsoft YaHei"`）。
 自己写一份等宽字体栈在浅深主题、不同系统上会和 Markdown 代码块不一致 ——
 曾经在三处各写了一份，其中一个还在逗号后多了空格。
+
+### 增删点缀色是**底色**
+
+`--dsw-alias-code-diff-added` / `-deleted` 的 alpha 只有 **0.08**（实测浅色下是 `rgba(34, 197, 94, .08)`）。
+把它们当**文字色**用，标签在真机上等于隐身 —— 左侧「当前」/「修改后」就是这样差点没画出来。
+正确用法：当小标签的底色，文字仍用 `--dsw-alias-label-secondary`。
 
 ### DSH 只有一个红
 

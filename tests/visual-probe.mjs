@@ -902,6 +902,10 @@ async function measureSelector(session, selector) {
 			overflowStyle: { x: style.overflowX, y: style.overflowY },
 			visible: rect.width > 0 && rect.height > 0,
 			styles: {
+				// 颜色与字号也报出来：样式的统一（说明文字、增删点缀色、字号阶梯）只能在真机上量。
+				color: style.color,
+				fontSize: style.fontSize,
+				lineHeight: style.lineHeight,
 				display: style.display,
 				height: style.height,
 				maxHeight: style.maxHeight,

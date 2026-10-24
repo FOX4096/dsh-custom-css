@@ -162,7 +162,7 @@
 ├── .dshCc_stateChips            状态芯片（只在单屏模式）
 ├── .dshCc_previewStage
 │   ├── .dshCc_previewBox
-│   │   ├── .dshCc_previewLabel
+│   │   ├── .dshCc_previewLabel（增删点缀色作底色的小标签）
 │   │   ├── .dshCc_previewCurrent   对比模式：左「当前」
 │   │   └── .dshCc_previewAfter     右「修改后」
 └── .dshCc_previewNote           冻结口径那一行小字
@@ -175,6 +175,10 @@ dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 to
 ```
 
 高度：样本容器 **260px** 自己滚，整块面板 **340px**（原来是 160 / 260 —— 预览被声明区挤成一条缝）。
+
+规格：块本身与其它块同一套（`radius-md` + `bg-module-platform` + `0.5px border-l2`，内边距 10、间距 8），
+视口 `radius-sm` + `bg-layer-1`（内边距 8），说明文字用 `--dsw-font-xxs-12`（与历史版本页那条一致）。
+两块的小标签用**增删点缀色作底色**（它们是 alpha 0.08 的底色，不是文字色 —— 详见 [设计一致性](./design-tokens.md)）。
 
 ## 分阶段
 
