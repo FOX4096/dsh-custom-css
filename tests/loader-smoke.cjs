@@ -6190,6 +6190,74 @@ const injected = { textContent: ownSheet };
     );
   }
 
+  // --- 排除名单只看元素本身：祖先在名单里不等于后代也在 -------------------------
+  // 回归用的就是这次真机上量到的现象：`closest(':root')` 对页面上每个节点都成立，于是**所有**
+  // 规则都退化成「合成样本（不是页面上的元素）」。名单的语义是「别碰整页」。
+  {
+    const boxLike = (className) => ({
+      className,
+      children: [],
+      textContent: '',
+      appendChild(child) { this.children.push(child); return child; },
+    });
+    const bodyNode = {
+      tagName: 'BODY',
+      className: '',
+      children: [],
+      parentElement: null,
+      matches: selector => selector.trim() === 'body',
+      cloneNode() { return { className: 'body', children: [], style: {}, appendChild() {}, removeAttribute() {} }; },
+    };
+    const cardNode = {
+      tagName: 'DIV',
+      className: 'card',
+      children: [],
+      parentElement: bodyNode,
+      matches: selector => selector.trim() === '.card',
+      cloneNode() { return { className: 'card', children: [], style: {}, appendChild() {}, removeAttribute() {} }; },
+    };
+    bodyNode.children.push(cardNode);
+    const nestedHost = await boot({
+      dom: { nodes: [bodyNode, cardNode] },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    const nestedRow = nestedHost.registrations[0].component();
+    findNode(nestedRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    renderedText.length = 0;
+    const nestedPanel = nestedHost.registrations[0].component();
+    assert.ok(
+      !renderedText.some(text => typeof text === 'string' && text.includes('排除名单')),
+      'an element inside the page is NOT excluded just because its ancestor is — got: '
+        + JSON.stringify(renderedText.filter(text => typeof text === 'string' && text.includes('排除'))),
+    );
+    const boxes = [boxLike('dshCc_previewAfter'), boxLike('dshCc_previewCurrent')];
+    const fakePanel = { querySelectorAll: () => boxes };
+    const rowNode = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(nestedPanel);
+    rowNode.props.ref.current = { querySelector: () => fakePanel };
+    await nestedHost.runEffects();
+    await settle();
+    assert.ok(boxes[0].children.length >= 1, 'the sample was painted for a normal element');
+    assert.ok(
+      !String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
+      'and it is the real clone, not the synthetic sample — got: ' + String(boxes[0].children[0].className),
+    );
+  }
+
   // --- 效果预设：一排按钮，一次编辑 ------------------------------------------
   // 预设写的是**这一条规则**的一组声明，用的是材质令牌；它必须是**一次编辑**（一次 Ctrl+Z 撤回
   // 整批），而且检查不通过时要说原因，不是点了没反应。
