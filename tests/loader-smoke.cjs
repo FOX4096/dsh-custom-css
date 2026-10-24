@@ -5628,6 +5628,87 @@ const injected = { textContent: ownSheet };
     'and the defaults are injected before the user sheet, so the user can override them',
   );
 
+  // --- 预览块：三个按钮 + 对比模式 --------------------------------------------
+  // 位置与存在条件：只在打开某条规则时出现（与规则面板同进同退），所以这一节同时守住
+  // 「没打开规则时不应该有预览块」—— 那会让没在编辑的行无故变高。
+  {
+    const previewHost = await boot({
+      dom: { nodes: [{ tagName: 'DIV', className: 'card', children: [] }] },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    // 每次渲染前把 hookIndex 归零：它决定这次渲染从哪个状态槽开始读，错位会让点击写进
+    // 别的组件留下的槽里（表现为「点了没反应」）。
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    const previewRow = previewHost.registrations[0].component();
+    assert.ok(!renderedClasses.includes('dshCc_preview'), 'no preview block while no rule is open');
+    findNode(previewRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    const previewPanel = previewHost.registrations[0].component();
+    assert.ok(renderedClasses.includes('dshCc_preview'), 'opening a rule brings the preview block — classes: ' + JSON.stringify(renderedClasses.slice(0, 40)));
+    // 三个按钮，顺序：全屏 / 对比 / 列表。前两个之外的两个这一版只占位。
+    assert.ok(renderedText.includes('全屏') && renderedText.includes('对比') && renderedText.includes('列表'),
+      'three buttons — got: ' + JSON.stringify(renderedText.slice(0, 12)));
+    const previewButtons = [];
+    (function collect(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshCc_hlToggle')) previewButtons.push(node);
+      for (const child of node.children ?? []) collect(child);
+    })(previewPanel);
+    const fullButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('全屏'));
+    const listButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('列表'));
+    assert.ok(fullButton?.props.disabled === true, 'the full-screen button is a placeholder this release');
+    assert.ok(listButton?.props.disabled === true, 'the list button is a placeholder too');
+    assert.ok(String(fullButton?.props.title ?? '').includes('下一步'), 'and it says so instead of doing nothing silently');
+    // 单屏：只有「修改后」一块。
+    assert.ok(renderedClasses.includes('dshCc_previewAfter'), 'single-screen shows the modified sample');
+    assert.ok(!renderedClasses.includes('dshCc_previewCurrent'), 'and not the current one');
+    assert.ok(renderedText.includes('当前') === false, 'no current label in single-screen mode');
+    // 点对比：左边多出「当前」那一块。
+    const compareButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('对比'));
+    assert.ok(compareButton !== undefined, 'the compare button exists');
+    compareButton.props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    previewHost.registrations[0].component();
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('还没改动')),
+      'compare mode on an unchanged rule says so instead of showing an empty box — got: '
+        + JSON.stringify(renderedText.slice(-5)),
+    );
+    assert.ok(renderedText.includes('当前') && renderedText.includes('修改后'), 'with both labels');
+    // 改一行之后再比：左边那块才真的出现（它代表「打开时」的样子）。
+    hookIndex = 0;
+    findNode(previewHost.registrations[0].component(), 'textarea').props.onChange({
+      target: { value: '.card { color: blue; }', selectionStart: 0 },
+      nativeEvent: { inputType: 'insertText' },
+    });
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    previewHost.registrations[0].component();
+    assert.ok(renderedClasses.includes('dshCc_previewCurrent'), 'after an edit the current sample appears');
+    assert.ok(
+      !renderedText.some(text => typeof text === 'string' && text.includes('还没改动')),
+      'and the "nothing changed" note is gone',
+    );
+    assert.ok(compareButton.props['aria-pressed'] === false, 'the button reports the state it started in');
+    // 口径说明一直在：预览的价值取决于它说的这句实话。
+    assert.ok(
+      renderedText.some(text => typeof text === 'string' && text.includes('冻结')),
+      'the freeze caveat is always shown — got: ' + JSON.stringify(renderedText.slice(-4)),
+    );
+  }
+
   // --- 效果预设：一排按钮，一次编辑 ------------------------------------------
   // 预设写的是**这一条规则**的一组声明，用的是材质令牌；它必须是**一次编辑**（一次 Ctrl+Z 撤回
   // 整批），而且检查不通过时要说原因，不是点了没反应。
