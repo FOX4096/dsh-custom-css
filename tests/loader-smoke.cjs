@@ -6008,6 +6008,73 @@ const injected = { textContent: ownSheet };
     assert.ok(!renderedClasses.includes('dshCc_full'), 'closing removes the dialog');
   }
 
+  // --- 预览的样本本身是「插件自己的东西」，不能参与匹配 --------------------------
+  // 用户写的 `[class*='_tableRow']` 曾经把预览里克隆出来的那几行也命中：样本一画出来，
+  // 计数就跟着涨，看起来像「规则匹配了不存在的东西」。容器带上 data-dshcc-owned 之后，
+  // queryOwned 会把它们（以及里面所有克隆）从任何匹配里剔掉。
+  {
+    const boxLike = (className) => ({
+      className,
+      children: [],
+      textContent: '',
+      appendChild(child) { this.children.push(child); return child; },
+    });
+    const row = {
+      tagName: 'TR',
+      className: 'table-row',
+      children: [],
+      cloneNode() { return { tagName: 'TR', className: 'table-row', children: [], style: {}, appendChild(c) { this.children.push(c); return c; }, removeAttribute() {} }; },
+    };
+    const tableHost = await boot({
+      dom: { nodes: [row] },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.table-row { color: red; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    const tableTree = tableHost.registrations[0].component();
+    findNode(tableTree, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    const boxes = [boxLike('dshCc_previewAfter'), boxLike('dshCc_previewCurrent')];
+    const fakePanel = { querySelectorAll: () => boxes };
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    const markedPanel = tableHost.registrations[0].component();
+    const markedRow = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(markedPanel);
+    markedRow.props.ref.current = { querySelector: () => fakePanel };
+    const sampleNodes = (function collect(node, found = []) {
+      if (node === null || typeof node !== 'object') return found;
+      if (String(node.props?.className ?? '').includes('dshCc_previewAfter') && node.props?.className === 'dshCc_previewAfter') found.push(node);
+      for (const child of node.children ?? []) collect(child, found);
+      return found;
+    })(markedPanel);
+    assert.ok(sampleNodes.length >= 1, 'the modified sample container is in the tree');
+    assert.strictEqual(
+      String(sampleNodes[0].props['data-dshcc-owned']),
+      '',
+      'and it is marked as plugin chrome, so a selector cannot match the preview itself',
+    );
+    // <tr> 克隆进一个 div 是没有布局的：样本要自己补上 table / tbody 包装。
+    await tableHost.runEffects();
+    await settle();
+    assert.ok(boxes[0].children.length >= 1, 'a table row was painted');
+    assert.strictEqual(
+      String(boxes[0].children[0].tagName ?? '').toLowerCase(),
+      'table',
+      'the row clone is wrapped in a table so it can lay out — got: ' + String(boxes[0].children[0].tagName),
+    );
+  }
+
   // --- 效果预设：一排按钮，一次编辑 ------------------------------------------
   // 预设写的是**这一条规则**的一组声明，用的是材质令牌；它必须是**一次编辑**（一次 Ctrl+Z 撤回
   // 整批），而且检查不通过时要说原因，不是点了没反应。
