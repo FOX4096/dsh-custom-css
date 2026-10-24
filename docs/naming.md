@@ -269,8 +269,8 @@
 | 名字 | 标识 | 说明 | 状态 |
 | --- | --- | --- | --- |
 | **全屏视图** | `dialog.dshCc_full` | 铺满的那个视图；**原生 `<dialog>` + `showModal()`**，`Esc` 或 × 退出 | 已实现 |
-| **全屏遮罩** | `.dshCc_full::backdrop` | 铺满的半透明底（`--dsw-alias-bg-overlay`） | 已实现 |
-| **全屏卡片** | `.dshCc_full` 自身 | 面板面 + 唤起阴影；尺寸 `min(920px,94vw)` × `min(86vh,760px)` | 已实现 |
+| **全屏遮罩** | `.dshCc_full::backdrop` | 铺满的**毛玻璃**：`--dsw-alias-bg-overlay` 混 55% 透明 + `blur(18px) saturate(1.15)`；关掉透明效果时退回不透明 | 已实现 |
+| **全屏卡片** | `.dshCc_full` 自身 | 设置卡片面 + 唤起阴影；尺寸 `min(1280px,96vw)` × `min(94vh,960px)`，内边距 20 | 已实现 |
 | **全屏顶栏** | `.dshCc_fullHead` | 卡片最上面一行 | 已实现 |
 | **全屏选择器框** | `.dshCc_previewRule`（在顶栏里） | **只显示**该规则的选择器（只读） | 已实现 |
 | **全屏退出钮** | `.dshCc_panelClose`（顶栏里） | 顶栏右侧的 `×` | 已实现 |
@@ -316,7 +316,7 @@
 | 原始视口 点缀 | `--dsw-alias-code-diff-deleted` |
 | 修改后视口 点缀 | `--dsw-alias-code-diff-added` |
 | 状态芯片：选中 / 未选中 | `--dsw-alias-interactive-bg-active` / `--dsw-alias-bg-module-platform` |
-| 全屏遮罩 | `--dsw-alias-bg-overlay` |
+| 全屏遮罩 | `--dsw-alias-bg-overlay` **混成 55% 透明**（它本身不透明，直接铺会盖死页面）+ `backdrop-filter:blur(18px) saturate(1.15)` |
 | 全屏卡片 | `--dsw-alias-settings-card-fill` + `--dsw-alias-settings-card-stroke` |
 | 全屏卡片阴影 | `--dsw-elevation-prominent` |
 | 聚焦环 | `--dsw-alias-brand-primary` |

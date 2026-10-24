@@ -74,6 +74,8 @@ function parseArgs(argv) {
 	const options = {
 		selectors: [],
 		clicks: [],
+		// 任意的页面内表达式：令牌取值、`::backdrop` 这种选不中的东西，只能这样量。
+		evals: [],
 		waitMs: 1200,
 		timeoutMs: 120_000,
 		shot: false,
@@ -88,6 +90,7 @@ function parseArgs(argv) {
 		const next = () => argv[++index];
 		if (arg === '--sel') options.selectors.push(next());
 		else if (arg === '--click') options.clicks.push(next());
+		else if (arg === '--eval') options.evals.push(next());
 		else if (arg === '--wait') options.waitMs = Number(next());
 		else if (arg === '--timeout') options.timeoutMs = Number(next());
 		else if (arg === '--width') options.width = Number(next());
@@ -570,6 +573,19 @@ async function run(options) {
 			if (failures.length > 0 && verdict.kind === 'ok') {
 				result.failureKind = result.failureKind ?? 'regression';
 				process.exitCode = Math.max(process.exitCode ?? 0, 1);
+			}
+		}
+
+		// `--eval`：把表达式的结果一并带回。量令牌与伪元素（`::backdrop`）时用得上。
+		if (options.evals.length > 0) {
+			result.evals = [];
+			for (const expression of options.evals) {
+				const answer = await session.send('Runtime.evaluate', {
+					expression, returnByValue: true, awaitPromise: true,
+				});
+				const value = answer.result?.value;
+				result.evals.push({ expression, value: value === undefined ? String(answer.result?.description ?? '') : value, error: answer.exceptionDetails?.text });
+				log('info', `eval：${expression} → ${JSON.stringify(result.evals[result.evals.length - 1].value)}`);
 			}
 		}
 

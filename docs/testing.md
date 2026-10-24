@@ -111,7 +111,16 @@ node tests/visual-probe.mjs --open-settings \
   --click ".dshCc_highlight span[data-rule]" --sel ".dshCc_sampleSynthetic" --shot
 ```
 
-全屏那条要**看尺寸**：原生 `<dialog>` + `showModal()` 进 top layer，实测 920×760；如果哪天有人把它换回
+量伪元素、量令牌取值时用 `--eval "<表达式>"`（结果落在 `temp/probe/last-probe.json` 的 `evals` 里）——
+`::backdrop` 这种 `querySelector` 选不中的东西只能这样量：
+
+```bash
+node tests/visual-probe.mjs --open-settings --click ".dshCc_highlight span[data-rule]" \
+  --click ".dshCc_previewTools button:nth-child(1)" \
+  --eval "getComputedStyle(document.querySelector('dialog.dshCc_full'),'::backdrop').backdropFilter"
+```
+
+全屏那条要**看尺寸**：原生 `<dialog>` + `showModal()` 进 top layer，实测 **1280×940**（1440×1000 视口下）；如果哪天有人把它换回
 `position:fixed` 的浮层，尺寸会掉到设置对话框那一档（≈ 430×700），探针的 `rect` 一眼就能看出来。
 
 （`--click "nav=插件" --click "nav=dsh-custom-css"`）—— 后者是插件里最大、原来完全没有视觉证据的界面。

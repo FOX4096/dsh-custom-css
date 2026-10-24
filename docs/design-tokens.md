@@ -46,6 +46,12 @@ DSH 的 Button 只有 **36px**（`14px` 字号、`0 14px` 内边距）与 **28px
 自己写一份等宽字体栈在浅深主题、不同系统上会和 Markdown 代码块不一致 ——
 曾经在三处各写了一份，其中一个还在逗号后多了空格。
 
+### 毛玻璃：`backdrop-filter` 放 `::backdrop` 上，且遮罩要半透明
+
+原生 `<dialog>` 的 `::backdrop` 是 top layer 里的真实元素，所以 `backdrop-filter` 直接写在它身上就生效（`blur(18px) saturate(1.15)`）—— 不需要额外包一层，也不要用 iframe（iframe 里的 `backdrop-filter` 糊不到外面）。
+但 `--dsw-alias-bg-overlay` 是**不透明**的 `#e9ecf2`：直接当遮罩色会把页面彻底盖住，模糊等于白做。
+正确写法是先混成半透明（`color-mix(in srgb,var(--dsw-alias-bg-overlay) 55%,transparent)`），并在 `prefers-reduced-transparency:reduce` 时退回不透明。
+
 ### 增删点缀色是**底色**
 
 `--dsw-alias-code-diff-added` / `-deleted` 的 alpha 只有 **0.08**（实测浅色下是 `rgba(34, 197, 94, .08)`）。
