@@ -111,6 +111,8 @@ node tests/visual-probe.mjs --open-settings \
   --click ".dshCc_highlight span[data-rule]" --sel ".dshCc_sampleSynthetic" --shot
 ```
 
+量渲染开销用 `--metrics <毫秒>`：采样窗口内 `TaskDuration` /
+`RecalcStyleCount` 的增量，用来 A/B 样式表 —— 截图看不出「每帧多花了多少」。
 量伪元素、量令牌取值时用 `--eval "<表达式>"`（结果落在 `temp/probe/last-probe.json` 的 `evals` 里）——
 `::backdrop` 这种 `querySelector` 选不中的东西只能这样量：
 

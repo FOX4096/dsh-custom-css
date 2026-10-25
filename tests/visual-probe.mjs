@@ -82,6 +82,8 @@ function parseArgs(argv) {
 		show: false,
 		openSettings: false,
 		strict: false,
+		// 采样窗口（毫秒）；0 表示不采样。
+		metricsMs: 0,
 		width: 1440,
 		height: 900,
 	};
@@ -100,6 +102,7 @@ function parseArgs(argv) {
 		else if (arg === '--show') options.show = true;
 		else if (arg === '--open-settings') options.openSettings = true;
 		else if (arg === '--strict') options.strict = true;
+		else if (arg === '--metrics') options.metricsMs = Number(next());
 		else if (arg === '--help' || arg === '-h') options.help = true;
 		else throw new Error(`不认识的参数：${arg}`);
 	}
@@ -575,6 +578,25 @@ async function run(options) {
 				result.failureKind = result.failureKind ?? 'regression';
 				process.exitCode = Math.max(process.exitCode ?? 0, 1);
 			}
+		}
+
+		// `--metrics`：量一段时间的渲染成本。样式表优化只能这样 A/B —— 看截图看不出「每帧多花了多少」。
+		if (options.metricsMs > 0) {
+			await session.send('Performance.enable', {});
+			const read = async () => {
+				const answer = await session.send('Performance.getMetrics', {});
+				const map = {};
+				for (const metric of answer.metrics ?? []) map[metric.name] = metric.value;
+				return map;
+			};
+			const before = await read();
+			await new Promise(resolve => setTimeout(resolve, options.metricsMs));
+			const after = await read();
+			const keys = ['TaskDuration', 'LayoutDuration', 'RecalcStyleDuration', 'ScriptDuration', 'LayoutCount', 'RecalcStyleCount'];
+			const delta = {};
+			for (const key of keys) delta[key] = Math.round(((after[key] ?? 0) - (before[key] ?? 0)) * 1000) / 1000;
+			result.metrics = { windowMs: options.metricsMs, delta };
+			log('info', `metrics（${options.metricsMs}ms）：` + JSON.stringify(delta));
 		}
 
 		// `--eval`：把表达式的结果一并带回。量令牌与伪元素（`::backdrop`）时用得上。

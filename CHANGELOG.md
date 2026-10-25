@@ -2,6 +2,31 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 未发布 — 探针加 `--metrics`；aurora-nexus 主题的性能优化
+
+**探针 `--metrics <ms>`**：采样一段时间内的 `TaskDuration` / `LayoutDuration` / `RecalcStyleDuration`
+与计数，用来 A/B 样式表的开销。样式优化只能这样量 —— 截图看不出「每帧多花了多少」。
+
+用它量了 `~/.dsh/custom-css/aurora-nexus.css`（用户主题）静置 4 秒的开销：
+
+| 状态 | TaskDuration | RecalcStyleCount |
+| --- | --- | --- |
+| 空样式表（只跑 DSH） | 0.298s | 21 |
+| 原主题 | 0.974s | 703 |
+| 优化后 | **0.420s** | **56** |
+
+三处改动（都在主题里，不是插件）：
+
+1. 画布渐变从 `body` 挪到固定伪元素 `body::after`，漂移动画从 `background-position` 改成
+   `transform`。原来的写法每帧重绘整页 —— 这也是 703 次样式重算的大头。
+2. `[data-composer-card]::before` 的描边光晕动画原本 `:focus-within` 就在跑，而输入框常年有焦点；
+   改成只在 `:hover` 时跑（静态渐变仍在）。自定义属性动画不合成，每帧重算整棵子树。
+3. 玻璃效果收敛：`[role='menu']` / `[role='tooltip']` 不再 `backdrop-filter`（两者底色本来就 ~90%
+   不透明），对话框与输入卡从 24px 降到 14px。
+
+验证：105 个选择器的命中数**逐一相同**（0 处差异）；`body::after` 的渐变、`will-change`、
+对话框的 blur 值都在真机上量过；原文件备份在 `~/.dsh/custom-css/aurora-nexus.css.backup`。
+
 ## 未发布 — 下拉菜单进 top layer（修「大纲点不了」）
 
 用户反馈：`aurora-nexus.css` 的**大纲点不了**。
