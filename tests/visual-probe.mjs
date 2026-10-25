@@ -91,6 +91,7 @@ function parseArgs(argv) {
 		if (arg === '--sel') options.selectors.push(next());
 		else if (arg === '--click') options.clicks.push(next());
 		else if (arg === '--eval') options.evals.push(next());
+		else if (arg === '--eval-file') options.evals.push(readFileSync(next(), 'utf8'));
 		else if (arg === '--wait') options.waitMs = Number(next());
 		else if (arg === '--timeout') options.timeoutMs = Number(next());
 		else if (arg === '--width') options.width = Number(next());

@@ -2,6 +2,26 @@
 
 本文件记录 `dsh-custom-css` 的用户可见变更。版本号跟随 `package.json`。
 
+## 未发布 — 下拉菜单进 top layer（修「大纲点不了」）
+
+用户反馈：`aurora-nexus.css` 的**大纲点不了**。
+
+真机量到的原因不是大纲本身：设置对话框的卡片带 `transform`（进场动画），菜单是 `position:fixed`，
+于是它变成「相对那个祖先定位」，再被编辑器外壳的 `overflow:hidden` 整块裁掉 ——
+菜单 rect 364–624、外壳 720–952，`aria-expanded` 是 true、89 行都在 DOM 里，屏幕上一个像素都没有。
+
+- `ui.choice` 的菜单改成 **`popover="manual"` + `showPopover()`**：进 top layer，不受祖先 transform
+  与 overflow 影响。老浏览器没有这个方法时静默跳过（菜单行为不变）。
+- `[popover]` 的 UA 默认样式（`inset:0`/`margin:auto`/边框）在菜单规则里清掉，否则盒子会被拉伸。
+- 关闭逻辑不变（`manual` 不 light-dismiss）：点外面、Esc、选中一行都由组件自己做。
+
+测试：新增一节直接渲染 `Choice`（原先的测试走 `Dropdown.props.onPick`，把组件跳过了，所以这类
+「画不出来」一次都没被抓住）——断言菜单带 `popover="manual"`、假 DOM 没有 `showPopover` 也不崩、
+点一行把值交给 `onPick`。
+
+真机（3081，`aurora-nexus.css`，1440×1000）：点「大纲」→ 菜单可见、`popover-open`、
+rect 887,464 320×260；点第三行 → 光标到 14091、面板打开且名字是 `body`。
+
 ## 未发布 — 全屏视图：顶栏补齐上下文 + 窄窗口堆叠
 
 继续 `/ux-polish` 全屏视图（只推 git，不发版）：

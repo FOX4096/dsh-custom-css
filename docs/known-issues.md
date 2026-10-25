@@ -8,6 +8,15 @@
 
 ---
 
+### 带 `transform` 的祖先会让 `position:fixed` 的菜单消失
+
+设置对话框的卡片有一个 `transform`（进场用），任何 `position:fixed` 的后代都会改成「相对它定位」；
+再叠一层 `overflow:hidden`（编辑器外壳）就是完全裁掉。表现为控件「点不了」，而 DOM 里一切正常：
+`aria-expanded` 是 true、菜单行都在、`getBoundingClientRect()` 有尺寸，只是那个矩形在可见区域之外。
+
+解法是把菜单放进 **top layer**（`popover`），不是调 `z-index`、也不是删掉 `overflow`。
+量法：`getComputedStyle(menu).position` 是 `fixed` 时，看它的 rect 有没有落在某个 `overflow:hidden`
+祖先之外 —— 落在外面就是被裁了。
 ## 已知坑（都是实测踩出来的）
 
 | 坑 | 现象 | 结论 |

@@ -55,6 +55,25 @@ ui.field({ value: url, invalid: true, message: '只接受 http(s) 或 file://', 
 | **状态行** | `ui.status({ state, text })` | `state` = `idle` / `busy` / `ok` / `error`；带 `role=status` + `aria-live=polite`，所以变化会被读屏器念出来 |
 | **空态** | `ui.empty('还没有壁纸：…')` | 虚线框 + 一行灰字，表达「这里还没有东西」而不是「出错了」 |
 
+## 菜单必须在 top layer
+
+`ui.choice` 的菜单是 `popover="manual"`（原生 Popover API），打开时 `showPopover()` —— 
+它因此渲染在 **top layer**，不受祖先的 `transform` 与 `overflow` 影响。
+
+这不是偏好，是量出来的：设置对话框的卡片带 `transform`（进场动画），于是菜单的 `position:fixed`
+退化成「相对那个祖先定位」，再被编辑器外壳的 `overflow:hidden` **整块裁掉**。症状是
+`aria-expanded` 为 true、菜单 DOM 里 89 行都在，屏幕上**一个像素都没有** —— 用户看到的就是
+「大纲点不了」（复现于 `aurora-nexus.css` 这类长样式表，因为大纲越长越容易撞上）。
+
+三条约束：
+
+1. 菜单要带 `popover="manual"`，打开后调用 `showPopover()`（老浏览器没有这个方法时静默跳过）。
+2. `[popover]` 有 UA 默认样式（`inset:0`、`margin:auto`、边框、`display:none` 直到打开），
+   菜单规则里必须清掉：`inset:auto;margin:0;border:0`。
+3. 关闭仍由组件自己负责（`manual` 不会 light-dismiss）：点外面、Esc、选中一行。
+
+---
+
 ## 状态怎么表达
 
 **状态只写在属性上，CSS 只从属性取值。** 这条规则让「机器读到的」和「眼睛看到的」不可能分家：

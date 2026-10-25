@@ -4083,6 +4083,111 @@ async function main() {
     'with the caret on its selector so the line comes into view',
   );
 
+  // --- 下拉菜单必须在 top layer ----------------------------------------------
+  // 从用户那里来的：`aurora-nexus.css` 的**大纲点不了**。真机量到的原因不是大纲本身：设置对话框带
+  // `transform`，菜单是 `position:fixed`，于是它变成「相对那个祖先定位」，又被编辑器外壳的
+  // `overflow:hidden` 整块裁掉（菜单 rect 364–624，外壳 720–952）—— 菜单在 DOM 里、`aria-expanded`
+  // 也是 true，屏幕上一个像素都没有，当然点不到。现在菜单是 `popover="manual"`，进 top layer。
+  //
+  // 这条测试直接渲染 `Choice` 本身：原先的测试走的是 `Dropdown.props.onPick`，把组件跳过了，
+  // 所以这类「画不出来」的问题一次都没被抓住。
+  {
+    const boxy = (className) => ({
+      className,
+      children: [],
+      textContent: '',
+      appendChild(child) { this.children.push(child); return child; },
+    });
+    const choiceHost = await boot({
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}\n.b{color:blue}' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+      dom: { nodes: [{ tagName: 'DIV', className: 'a', children: [] }] },
+    });
+    hookIndex = 0;
+    const rowView = choiceHost.registrations[0].component();
+    findNode(rowView, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
+    hookIndex = 0;
+    const withPanel = choiceHost.registrations[0].component();
+    // 找到 Choice 组件节点（wrapperClassName 是它的 props），把它渲染出来。
+    const findChoice = (node) => {
+      let found = null;
+      (function walk(current) {
+        if (found !== null || current === null || typeof current !== 'object') return;
+        if (typeof current.type === 'function' && current.props?.wrapperClassName === 'dshCc_outline') found = current;
+        for (const child of current.children ?? []) walk(child);
+      })(node);
+      return found;
+    };
+    const choice = findChoice(withPanel);
+    assert.ok(choice !== null, 'the outline is a Choice');
+    hookSlots.length = 0;
+    hookIndex = 0;
+    const choiceTree = choice.type(choice.props ?? {});
+    // 打开菜单：触发按钮的 onClick 就是 toggle。
+    const trigger = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshUi_choice')) return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(choiceTree);
+    assert.ok(trigger !== null, 'the choice has a trigger button');
+    trigger.props.onClick();
+    hookIndex = 0;
+    const openedTree = choice.type(choice.props ?? {});
+    const menu = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (String(node.props?.className ?? '') === 'dshUi_choiceMenu') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(openedTree);
+    assert.ok(menu !== null, 'clicking the trigger renders the menu');
+    assert.strictEqual(menu.props.popover, 'manual', 'the menu is a manual popover, so it renders in the top layer');
+    // 假 DOM 没有 showPopover：效果里的调用必须是可选的，否则组件在这里就崩了。
+    assert.doesNotThrow(() => { choiceHost.runEffects(); }, 'a DOM without showPopover does not break opening');
+    const rows = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshUi_choiceItem')) rows.push(node);
+      for (const child of node.children ?? []) walk(child);
+    })(openedTree);
+    assert.ok(rows.length >= 2, 'the menu lists the sheet\'s rules — got: ' + rows.length);
+    let picked = null;
+    const props = { ...choice.props, onPick: (value) => { picked = value; } };
+    hookSlots.length = 0;
+    hookIndex = 0;
+    const liveTree = choice.type(props);
+    const liveTrigger = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshUi_choice')) return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(liveTree);
+    liveTrigger.props.onClick();
+    hookIndex = 0;
+    const openTree = choice.type(props);
+    const liveRows = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshUi_choiceItem')) liveRows.push(node);
+      for (const child of node.children ?? []) walk(child);
+    })(openTree);
+    liveRows[1].props.onClick();
+    assert.strictEqual(picked, '1', 'clicking a row hands its value to onPick — got: ' + JSON.stringify(picked));
+  }
+
   // --- an empty sheet has no outline to show --------------------------------
   // Reported from use: the file starts out empty, and the outline was still clickable.
   // Opening it showed a menu with no rows, which reads as broken rather than as
