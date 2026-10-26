@@ -1453,6 +1453,16 @@ async function main() {
     assert.strictEqual(typeof canvasNode.props.onKeyDown, 'function', 'and handles arrow keys');
     // 没拖过时归位是禁用的：一颗「点了也不会变」的按钮比没有更让人困惑。
     assert.strictEqual(resetBtns[0].props.disabled, true, 'reset starts disabled because nothing has moved yet');
+    // 常驻那一排：状态芯片在这里（命中只有 1 个，所以没有游标、也没有卡片）。
+    // 三层排布（卡片 / 芯片 / 演示中）换成一层这件事，就从这里钉住。
+    const picks = byClass(panelView, 'dshCc_previewPicks');
+    assert.strictEqual(picks.length, 1, 'the preview keeps exactly one persistent picks row — got: ' + picks.length);
+    assert.ok(
+      (picks[0].children ?? []).some(child => String(child?.props?.className ?? '') === 'dshCc_stateChips'),
+      'with the state chips inside it',
+    );
+    // 干净的样本没有提示区：漏报比误报重要，这一块不该空着占位。
+    assert.strictEqual(byClass(panelView, 'dshCc_previewHints').length, 0, 'a clean sample shows no hints block');
     // 拖动一次不该抛：ref 在测试床里是空的（假 React 不挂 DOM），所以这条同时钉住「形状变了也
     // 不能让面板崩」—— 面板一崩，整行的预览就没了。
     assert.strictEqual(typeof canvasNode.props.onPointerDown, 'function', 'the canvas takes a pointerdown');
