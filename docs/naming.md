@@ -221,10 +221,11 @@
 | **预览块** | `.dshCc_preview` | 插在声明区上方（代码区与规则面板之间），只在打开某条规则时出现 | 已实现 |
 | **预览头部** | `.dshCc_previewHead` | 预览块顶部一行 | 已实现 |
 | **规则文本** | `.dshCc_previewRule` | 头部**左侧**：当前规则的原文（只读、省略号） | 已实现 |
-| **预览工具组** | `.dshCc_previewTools` | 头部**右上角**：背景下拉 + 三个按钮 | 已实现 |
-| **画布背景** | `.dshUi_choice`（工具组里第一个，`aria-label` = 画布背景） | 换画布背景：页面（默认）/ 棋盘 / 方格 / 斜纹 / 点阵 / 渐变 / 纯色 | 已实现 |
-| **画布** | `.dshCc_canvas`（`data-canvas` = 预设 id） | 样本坐着的那块**可拖动**的画布；行内与全屏共用平移量 | 已实现 |
-| **归位** | `.dshCc_canvasReset` | 画布右下角：平移量清零（双击画布同效） | 已实现 |
+| **预览工具组** | `.dshCc_previewTools` | 头部**右侧**：全屏 / 对比 / 列表（背景在 `.dshCc_previewCanvasTools`） | 已实现 |
+| **画布背景** | `.dshUi_choice`（在 `.dshCc_previewCanvasTools` 里，`aria-label` = 画布背景） | 换画布背景：页面（默认）/ 棋盘 / 方格 / 斜纹 / 点阵 / 渐变 / 纯色 | 已实现 |
+| **画布** | `.dshCc_canvas`（`data-canvas` = 预设 id） | 样本坐着的那块**可拖动**的画布；平移量按窗格（`data-pane`）各记各的，全屏左右可以分开拖 | 已实现 |
+| **窗格** | `.dshCc_previewBox[data-pane="current\|modified"]` | 拖动实际作用在它身上（`transform` 写在这块盒子上，不是舞台上） | 已实现 |
+| **归位** | `.dshCc_canvasReset` | 画布右下角：所有窗格平移量清零（双击画布同效） | 已实现 |
 | **全屏按钮** | `.dshCc_hlToggle`（工具组里第一个） | 打开全屏视图 | 已实现 |
 | **对比按钮** | `.dshCc_hlToggle`（第二个，`aria-pressed`） | 开**对比模式** | 已实现 |
 | **列表按钮** | `.dshCc_hlToggle`（第三个，`aria-pressed`） | 开 / 关**卡片导航** | 已实现 |
