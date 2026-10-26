@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6118,6 +6118,120 @@ const injected = { textContent: ownSheet };
     assert.ok(!renderedClasses.includes('dshCc_full'), 'closing removes the dialog');
   }
 
+  // --- 元素诊断：纯函数 + 注入样式 -----------------------------------------
+  // 三个检查都是「真的会坏」的：祖先还有一层毛玻璃、opacity 把 backdrop-filter 废掉、
+  // fixed 被带 transform 的祖先捕获。判定函数不碰真实 DOM —— 样式读取是参数，所以这里
+  // 用假节点 + 假样式表驱动，既快又能说清每条断言在证明什么。
+  {
+    const probe = host.mod.__probe;
+    assert.ok(typeof probe.diagnoseElement === 'function', 'the diagnostic is reachable for testing');
+    const fake = (className, parent) => ({ className, parentElement: parent ?? null });
+    const styleMap = new Map();
+    const styleOf = (element) => styleMap.get(element) ?? { backdropFilter: 'none', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' };
+
+    // a) 干净的卡片：什么都不报。
+    const plain = fake('card');
+    styleMap.set(plain, { backdropFilter: 'blur(8px)', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' });
+    assert.deepStrictEqual([...probe.diagnoseElement(plain, styleOf)].map(f => f.id), [], 'a plain glass card has nothing to report');
+
+    // b) 祖先还有一层毛玻璃。
+    const outer = fake('shell');
+    const inner = fake('panel', outer);
+    styleMap.set(outer, { backdropFilter: 'blur(24px)', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' });
+    styleMap.set(inner, { backdropFilter: 'blur(12px)', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' });
+    assert.deepStrictEqual([...probe.diagnoseElement(inner, styleOf)].map(f => f.id), ['stackedGlass'], 'a glass card inside a glass shell is reported');
+
+    // c) opacity 杀掉 backdrop-filter（自身与祖先各一例）。
+    const faded = fake('faded');
+    styleMap.set(faded, { backdropFilter: 'blur(12px)', opacity: '0.6', position: 'static', transform: 'none', filter: 'none', perspective: 'none' });
+    assert.deepStrictEqual([...probe.diagnoseElement(faded, styleOf)].map(f => f.id), ['opacityKillsGlass'], 'opacity on the layer itself is reported');
+    const fadedParent = fake('faded-shell');
+    const child = fake('card', fadedParent);
+    styleMap.set(fadedParent, { backdropFilter: 'none', opacity: '0.8', position: 'static', transform: 'none', filter: 'none', perspective: 'none' });
+    styleMap.set(child, { backdropFilter: 'blur(12px)', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' });
+    assert.deepStrictEqual([...probe.diagnoseElement(child, styleOf)].map(f => f.id), ['opacityKillsGlass'], 'and opacity on an ancestor counts too');
+
+    // d) fixed 被 transform 的祖先捕获（上一轮菜单点不了的根因）。
+    const moved = fake('moved');
+    const pinned = fake('pinned', moved);
+    styleMap.set(moved, { backdropFilter: 'none', opacity: '1', position: 'static', transform: 'translateY(2px)', filter: 'none', perspective: 'none' });
+    styleMap.set(pinned, { backdropFilter: 'none', opacity: '1', position: 'fixed', transform: 'none', filter: 'none', perspective: 'none' });
+    assert.deepStrictEqual([...probe.diagnoseElement(pinned, styleOf)].map(f => f.id), ['fixedTrapped'], 'a fixed overlay under a transformed ancestor is reported');
+  }
+
+  // --- 查找：跳转不抢焦点；编辑器里的 Esc 关条 --------------------------------
+  // 用户报过两条：搜索「不会跳转到行」，以及「必须关闭才退出」。根因是同一个 —— 放光标的
+  // effect 每次都 editor.focus()，焦点离开查找框之后 Esc 就再也关不掉条。
+  {
+    const doc = { tagName: 'DIV', className: 'card', children: [] };
+    const mini = await boot({
+      dom: { nodes: [doc] },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 40, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.a{color:red}\n.b{color:blue}\n' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    const row = mini.registrations[0].component();
+    const editor = findNode(row, 'textarea');
+    const focuses = [];
+    const carets = [];
+    editor.props.ref.current = {
+      selectionStart: 0,
+      selectionEnd: 0,
+      scrollTop: 0,
+      scrollLeft: 0,
+      clientHeight: 140,
+      focus() { focuses.push('focus'); },
+      setSelectionRange(start) { carets.push(start); },
+    };
+    hookIndex = 0;
+    findNode(mini.registrations[0].component(), 'textarea').props.onKeyDown({ key: 'f', ctrlKey: true, preventDefault() {} });
+    hookIndex = 0;
+    let view = mini.registrations[0].component();
+    await mini.runEffects();
+    const inputs = [];
+    (function collect(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.type === 'input') inputs.push(node.props);
+      for (const child of node.children ?? []) collect(child);
+    })(view);
+    const field = inputs.find(props => props['aria-label'] === '查找');
+    assert.ok(field !== undefined, 'Ctrl+F opens a find field');
+    // 打开查找条时允许把焦点交给编辑器（那是「开始搜索」），之后不允许。
+    focuses.length = 0;
+    carets.length = 0;
+    hookIndex = 0;
+    field.onChange({ target: { value: 'color' } });
+    hookIndex = 0;
+    view = mini.registrations[0].component();
+    const liveField = (() => {
+      const found = [];
+      (function collect(node) {
+        if (node === null || typeof node !== 'object') return;
+        if (node.type === 'input') found.push(node.props);
+        for (const child of node.children ?? []) collect(child);
+      })(view);
+      return found.find(props => props['aria-label'] === '查找');
+    })();
+    hookIndex = 0;
+    liveField.onKeyDown({ key: 'Enter', shiftKey: false, preventDefault() {} });
+    hookIndex = 0;
+    view = mini.registrations[0].component();
+    await mini.runEffects();
+    assert.ok(carets.length > 0, '按 Enter 把光标放到命中上');
+    assert.strictEqual(focuses.length, 0, '跳转不抢焦点（抢了 Esc 就关不掉查找条）');
+    // 编辑器里的 Esc：查找条开着时它属于查找条。
+    renderedClasses.length = 0;
+    hookIndex = 0;
+    findNode(view, 'textarea').props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    mini.registrations[0].component();
+    assert.ok(!renderedClasses.includes('dshCc_findBar'), '编辑器里的 Esc 关掉查找条');
+  }
   // --- 全屏头：上下文与出口 ------------------------------------------------
   // 全屏里没有行内的「N 个命中」和卡片序号，也没有卡片导航 —— 这三件事要在头上补回来，
   // 否则用户不知道自己在预览第几个元素、也不知道怎么退出。
