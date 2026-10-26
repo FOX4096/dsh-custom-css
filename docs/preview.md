@@ -19,20 +19,21 @@
 它回答的问题是 **「我刚才这一改，把它变成了什么样」** —— 左边是你打开这条规则时的样子，
 右边是现在的样子。这也正是调值时的那一圈：改值 → 看效果。
 
-## 工具栏：背景 + 三个按钮
+## 头部：三组，各管一件事
 
-按顺序，都在 `.dshCc_previewTools` 里：
+`.dshCc_previewHead` 从左到右是三块，中间那条竖线就是「这两类不是一回事」：
 
-| 顺序 | 控件 | 标识 | 这一版 |
+| 组 | 标识 | 里面 | 管什么 |
 | --- | --- | --- | --- |
-| 0 | **背景**（下拉） | `.dshUi_choice`（`aria-label` = 画布背景） | 换画布背景，见上一节 |
-| 1 | **全屏** | `.dshCc_hlToggle`（第一个） | 打开**全屏视图**（原生 `<dialog>`，`Esc` / × 退出） |
-| 2 | **对比** | `.dshCc_hlToggle`（第二个，`aria-pressed`） | 切换对比模式：**左侧多出一块「当前」**，右侧是「修改后」 |
-| 3 | **列表** | `.dshCc_hlToggle`（第三个，`aria-pressed`） | 切换**卡片导航**：一排卡片，一张卡对应一个命中元素 |
+| **画布** | `.dshCc_previewCanvasTools` | 背景下拉（`aria-label` = 画布背景） | 样本坐在什么底上 |
+| （中间） | `.dshCc_previewRule` | 当前规则原文，只读、溢出省略 | 这条规则是哪一条 |
+| **视图** | `.dshCc_previewTools` | 全屏 / 对比 / 列表 | 怎么看 |
 
-下拉不设死高度，靠内边距 + 行高跟着旁边那几个胶囊走 —— 36px 的 kit 默认值会把这行头部撑成两倍高。
+视图组里的三颗都在 `.dshCc_previewTools` 里，还是全高胶囊：`全屏` 打开原生 `<dialog>`（`Esc` / ×
+退出）；`对比`（`aria-pressed`）左侧多出一块「当前」；`列表`（`aria-pressed`）展开卡片导航。
 
-左边还有 **规则文本**（`.dshCc_previewRule`）：当前规则的原文，只读，溢出省略。
+第一版四颗控件挤成一排，最左那颗下拉看起来和右边三颗是一类东西 —— 现在按「它管画布还是管视图」分开，
+下拉也不设死高度，靠内边距 + 行高跟着胶囊走（36px 的 kit 默认值会把这行撑成两倍高）。
 
 ## 画布：拖动、归位、背景预设
 
@@ -213,18 +214,21 @@
 ```
 .dshCc_preview
 ├── .dshCc_previewHead
-│   ├── .dshCc_previewRule       规则原文（省略号）
-│   └── .dshCc_previewTools      背景 ▾ | 全屏 | 对比 | 列表
+│   ├── .dshCc_previewCanvasTools 背景 ▾
+│   ├── .dshCc_previewRule        规则原文（省略号）
+│   └── .dshCc_previewTools       全屏 | 对比 | 列表（左侧一条竖线分隔）
 ├── .dshCc_sampleCards           卡片导航（点「列表」才有）
 │   └── button.dshCc_hlToggle     一张卡 = 一个命中元素（div · 2/5）
 ├── .dshCc_stateChips            状态芯片（只在单屏模式）
-├── .dshCc_canvas                画布（可拖、带背景预设）
-│   ├── .dshCc_previewStage      ← 拖动改的就是它的 transform
+├── .dshCc_previewHints          提示区（warn = 会坏，info = 解释 + 出路）
+│   └── .dshCc_hintRow[data-tone]
+├── .dshCc_canvas                画布（可拖、可聚焦、带背景预设）
+│   ├── .dshCc_previewStage      ← 拖动 / 方向键改的就是它的 transform
 │   │   ├── .dshCc_previewBox
 │   │   │   ├── .dshCc_previewLabel（增删点缀色作底色的小标签）
 │   │   │   ├── .dshCc_previewCurrent   对比模式：左「当前」
 │   │   │   └── .dshCc_previewAfter     右「修改后」
-│   └── .dshCc_canvasReset       归位（右下角）
+│   └── .dshCc_canvasReset       归位（右下角，没拖过时禁用）
 └── .dshCc_previewNote           冻结口径那一行小字
 
 dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 top layer；min(1280px,96vw) × min(94vh,960px)）
