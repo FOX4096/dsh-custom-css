@@ -1448,14 +1448,34 @@ async function main() {
     assert.strictEqual(resetBtns.length, 1, 'with a reset control in its corner — got: ' + resetBtns.length);
     assert.strictEqual(textOf(resetBtns[0]), '归位', 'labelled 归位');
     assert.strictEqual(typeof resetBtns[0].props.onClick, 'function', 'that does something when clicked');
+    // 键盘：画布可聚焦、方向键能挪（拖动之外的第二条路）。
+    assert.strictEqual(canvasNode.props.tabIndex, 0, 'the canvas can take focus');
+    assert.strictEqual(typeof canvasNode.props.onKeyDown, 'function', 'and handles arrow keys');
+    // 没拖过时归位是禁用的：一颗「点了也不会变」的按钮比没有更让人困惑。
+    assert.strictEqual(resetBtns[0].props.disabled, true, 'reset starts disabled because nothing has moved yet');
     // 拖动一次不该抛：ref 在测试床里是空的（假 React 不挂 DOM），所以这条同时钉住「形状变了也
     // 不能让面板崩」—— 面板一崩，整行的预览就没了。
     assert.strictEqual(typeof canvasNode.props.onPointerDown, 'function', 'the canvas takes a pointerdown');
     canvasNode.props.onPointerDown({ clientX: 10, clientY: 10, button: 0 });
     canvasNode.props.onPointerMove({ clientX: 30, clientY: 40 });
     canvasNode.props.onPointerUp({});
-    canvasNode.props.onDoubleClick();
-    assert.ok(true, 'dragging and resetting a canvas with no DOM behind it does not throw');
+    assert.ok(true, 'dragging a canvas with no DOM behind it does not throw');
+    // 拖过之后，同一颗按钮要变成可点 —— 这条钉的是「拖动状态确实传到了渲染层」。
+    hookIndex = 0;
+    const dragged = panelRoot(renderRow());
+    const resetAfterDrag = (function find(node) {
+      if (node === null || typeof node !== 'object') return null;
+      if (String(node.props?.className ?? '') === 'dshCc_canvasReset') return node;
+      for (const child of node.children ?? []) {
+        const hit = find(child);
+        if (hit !== null) return hit;
+      }
+      return null;
+    })(dragged);
+    assert.ok(resetAfterDrag !== null, 'the canvas is still there after a drag');
+    assert.strictEqual(resetAfterDrag.props.disabled, false, 'after a drag, 归位 becomes clickable');
+    resetAfterDrag.props.onClick();
+    assert.ok(true, 'and resetting from there does not throw');
   }
 
   // The add-property control sits below the declarations grid: after reading the
