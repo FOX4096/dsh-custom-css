@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6192,18 +6192,59 @@ const injected = { textContent: ownSheet };
     // 摊进本文件自己的数组/对象里再比：模块在自己的作用域里造出来的数组，原型和这边不是同一个，
     // deepStrictEqual 会把「看起来一模一样」判成不等。
     const found = [...probe.sheetFindings(sheet, doc, styleOf)]
-      .map(entry => ({ ...entry, ids: [...entry.ids] }));
+      .map(entry => ({ ...entry, findings: [...entry.findings].map(finding => ({ ...finding })) }));
+    const idsOf = (entries) => entries.map(entry => entry.findings.map(finding => finding.id));
     assert.deepStrictEqual(found.map(entry => entry.selector), ['.a', '.b'],
       'only the rules whose samples really have a problem are listed, in source order — got: ' + JSON.stringify(found.map(entry => entry.selector)));
     assert.deepStrictEqual(found.map(entry => entry.line), [1, 2], 'each entry carries its line');
-    assert.deepStrictEqual(found.map(entry => entry.ids), [['stackedGlass'], ['fixedTrapped']],
-      'with the ids the preview panel would show — got: ' + JSON.stringify(found.map(entry => entry.ids)));
+    assert.deepStrictEqual(idsOf(found), [['stackedGlass'], ['fixedTrapped']],
+      'with the ids the preview panel would show — got: ' + JSON.stringify(idsOf(found)));
     assert.ok(found.every(entry => typeof entry.start === 'number' && entry.end > entry.start),
       'and a source range, so the row can jump to it');
     // `.c` 干净、`.d:hover` 是状态相关（静止页面上它的声明根本没生效），都不该出现在表里。
     assert.ok(!found.some(entry => entry.selector === '.c'), 'a clean rule is not listed');
     assert.ok(!found.some(entry => entry.selector.includes(':hover')), 'a state-dependent rule is not listed');
     assert.deepStrictEqual([...probe.sheetFindings('', doc, styleOf)], [], 'an empty sheet has nothing to report');
+  }
+
+  // --- 动效与性能：只看文本的三件事 -----------------------------------------
+  // `transition: all`、动画在动布局属性、大模糊半径 —— 它们的共同点是「规则是生效的」，只是代价
+  // 比看起来大。所以判据必须是**读文本**（命不中的规则也算），并且宁漏勿误：正常的透明度过渡、
+  // 小的模糊、「transform 位移动画」都不该被点名。
+  {
+    const probe = host.mod.__probe;
+    assert.ok(typeof probe.sheetStyleFindings === 'function', 'the text-level scan is reachable for testing');
+    const sheet = [
+      '.a{transition:all .2s}',                              // 1 该报
+      '.b{transition:opacity .2s}',                          // 2 正常过渡
+      '.c{backdrop-filter:blur(32px)}',                       // 3 该报（大模糊）
+      '.d{filter:blur(4px)}',                                // 4 小模糊
+      '.e{transition:opacity .2s, all .3s}',                  // 5 分量里有 all，同样该报
+      '@keyframes grow{from{width:0}to{width:100%}}',         // 6 布局动画的来源
+      '@keyframes fade{to{opacity:0}}',                       // 7 合成器动画，不报
+      '@keyframes spaced{to{box-shadow:0 0 0 4px red;/* width: 1px */}}', // 8 注释不算数
+      '.f{animation:grow .3s ease}',                          // 9 该报（动 width）
+      '.g{animation:fade .3s}',                               // 10 不报
+      '.h{animation-name:spaced}',                            // 11 该报（动 box-shadow）
+      '.i:hover{transition:all .2s}',                         // 12 状态相关，不报
+      '@media (min-width:9999px){ .j{transition:all .2s} }',  // 13 断点里，不在这一张表
+    ].join('\n');
+    const found = [...probe.sheetStyleFindings(sheet)]
+      .map(entry => ({ ...entry, findings: [...entry.findings].map(finding => ({ ...finding, params: finding.params ? { ...finding.params } : undefined })) }));
+    const bySelector = new Map(found.map(entry => [entry.selector, entry.findings]));
+    assert.deepStrictEqual([...bySelector.keys()], ['.a', '.c', '.e', '.f', '.h'],
+      'only the expensive ones are listed, in source order — got: ' + JSON.stringify([...bySelector.keys()]));
+    assert.deepStrictEqual(bySelector.get('.a').map(f => f.id), ['transitionAll'], 'transition: all is reported');
+    assert.deepStrictEqual(bySelector.get('.e').map(f => f.id), ['transitionAll'], 'and so is all inside a list of properties');
+    assert.deepStrictEqual(bySelector.get('.c').map(f => f.id + ':' + f.params.radius), ['bigBlur:32px'], 'a big blur radius is reported, with the radius it read');
+    assert.deepStrictEqual(bySelector.get('.f').map(f => f.id + ':' + f.params.list), ['layoutAnimation:width'], 'an animation that drives width is reported, naming the property');
+    assert.deepStrictEqual(bySelector.get('.h').map(f => f.id + ':' + f.params.list), ['layoutAnimation:box-shadow'],
+      'box-shadow counts too — and the commented-out "width" does not');
+    assert.ok(!bySelector.has('.b') && !bySelector.has('.d') && !bySelector.has('.g'),
+      'a normal transition, a small blur and an opacity animation are all left alone');
+    assert.ok(!bySelector.has('.i') && !bySelector.has('.j'),
+      'a state-dependent rule and one inside a media query are not part of this sheet’s report');
+    assert.deepStrictEqual([...probe.sheetStyleFindings('')], [], 'an empty sheet has nothing to report');
   }
 
   // --- 查找：跳转不抢焦点；编辑器里的 Esc 关条 --------------------------------
@@ -6953,7 +6994,7 @@ const injected = { textContent: ownSheet };
     const glassNode = { tagName: 'DIV', className: 'glass-hit', children: [] };
     const plainStyle = { backdropFilter: 'none', webkitBackdropFilter: 'none', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none', getPropertyValue: () => '' };
     const glassStyle = { ...plainStyle, backdropFilter: 'blur(8px)', webkitBackdropFilter: 'blur(8px)', opacity: '0.6' };
-    const glassSheet = '.glass-hit{backdrop-filter:blur(8px);opacity:0.6}\n';
+    const glassSheet = '.glass-hit{backdrop-filter:blur(8px);opacity:0.6;transition:all .2s}\n';
     const glassBoot = await boot({
       dom: {
         nodes: [glassNode],
@@ -6993,6 +7034,15 @@ const injected = { textContent: ownSheet };
     assert.ok(
       !renderedText.some(text => text.includes('命不中的规则')),
       'and the selector section stays out when nothing is dead — list: ' + JSON.stringify(renderedText),
+    );
+    // 第二条判据（只看文本的 `transition: all`）落在同一节之外的另一节：两节同屏时各自有标题。
+    assert.ok(
+      renderedText.includes('动效与性能'),
+      'a rule that is merely expensive gets its own section — list: ' + JSON.stringify(renderedText),
+    );
+    assert.ok(
+      renderedText.some(text => text.includes('⚠ 1 处')),
+      'with the same kind of badge — list: ' + JSON.stringify(renderedText),
     );
     // 点一行不是「注释掉」，是**跳过去**：菜单收起、编辑器接管（只读地跳，不改这一条）。
     buttonWith(view, '第 1 行').props.onClick();
