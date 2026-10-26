@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -1403,7 +1403,7 @@ async function main() {
     return found;
   };
   collectDropdowns(panelRoot(panelView));
-  const propertyDropdowns = dropdowns.filter(item => item.props.ariaLabel !== '添加属性');
+  const propertyDropdowns = dropdowns.filter(item => item.props.ariaLabel !== '添加属性' && item.props.ariaLabel !== '画布背景');
   assert.strictEqual(propertyDropdowns.length, 2, 'only declared enum properties get a dropdown');
   // The value fields are `PropValueInput` elements rather than raw `<input>`s: the field owns
   // the "is this valid CSS" judgement, and it can only own that as a component. So the
@@ -1427,6 +1427,36 @@ async function main() {
     valueFields.every(field => field.props['aria-label'] !== undefined),
     'and every value field is named',
   );
+
+  // 预览画布：样本坐在一块画布里（可拖动、右下角归位、背景可选）。拖动本身是纯函数 +
+  // 直接写 DOM（见 canvasTranslate / canvasDragTo 的注释），这里只钉住三件在渲染层就能看出来的事。
+  {
+    const byClass = (view, wanted) => {
+      const found = [];
+      (function walk(current) {
+        if (current === null || typeof current !== 'object') return;
+        if (String(current.props?.className ?? '') === wanted) found.push(current);
+        for (const child of current.children ?? []) walk(child);
+      })(view);
+      return found;
+    };
+    const canvasNodes = byClass(panelView, 'dshCc_canvas');
+    assert.strictEqual(canvasNodes.length, 1, 'the preview has exactly one canvas — got: ' + canvasNodes.length);
+    const canvasNode = canvasNodes[0];
+    assert.strictEqual(canvasNode.props['data-canvas'], 'checker', 'and it starts on the checkerboard');
+    const resetBtns = byClass(panelView, 'dshCc_canvasReset');
+    assert.strictEqual(resetBtns.length, 1, 'with a reset control in its corner — got: ' + resetBtns.length);
+    assert.strictEqual(textOf(resetBtns[0]), '归位', 'labelled 归位');
+    assert.strictEqual(typeof resetBtns[0].props.onClick, 'function', 'that does something when clicked');
+    // 拖动一次不该抛：ref 在测试床里是空的（假 React 不挂 DOM），所以这条同时钉住「形状变了也
+    // 不能让面板崩」—— 面板一崩，整行的预览就没了。
+    assert.strictEqual(typeof canvasNode.props.onPointerDown, 'function', 'the canvas takes a pointerdown');
+    canvasNode.props.onPointerDown({ clientX: 10, clientY: 10, button: 0 });
+    canvasNode.props.onPointerMove({ clientX: 30, clientY: 40 });
+    canvasNode.props.onPointerUp({});
+    canvasNode.props.onDoubleClick();
+    assert.ok(true, 'dragging and resetting a canvas with no DOM behind it does not throw');
+  }
 
   // The add-property control sits below the declarations grid: after reading the
   // summary of what the rule declares, that is where the next action belongs.
@@ -6245,6 +6275,40 @@ const injected = { textContent: ownSheet };
     assert.ok(!bySelector.has('.i') && !bySelector.has('.j'),
       'a state-dependent rule and one inside a media query are not part of this sheet’s report');
     assert.deepStrictEqual([...probe.sheetStyleFindings('')], [], 'an empty sheet has nothing to report');
+  }
+
+  // --- 预览画布：平移的算术，和背景记忆 --------------------------------
+  // 拖动是「每帧直接写 DOM」的（一帧一次 React 渲染会把克隆出来的样本一起重画），所以真正要钉住的是
+  // 两件纯算术：归位时给空串而不是 `translate(0px, 0px)`（后者仍然会建合成层、仍然会改 fixed 的包含块），
+  // 以及「从这一份起点再拖 40px」算得对。
+  {
+    const probe = host.mod.__probe;
+    assert.strictEqual(probe.canvasTranslate({ x: 0, y: 0 }), '',
+      'at rest the transform is empty, not translate(0px, 0px)');
+    assert.strictEqual(probe.canvasTranslate({ x: -12, y: 7 }), 'translate(-12px, 7px)', 'a moved canvas carries its offset');
+    assert.strictEqual(probe.canvasTranslate({ x: Number.NaN, y: 0 }), '', 'a broken pan is treated as "at rest"');
+    const first = probe.canvasDragTo({ x: 100, y: 100, panX: 0, panY: 0 }, { clientX: 140, clientY: 80 });
+    assert.deepStrictEqual({ ...first }, { x: 40, y: -20 }, 'dragging from the origin follows the pointer — got: ' + JSON.stringify(first));
+    const second = probe.canvasDragTo({ x: 100, y: 100, panX: 40, panY: -20 }, { clientX: 120, clientY: 100 });
+    assert.deepStrictEqual({ ...second }, { x: 60, y: -20 }, 'and a second drag starts from where the first one left it — got: ' + JSON.stringify(second));
+    // 六个背景 id 就是 CSS 里 `[data-canvas="…"]` 的那六个，多一个少一个都会变成一块没样式的空白。
+    assert.deepStrictEqual(
+      [...probe.CANVAS_BACKGROUNDS].map(entry => entry.id).sort(),
+      ['checker', 'dots', 'gradient', 'grid', 'plain', 'stripes'],
+      'the presets are exactly the ids the stylesheet paints',
+    );
+    assert.strictEqual(probe.readCanvasBackground(), 'checker', 'with nothing stored the canvas starts on the checkerboard');
+    const stored = await boot({
+      stored: new Map([['dsh-custom-css:canvas', 'stripes']]),
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 2, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    assert.strictEqual(stored.mod.__probe.readCanvasBackground(), 'stripes',
+      'a remembered background is the one that comes back');
   }
 
   // --- 查找：跳转不抢焦点；编辑器里的 Esc 关条 --------------------------------
