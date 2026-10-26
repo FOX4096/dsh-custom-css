@@ -1465,11 +1465,25 @@ async function main() {
     assert.strictEqual(byClass(panelView, 'dshCc_previewHints').length, 0, 'a clean sample shows no hints block');
     // 拖动一次不该抛：ref 在测试床里是空的（假 React 不挂 DOM），所以这条同时钉住「形状变了也
     // 不能让面板崩」—— 面板一崩，整行的预览就没了。
+    // 指针现在必须落在**某个窗格**上（左右分开拖），所以事件得带上一个 `closest` 能认的盒子。
     assert.strictEqual(typeof canvasNode.props.onPointerDown, 'function', 'the canvas takes a pointerdown');
-    canvasNode.props.onPointerDown({ clientX: 10, clientY: 10, button: 0 });
+    const fakePane = { dataset: { pane: 'modified' } };
+    // 假 target 要按选择器回答：`closest('.dshCc_canvasReset')` 必须给 null，否则会被当成「按在归位上」。
+    const pressedInPane = {
+      clientX: 10,
+      clientY: 10,
+      button: 0,
+      target: { closest: (selector) => (String(selector).includes('canvasReset') ? null : fakePane) },
+    };
+    canvasNode.props.onPointerDown(pressedInPane);
     canvasNode.props.onPointerMove({ clientX: 30, clientY: 40 });
     canvasNode.props.onPointerUp({});
     assert.ok(true, 'dragging a canvas with no DOM behind it does not throw');
+    // 按在画布空白处（不在任何窗格上）不该开始拖：那里没有可拖的对象。
+    canvasNode.props.onPointerDown({ clientX: 10, clientY: 10, button: 0, target: { closest: () => null } });
+    canvasNode.props.onPointerMove({ clientX: 90, clientY: 90 });
+    canvasNode.props.onPointerUp({});
+    assert.ok(true, 'pressing the padding does not throw either');
     // 拖过之后，同一颗按钮要变成可点 —— 这条钉的是「拖动状态确实传到了渲染层」。
     hookIndex = 0;
     const dragged = panelRoot(renderRow());
