@@ -211,3 +211,9 @@ dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 to
 - [规则面板](./rule-panel.md) —— 预览块下方那块
 - [编辑器](./editor.md) —— 预览块上方那块
 - [设计一致性](./design-tokens.md) —— 令牌阶梯与「别自创规格」
+
+
+## 元素诊断（0.13.0）
+
+预览着的那个元素会跑三个「真的会坏」的检查：毛玻璃多层叠加、opacity 把 backdrop-filter 废掉、
+position:fixed 被带 transform 的祖先捕获。命中时在预览块的说明末尾多一行提示（.dshCc_previewDemo）。
