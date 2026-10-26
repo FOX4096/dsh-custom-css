@@ -19,17 +19,44 @@
 它回答的问题是 **「我刚才这一改，把它变成了什么样」** —— 左边是你打开这条规则时的样子，
 右边是现在的样子。这也正是调值时的那一圈：改值 → 看效果。
 
-## 右上角三个按钮
+## 工具栏：背景 + 三个按钮
 
 按顺序，都在 `.dshCc_previewTools` 里：
 
-| 顺序 | 按钮 | 标识 | 这一版 |
+| 顺序 | 控件 | 标识 | 这一版 |
 | --- | --- | --- | --- |
+| 0 | **背景**（下拉） | `.dshUi_choice`（`aria-label` = 画布背景） | 换画布背景，见上一节 |
 | 1 | **全屏** | `.dshCc_hlToggle`（第一个） | 打开**全屏视图**（原生 `<dialog>`，`Esc` / × 退出） |
 | 2 | **对比** | `.dshCc_hlToggle`（第二个，`aria-pressed`） | 切换对比模式：**左侧多出一块「当前」**，右侧是「修改后」 |
 | 3 | **列表** | `.dshCc_hlToggle`（第三个，`aria-pressed`） | 切换**卡片导航**：一排卡片，一张卡对应一个命中元素 |
 
+下拉不设死高度，靠内边距 + 行高跟着旁边那几个胶囊走 —— 36px 的 kit 默认值会把这行头部撑成两倍高。
+
 左边还有 **规则文本**（`.dshCc_previewRule`）：当前规则的原文，只读，溢出省略。
+
+## 画布：拖动、归位、背景预设
+
+样本坐在一块**画布**里（`.dshCc_canvas`），行内与全屏各一块，共用同一个平移量。
+
+| 交互 | 结果 |
+| --- | --- |
+| 按住画布拖动 | 样本跟着走（`transform: translate(…, …)`），行内与全屏同步 |
+| 右下角「归位」/ 双击画布 | 回到原点 |
+| 工具栏最左边的下拉 | 换画布背景：棋盘 / 方格 / 斜纹 / 点阵 / 渐变 / 纯色 |
+
+三件事值得写下来：
+
+1. **拖动不经过 React state**。一次 `pointermove` 走一次渲染，等于把整块面板连同克隆出来的样本
+   一起重画（同一个判断见 `paintHighlightBoxes`）。平移量放在 ref 里，`transform` 直接写 DOM；
+   归位按钮始终渲染，所以没有「拖没拖过」这个状态要维护。
+2. **回到原点给空串**，不是 `translate(0px, 0px)` —— 后者仍然会建一个合成层、仍然会改变 `fixed`
+   后代的包含块，于是「归位了但其实没归位」。
+3. **画布负责底，谁都不许再铺一层**：样本框与合成样本在画布里都是透明底。否则背景预设只剩边框那一圈
+   能看见，等于这个功能没做。真实元素的底色仍然来自冻结的计算样式 —— 所以半透明组件会真的透出棋盘格，
+   而那正是选棋盘格的理由。
+
+背景选择存在 `localStorage`（键 `dsh-custom-css:canvas`），**不进设置记录**：它是「看的时候的偏好」，
+不参与注入，也不需要 Host 知道。认不出来的值一律退回棋盘格。
 
 ## 三种模式
 
@@ -156,21 +183,24 @@
 .dshCc_preview
 ├── .dshCc_previewHead
 │   ├── .dshCc_previewRule       规则原文（省略号）
-│   └── .dshCc_previewTools      全屏 | 对比 | 列表
+│   └── .dshCc_previewTools      背景 ▾ | 全屏 | 对比 | 列表
 ├── .dshCc_sampleCards           卡片导航（点「列表」才有）
 │   └── button.dshCc_hlToggle     一张卡 = 一个命中元素（div · 2/5）
 ├── .dshCc_stateChips            状态芯片（只在单屏模式）
-├── .dshCc_previewStage
-│   ├── .dshCc_previewBox
-│   │   ├── .dshCc_previewLabel（增删点缀色作底色的小标签）
-│   │   ├── .dshCc_previewCurrent   对比模式：左「当前」
-│   │   └── .dshCc_previewAfter     右「修改后」
+├── .dshCc_canvas                画布（可拖、带背景预设）
+│   ├── .dshCc_previewStage      ← 拖动改的就是它的 transform
+│   │   ├── .dshCc_previewBox
+│   │   │   ├── .dshCc_previewLabel（增删点缀色作底色的小标签）
+│   │   │   ├── .dshCc_previewCurrent   对比模式：左「当前」
+│   │   │   └── .dshCc_previewAfter     右「修改后」
+│   └── .dshCc_canvasReset       归位（右下角）
 └── .dshCc_previewNote           冻结口径那一行小字
 
 dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 top layer；min(1280px,96vw) × min(94vh,960px)）
 ├── .dshCc_full::backdrop        遮罩
 ├── .dshCc_fullHead              选择器 + ×
-├── .dshCc_fullStage             左右并排（同样是那两块）
+├── .dshCc_canvas                同一块画布（`flex:1 1 auto` 吃掉多出来的高度）
+│   └── .dshCc_previewStage.dshCc_fullStage   左右并排（同样是那两块）
 └── .dshCc_fullBody              同一份规则面板正文
 ```
 
