@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -1175,7 +1175,7 @@ async function main() {
   renderedText.length = 0;
   renderedClasses.length = 0;
   const menuView = renderRow();
-  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '选择器体检', '历史版本', '重命名', '打开目录', '删除']) {
+  for (const label of ['打开文件', '导入', '导出', '重置', '格式化', '问题检测', '历史版本', '重命名', '打开目录', '删除']) {
     assert.ok(renderedText.includes(label), 'the menu renders the ' + label + ' action');
   }
   // The order is a decision, not an accident: the file actions together, the whole-sheet
@@ -1189,7 +1189,7 @@ async function main() {
       if (current.type === 'button' && typeof current.props?.title === 'string') order.push(textOf(current));
       for (const child of current.children ?? []) walk(child);
     })(menuView);
-    const wanted = ['打开文件', '导入', '导出', '格式化', '选择器体检', '历史版本', '重命名', '打开目录', '删除', '重置'];
+    const wanted = ['打开文件', '导入', '导出', '格式化', '问题检测', '历史版本', '重命名', '打开目录', '删除', '重置'];
     const seen = order
       .map(entry => wanted.find(label => entry.startsWith(label)))
       .filter(label => label !== undefined);
@@ -5617,10 +5617,10 @@ const injected = { textContent: ownSheet };
   hookIndex = 0;
   renderedText.length = 0;
   const localizedMenu = localized.registrations[0].component();
-  for (const label of ['Check selectors', 'Versions', 'Rename', 'Delete', 'Reset']) {
+  for (const label of ['Check for problems', 'Versions', 'Rename', 'Delete', 'Reset']) {
     assert.ok(renderedText.includes(label), 'the menu is translated too (' + label + ') — got: ' + JSON.stringify(renderedText));
   }
-  assert.ok(buttonWith(localizedMenu, 'Check selectors') !== null, 'and the entries stay clickable');
+  assert.ok(buttonWith(localizedMenu, 'Check for problems') !== null, 'and the entries stay clickable');
 
   // 切语言：服务只通知订阅者，换字靠插件自己订阅后让 store 前进一步、组件重渲染。
   // 「重渲染就够了、不必重新挂载」是这套接法的全部承诺，所以这里直接验它。
@@ -5692,9 +5692,9 @@ const injected = { textContent: ownSheet };
   buttonWith(sweepMenu, 'Versions').props.onClick();
   await settle();
   sweep('versions');
-  // 选择器体检页：先从历史版本页的「返回」回到操作列表
+  // 问题检测页：先从历史版本页的「返回」回到操作列表
   buttonWith(renderEnglish(), 'Back').props.onClick();
-  buttonWith(renderEnglish(), 'Check selectors').props.onClick();
+  buttonWith(renderEnglish(), 'Check for problems').props.onClick();
   await settle();
   sweep('audit');
   // 规则面板：点高亮层里的选择器（假 React 不渲染 dangerouslySetInnerHTML，直接调 onClick）
@@ -6157,6 +6157,53 @@ const injected = { textContent: ownSheet };
     styleMap.set(moved, { backdropFilter: 'none', opacity: '1', position: 'static', transform: 'translateY(2px)', filter: 'none', perspective: 'none' });
     styleMap.set(pinned, { backdropFilter: 'none', opacity: '1', position: 'fixed', transform: 'none', filter: 'none', perspective: 'none' });
     assert.deepStrictEqual([...probe.diagnoseElement(pinned, styleOf)].map(f => f.id), ['fixedTrapped'], 'a fixed overlay under a transformed ancestor is reported');
+  }
+
+  // --- 整表诊断：同一套判据跑在每条规则的样本上 ------------------------------
+  // 页面里的提示只看得见「正在预览的那一个元素」，而问题在别的规则上（写死 fixed 的菜单被哪个
+  // 祖先捕获，取决于祖先，不取决于用户此刻在预览哪条）。这里只证明两件事：它按源码顺序把有问题的
+  // 规则挑出来并带上位置，以及它和体检页其余部分判得一样严（命不中 / 状态相关的不报）。
+  {
+    const probe = host.mod.__probe;
+    assert.ok(typeof probe.sheetFindings === 'function', 'the sheet-wide scan is reachable for testing');
+    const fake = (className, parent) => ({ className, parentElement: parent ?? null });
+    const styleMap = new Map();
+    const styleOf = (element) => styleMap.get(element) ?? { backdropFilter: 'none', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' };
+    const clean = { backdropFilter: 'none', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' };
+    const glass = { backdropFilter: 'blur(16px)', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none' };
+
+    const shell = fake('shell');
+    styleMap.set(shell, glass);
+    const glassCard = fake('card', shell);
+    styleMap.set(glassCard, glass);
+    const moved = fake('moved');
+    styleMap.set(moved, { ...clean, transform: 'translateY(2px)' });
+    const pinned = fake('pinned', moved);
+    styleMap.set(pinned, { ...clean, position: 'fixed' });
+    const fine = fake('plain');
+    styleMap.set(fine, clean);
+    const hovered = fake('hovered');
+    styleMap.set(hovered, glass);
+
+    const nodes = { '.a': [glassCard], '.b': [pinned], '.c': [fine], '.d:hover': [hovered] };
+    const doc = { querySelectorAll: (selector) => nodes[selector] ?? [] };
+    const sheet = '.a{backdrop-filter:blur(8px)}\n.b{position:fixed}\n.c{color:red}\n.d:hover{backdrop-filter:blur(8px)}\n';
+
+    // 摊进本文件自己的数组/对象里再比：模块在自己的作用域里造出来的数组，原型和这边不是同一个，
+    // deepStrictEqual 会把「看起来一模一样」判成不等。
+    const found = [...probe.sheetFindings(sheet, doc, styleOf)]
+      .map(entry => ({ ...entry, ids: [...entry.ids] }));
+    assert.deepStrictEqual(found.map(entry => entry.selector), ['.a', '.b'],
+      'only the rules whose samples really have a problem are listed, in source order — got: ' + JSON.stringify(found.map(entry => entry.selector)));
+    assert.deepStrictEqual(found.map(entry => entry.line), [1, 2], 'each entry carries its line');
+    assert.deepStrictEqual(found.map(entry => entry.ids), [['stackedGlass'], ['fixedTrapped']],
+      'with the ids the preview panel would show — got: ' + JSON.stringify(found.map(entry => entry.ids)));
+    assert.ok(found.every(entry => typeof entry.start === 'number' && entry.end > entry.start),
+      'and a source range, so the row can jump to it');
+    // `.c` 干净、`.d:hover` 是状态相关（静止页面上它的声明根本没生效），都不该出现在表里。
+    assert.ok(!found.some(entry => entry.selector === '.c'), 'a clean rule is not listed');
+    assert.ok(!found.some(entry => entry.selector.includes(':hover')), 'a state-dependent rule is not listed');
+    assert.deepStrictEqual([...probe.sheetFindings('', doc, styleOf)], [], 'an empty sheet has nothing to report');
   }
 
   // --- 查找：跳转不抢焦点；编辑器里的 Esc 关条 --------------------------------
@@ -6813,8 +6860,8 @@ const injected = { textContent: ownSheet };
   hookIndex = 0;
   renderedText.length = 0;
   auditView = auditor.registrations[0].component();
-  const auditEntry = buttonWith(auditView, '选择器体检');
-  assert.ok(auditEntry !== null, 'the actions menu offers 选择器体检 — menu: ' + JSON.stringify(renderedText));
+  const auditEntry = buttonWith(auditView, '问题检测');
+  assert.ok(auditEntry !== null, 'the actions menu offers 问题检测 — menu: ' + JSON.stringify(renderedText));
   auditEntry.props.onClick();
   await settle();
   hookIndex = 0;
@@ -6824,7 +6871,7 @@ const injected = { textContent: ownSheet };
   assert.ok(renderedClasses.includes('dshCc_versionsHead'), 'the audit page has a header of its own');
   assert.ok(buttonWith(auditView, '返回') !== null, 'and a way back to the actions');
   assert.ok(
-    renderedText.some(text => text.includes('2 条规则当前命不中')),
+    renderedText.some(text => text.includes('共 2 条')),
     'it counts what is dead — status: ' + JSON.stringify(renderedText),
   );
   assert.ok(
@@ -6862,7 +6909,7 @@ const injected = { textContent: ownSheet };
   renderedText.length = 0;
   auditView = auditor.registrations[0].component();
   assert.ok(
-    renderedText.some(text => text.includes('1 条规则当前命不中')),
+    renderedText.some(text => text.includes('共 1 条')),
     'the list shrinks by itself after the edit — list: ' + JSON.stringify(renderedText),
   );
 
@@ -6889,9 +6936,75 @@ const injected = { textContent: ownSheet };
   renderedText.length = 0;
   auditView = auditor.registrations[0].component();
   assert.ok(
-    renderedText.some(text => text.includes('当前都命得中')),
+    renderedText.some(text => text.includes('命不中的规则没有')),
     'with nothing dead left the page says so — list: ' + JSON.stringify(renderedText),
   );
+  // 这一遍的 computed 是公共桩（什么都读不到），所以「透明与定位」一节必须**不出现**：误报比漏报
+  // 更伤 —— 每一个打开这一页的人都会先看到它。
+  assert.ok(
+    !renderedText.includes('透明与定位'),
+    'a sheet whose samples read as plain is not reported — list: ' + JSON.stringify(renderedText),
+  );
+
+  // --- 问题检测页的第二节：透明与定位 ---------------------------------------
+  // 这一节只有样本元素真的有问题时才存在，所以单独起一次 boot，把问题的来源（计算样式）注入进去：
+  // opacity 0.6 的毛玻璃层，正是「玻璃开了但看不见」的那种写法。
+  {
+    const glassNode = { tagName: 'DIV', className: 'glass-hit', children: [] };
+    const plainStyle = { backdropFilter: 'none', webkitBackdropFilter: 'none', opacity: '1', position: 'static', transform: 'none', filter: 'none', perspective: 'none', getPropertyValue: () => '' };
+    const glassStyle = { ...plainStyle, backdropFilter: 'blur(8px)', webkitBackdropFilter: 'blur(8px)', opacity: '0.6' };
+    const glassSheet = '.glass-hit{backdrop-filter:blur(8px);opacity:0.6}\n';
+    const glassBoot = await boot({
+      dom: {
+        nodes: [glassNode],
+        computed: (element) => (element === glassNode ? glassStyle : plainStyle),
+      },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 44, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: glassSheet });
+        if (url.includes('/history')) return jsonResponse({ ok: true, name: 'custom.css', entries: [] });
+        if (url.endsWith('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    hookIndex = 0;
+    renderedText.length = 0;
+    let view = glassBoot.registrations[0].component();
+    await glassBoot.runEffects();
+    buttonWith(view, '更多操作').props.onClick();
+    hookIndex = 0;
+    renderedText.length = 0;
+    view = glassBoot.registrations[0].component();
+    buttonWith(view, '问题检测').props.onClick();
+    await settle();
+    hookIndex = 0;
+    renderedText.length = 0;
+    renderedClasses.length = 0;
+    view = glassBoot.registrations[0].component();
+    assert.ok(renderedClasses.includes('dshCc_auditSection'), 'the page grows a section header of its own');
+    assert.ok(
+      renderedText.includes('透明与定位'),
+      'a sample with real findings gets its own section — list: ' + JSON.stringify(renderedText),
+    );
+    assert.ok(
+      renderedText.some(text => text.includes('⚠ 1 处')),
+      'the row carries a badge with how many problems it has — list: ' + JSON.stringify(renderedText),
+    );
+    assert.ok(
+      !renderedText.some(text => text.includes('命不中的规则')),
+      'and the selector section stays out when nothing is dead — list: ' + JSON.stringify(renderedText),
+    );
+    // 点一行不是「注释掉」，是**跳过去**：菜单收起、编辑器接管（只读地跳，不改这一条）。
+    buttonWith(view, '第 1 行').props.onClick();
+    await settle();
+    hookIndex = 0;
+    renderedClasses.length = 0;
+    glassBoot.registrations[0].component();
+    assert.ok(
+      !renderedClasses.includes('dshUi_menu'),
+      'clicking a finding closes the menu, so the caret it moved is not hidden behind it — classes: ' + JSON.stringify(renderedClasses),
+    );
+  }
 
   // --- 查找 / 替换 与格式化 ---------------------------------------------------
   // The find bar is one of the few things here with a right answer that does not need a
