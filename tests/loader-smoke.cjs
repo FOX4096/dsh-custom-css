@@ -1443,7 +1443,7 @@ async function main() {
     const canvasNodes = byClass(panelView, 'dshCc_canvas');
     assert.strictEqual(canvasNodes.length, 1, 'the preview has exactly one canvas — got: ' + canvasNodes.length);
     const canvasNode = canvasNodes[0];
-    assert.strictEqual(canvasNode.props['data-canvas'], 'checker', 'and it starts on the checkerboard');
+    assert.strictEqual(canvasNode.props['data-canvas'], 'page', 'and it starts on the page background (the preview looks like it always did)');
     const resetBtns = byClass(panelView, 'dshCc_canvasReset');
     assert.strictEqual(resetBtns.length, 1, 'with a reset control in its corner — got: ' + resetBtns.length);
     assert.strictEqual(textOf(resetBtns[0]), '归位', 'labelled 归位');
@@ -6294,10 +6294,10 @@ const injected = { textContent: ownSheet };
     // 六个背景 id 就是 CSS 里 `[data-canvas="…"]` 的那六个，多一个少一个都会变成一块没样式的空白。
     assert.deepStrictEqual(
       [...probe.CANVAS_BACKGROUNDS].map(entry => entry.id).sort(),
-      ['checker', 'dots', 'gradient', 'grid', 'plain', 'stripes'],
+      ['checker', 'dots', 'gradient', 'grid', 'page', 'plain', 'stripes'],
       'the presets are exactly the ids the stylesheet paints',
     );
-    assert.strictEqual(probe.readCanvasBackground(), 'checker', 'with nothing stored the canvas starts on the checkerboard');
+    assert.strictEqual(probe.readCanvasBackground(), 'page', 'with nothing stored the canvas starts on the page background');
     const stored = await boot({
       stored: new Map([['dsh-custom-css:canvas', 'stripes']]),
       fetchImpl: async (url) => {
