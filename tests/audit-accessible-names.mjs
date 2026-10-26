@@ -32,6 +32,9 @@ const KNOWN_CONTENT_NAMED = [
 	// 令牌 chip：它的可访问名是内部那行 `color: var(--dsw-alias-…)`，完全合法；
 	// title 只是补充说明。在浏览器里量过，内容文字就是它的名字。
 	'entry.property',
+	// 画布提示里那个「换成棋盘看」：文字是 `t('preview.glassTry')`，静态看不出是字符串
+	// （判据只认字面量实参）。它在渲染出来的面板上是被读到的可见文字，名字不缺。
+	'preview.glassTryTitle',
 ];
 
 const REPO = path.dirname(path.dirname(fileURLToPath(import.meta.url)));

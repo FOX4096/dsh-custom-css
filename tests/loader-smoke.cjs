@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6309,6 +6309,11 @@ const injected = { textContent: ownSheet };
     });
     assert.strictEqual(stored.mod.__probe.readCanvasBackground(), 'stripes',
       'a remembered background is the one that comes back');
+    // 玻璃判定：只有它决定「画布底板要不要让开」，所以三种写法都得认。
+    assert.strictEqual(probe.glassEnabled({ backdropFilter: 'blur(36px) saturate(1.2)' }), true, 'a real blur counts as glass');
+    assert.strictEqual(probe.glassEnabled({ backdropFilter: 'none' }), false, 'none does not');
+    assert.strictEqual(probe.glassEnabled({ webkitBackdropFilter: 'blur(4px)' }), true, 'the webkit spelling is read too');
+    assert.strictEqual(probe.glassEnabled({}), false, 'a style with no backdrop-filter at all is not glass');
   }
 
   // --- 查找：跳转不抢焦点；编辑器里的 Esc 关条 --------------------------------
