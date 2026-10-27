@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, colorAlpha, pageBackdropOf, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, colorAlpha, pageBackdropOf, canvasFitScale, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6319,6 +6319,23 @@ const injected = { textContent: ownSheet };
     assert.ok(!bySelector.has('.i') && !bySelector.has('.j'),
       'a state-dependent rule and one inside a media query are not part of this sheet’s report');
     assert.deepStrictEqual([...probe.sheetStyleFindings('')], [], 'an empty sheet has nothing to report');
+  }
+
+  // --- 「适应」档的比例 ----------------------------------------------------
+  // 组件按真实尺寸排版，比窗口宽就必然被裁；「适应」只缩显示、不改尺寸。这条纯函数决定缩多少：
+  // 取两个方向里更小的那个比例，并且**只往下**（放大只会让画面比页面更虚）。
+  {
+    const probe = host.mod.__probe;
+    const surface = { offsetWidth: 800, offsetHeight: 400 };
+    const viewport = { clientWidth: 400, clientHeight: 400 };
+    assert.strictEqual(probe.canvasFitScale(surface, viewport, true), 0.5, 'a too-wide sample is scaled to the window width');
+    assert.strictEqual(probe.canvasFitScale(surface, viewport, false), 1, 'with fit off the scale is exactly 1');
+    assert.strictEqual(probe.canvasFitScale({ offsetWidth: 100, offsetHeight: 100 }, viewport, true), 1,
+      'a sample smaller than the window is never scaled up');
+    assert.strictEqual(probe.canvasFitScale(surface, { clientWidth: 800, clientHeight: 200 }, true), 0.5,
+      'the height is the tighter constraint here — got the smaller ratio');
+    assert.strictEqual(probe.canvasFitScale({ offsetWidth: 0, offsetHeight: 0 }, viewport, true), 1,
+      'an unmeasured sample falls back to 1 instead of dividing by zero');
   }
 
   // --- 组件「身后」那层颜色 ------------------------------------------------
