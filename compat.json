@@ -46,15 +46,16 @@
     "0.2.1-rc.1",
     "0.2.1-rc.2",
     "0.2.1-rc.3",
-    "0.2.1-rc.4"
+    "0.2.1-rc.4",
+    "0.2.2-alpha.2"
   ],
   "probe": [
-    "0.2.1-alpha.4",
     "0.2.1-alpha.5",
     "0.2.1-rc.1",
     "0.2.1-rc.2",
     "0.2.1-rc.3",
-    "0.2.1-rc.4"
+    "0.2.1-rc.4",
+    "0.2.2-alpha.2"
   ],
   "notes": [
     "runtimeVerified = 真机起过对应版本的 DSH 实例并跑通 host 半接口；knownGood/probe = 只做接口契约断言（解包该版本的 settings 包核对槽位与 id）。",
@@ -64,7 +65,7 @@
     "0.0.1-rc.x 一代一周下载量约 94 次（≈0.02%），只做接口断言，不做专门的兼容分支。",
     "runtimeVerifiedNotes = 真机验证那一档在 README 表格里的「验证方式」原文。自动写回时从这里取，不自己编 —— 否则「独立 DSH_HOME、三个接口 200、文件落盘」这类具体做法会在第一次自动更新时被压成一句泛话。",
     "runtimeVerified 的判据是「真机起过该版本的 DSH 并跑通 host 半接口」。0.2.0-rc.2 是当前最新在用版本，所以它是这一档里最有代表性的一个 —— 前面两个是历史锚点。",
-    "上次自动核对 2026-10-27：最新已发布版本 0.2.1-rc.4，本次断言 9 个版本全部通过（由 tests/update-compat.mjs 写入）。knownGood 是累积的：某个版本通过过一次即保留。"
+    "上次自动核对 2026-10-27：最新已发布版本 0.2.2-alpha.2，本次断言 9 个版本全部通过（由 tests/update-compat.mjs 写入）。knownGood 是累积的：某个版本通过过一次即保留。"
   ],
   "runtimeVerifiedNotes": {
     "0.2.0-rc.2": "真机运行：本机日常在用的实例（生产 profile `web`，插件以 `link:` 装入并实际渲染设置行）。实测 host 路由 `GET /list`、`GET /read`、`GET /history` 全部 200，返回的正是磁盘上的样式表与历史快照",
@@ -72,5 +73,5 @@
     "0.1.2-rc.1": "真机运行：独立 `DSH_HOME` 起实例，`/dsh-custom-css/list`、`/write`、`/read` 全部 200 且文件确实落盘"
   },
   "lastChecked": "2026-10-27",
-  "lastCheckedNewest": "0.2.1-rc.4"
+  "lastCheckedNewest": "0.2.2-alpha.2"
 }
