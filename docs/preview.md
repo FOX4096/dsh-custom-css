@@ -230,26 +230,27 @@
 ## 布局
 
 ```
-.dshCc_preview
+.dshCc_preview                    固定 180px 高的画布，下面的顺序就是「先说什么、再看什么」
 ├── .dshCc_previewHead
 │   ├── .dshCc_previewCanvasTools 背景 ▾
 │   ├── .dshCc_previewRule        规则原文（省略号）
 │   └── .dshCc_previewTools       全屏 | 对比 | 列表（左侧一条竖线分隔）
-├── .dshCc_sampleCards           卡片导航（点「列表」才展开，是展开不是常驻）
-│   └── button.dshCc_hlToggle     一张卡 = 一个命中元素（div · 2/5）
-├── .dshCc_previewPicks          常驻那一排：状态芯片 + 演示中 + 命中游标（21px）
-│   ├── .dshCc_stateChips        状态芯片（只在单屏模式）
-│   └── .dshCc_matchCursor       ‹ 2 / 5 ›（命中多于一个才出现）
-├── .dshCc_previewHints          提示区（warn = 会坏，info = 解释 + 出路）
-│   └── .dshCc_hintRow[data-tone]
-├── .dshCc_canvas                画布（可拖、可聚焦、带背景预设）
-│   ├── .dshCc_previewStage      ← 拖动 / 方向键改的就是它的 transform
-│   │   ├── .dshCc_previewBox
-│   │   │   ├── .dshCc_previewLabel（增删点缀色作底色的小标签）
-│   │   │   ├── .dshCc_previewCurrent   对比模式：左「当前」
-│   │   │   └── .dshCc_previewAfter     右「修改后」
-│   └── .dshCc_canvasReset       归位（右下角，没拖过时禁用）
-└── .dshCc_previewNote           冻结口径那一行小字
+├── .dshCc_previewHints           提示区（只在有话说时出现；画布**上方**：先看说明再看样本）
+│   └── .dshCc_hintRow[data-tone="warn|info"]
+├── .dshCc_sampleCards            卡片导航（点「列表」才展开，是展开不是常驻）
+│   └── button.dshCc_hlToggle      一张卡 = 一个命中元素（div · 2/5）
+├── .dshCc_previewPicks           常驻那一排（21px）：状态芯片 + 演示中 + 命中游标
+│   ├── .dshCc_stateChips         状态芯片（只在单屏模式）
+│   └── .dshCc_matchCursor        ‹ 2 / 5 ›（命中多于一个才出现）
+├── .dshCc_canvas                 视口（行内固定 180px；全屏吃满剩余高度）
+│   ├── .dshCc_previewStage
+│   │   └── .dshCc_previewBox            窗格 = 窗口（overflow:hidden，带描边与标签）
+│   │       ├── .dshCc_previewLabel        「当前 / 修改后」
+│   │       └── .dshCc_previewCurrent / .dshCc_previewAfter[data-pane]
+│   │                                      样本层：宽度按页面实测值写死，拖动改它的 transform
+│   └── .dshCc_canvasReset        归位（右下角，没拖过时禁用）
+└── .dshCc_previewNote            冻结口径那一行小字
+```
 
 dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 top layer；min(1280px,96vw) × min(94vh,960px)）
 ├── .dshCc_full::backdrop        遮罩
@@ -259,9 +260,9 @@ dialog.dshCc_full                全屏视图（原生 dialog，showModal 进 to
 └── .dshCc_fullBody              同一份规则面板正文
 ```
 
-高度：样本容器 **260px** 自己滚，整块面板 **340px**（原来是 160 / 260 —— 预览被声明区挤成一条缝）。
+高度：行内的画布**固定 180px**（开不开对比、展不展开卡片都不变 —— 高度一跳，刚才记住的「组件的哪一块在哪儿」就失效了），整块面板 **340px** 自己滚；全屏里画布 `flex:1 1 auto` 吃掉多出来的高度。
 
-全屏视图（0.12.0 的设计）：卡片 `min(1280px,96vw) × min(94vh,960px)`、内边距 20、间距 16；舞台至少 260px 并吃掉多出来的高度，正文留在下半屏（最多 42%）自己滚；两块视口带 `0.5px --dsw-alias-border-l2` 描边（§G 的「视口描边」），样本短的时候在视口里**居中**（用 `margin:auto` 而不是 `justify-content:center` —— 后者在内容溢出时会让头几行滚不到）。
+全屏视图（0.12.0 的设计，2026-10 重新核对）：卡片 `min(1280px,96vw) × min(94vh,960px)`、内边距 20、间距 16；舞台至少 260px 并吃掉多出来的高度，正文留在下半屏（最多 42%）自己滚；两块视口带 `0.5px --dsw-alias-border-l2` 描边（§G 的「视口描边」）。样本现在按原始尺寸排版、由窗格裁切（见上面「组件不压缩」一节），所以不再用 `margin:auto` 居中 —— 居中只对「比窗格小」的样本有意义。
 
 **顶栏是全屏里唯一的「我在哪」**：选择器（左）+ `N 个命中 · 第 i 个` + `‹ ›`（只在一个以上命中时出现，全屏里没有卡片导航，这对按钮是唯一的切换方式）+ `Esc 退出` + `×`。`‹ ›` 与 `×` 都是 28px 图标按钮（和面板右上角那个同一规格），不是 21px 的小胶囊 —— 一行里混两种控件高度，看起来像两条工具栏。
 
