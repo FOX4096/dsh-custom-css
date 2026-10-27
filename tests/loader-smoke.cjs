@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, colorAlpha, pageBackdropOf, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -6319,6 +6319,37 @@ const injected = { textContent: ownSheet };
     assert.ok(!bySelector.has('.i') && !bySelector.has('.j'),
       'a state-dependent rule and one inside a media query are not part of this sheet’s report');
     assert.deepStrictEqual([...probe.sheetStyleFindings('')], [], 'an empty sheet has nothing to report');
+  }
+
+  // --- 组件「身后」那层颜色 ------------------------------------------------
+  // 用户报过「明明在对话里有背景，预览里没有」：组件自己的 background 常常是 transparent，
+  // 看着有底是页面给的。这两条纯函数就是「找那层底」的全部逻辑。
+  {
+    const probe = host.mod.__probe;
+    assert.strictEqual(probe.colorAlpha('rgba(0, 0, 0, 0.58)'), 0.58, 'rgba alpha is read');
+    assert.strictEqual(probe.colorAlpha('rgb(255, 255, 255)'), 1, 'rgb without alpha is opaque');
+    assert.strictEqual(probe.colorAlpha('color(srgb 1 1 1 / 0.58)'), 0.58, 'the color() spelling DSH tokens use is read too');
+    assert.strictEqual(probe.colorAlpha('transparent'), 0, 'transparent is zero');
+    assert.ok(Math.abs(probe.colorAlpha('#00000080') - 0.5) < 0.01, 'hex alpha is read');
+    assert.strictEqual(probe.colorAlpha(''), 0, 'an empty string is not a colour');
+
+    const make = (className, parent, style) => ({ className, parentElement: parent ?? null, style });
+    const styles = new Map();
+    const styleOf = (node) => styles.get(node) ?? { backgroundColor: '', backgroundImage: 'none' };
+    const white = make('page', null);
+    styles.set(white, { backgroundColor: 'rgb(250, 250, 250)', backgroundImage: 'none' });
+    const card = make('card', white);
+    styles.set(card, { backgroundColor: 'color(srgb 1 1 1 / 0.58)', backgroundImage: 'none' });
+    const inner = make('bubble', card);
+    styles.set(inner, { backgroundColor: 'transparent', backgroundImage: 'none' });
+    assert.strictEqual(probe.pageBackdropOf(inner, styleOf), 'rgb(250, 250, 250)',
+      'a transparent component inherits the first opaque ancestor colour');
+    const patterned = make('wall', white);
+    styles.set(patterned, { backgroundColor: 'transparent', backgroundImage: 'linear-gradient(red, blue)' });
+    const onWall = make('bubble', patterned);
+    styles.set(onWall, { backgroundColor: 'transparent', backgroundImage: 'none' });
+    assert.strictEqual(probe.pageBackdropOf(onWall, styleOf), '',
+      'a patterned ancestor is left to the canvas背景 rather than painted over');
   }
 
   // --- 预览画布：平移的算术，和背景记忆 --------------------------------
