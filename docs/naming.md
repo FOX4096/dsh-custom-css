@@ -224,8 +224,9 @@
 | **预览工具组** | `.dshCc_previewTools` | 头部**右侧**：全屏 / 对比 / 列表（背景在 `.dshCc_previewCanvasTools`） | 已实现 |
 | **画布背景** | `.dshUi_choice`（在 `.dshCc_previewCanvasTools` 里，`aria-label` = 画布背景） | 换画布背景：页面（默认）/ 棋盘 / 方格 / 斜纹 / 点阵 / 渐变 / 纯色 | 已实现 |
 | **画布** | `.dshCc_canvas`（`data-canvas` = 预设 id） | 样本坐着的那块**可拖动**的画布；平移量按窗格（`data-pane`）各记各的，全屏左右可以分开拖 | 已实现 |
-| **窗格** | `.dshCc_previewBox[data-pane="current\|modified"]` | 拖动实际作用在它身上（`transform` 写在这块盒子上，不是舞台上） | 已实现 |
-| **归位** | `.dshCc_canvasReset` | 画布右下角：所有窗格平移量清零（双击画布同效） | 已实现 |
+| **窗格** | `.dshCc_previewBox`（`overflow:hidden`，带描边与「当前/修改后」标签） | **窗口**：组件在它里面按原始尺寸排版，装不下的部分裁掉 | 已实现 |
+| **样本层** | `.dshCc_previewAfter[data-pane="modified"]` / `.dshCc_previewCurrent[data-pane="current"]` | 拖动实际作用在它身上（`transform` 写在这层，不是窗格或舞台上）；宽度由实测值写死，不压缩 | 已实现 |
+| **归位** | `.dshCc_canvasReset` | 画布右下角：所有样本层平移量清零（双击画布同效） | 已实现 |
 | **全屏按钮** | `.dshCc_hlToggle`（工具组里第一个） | 打开全屏视图 | 已实现 |
 | **对比按钮** | `.dshCc_hlToggle`（第二个，`aria-pressed`） | 开**对比模式** | 已实现 |
 | **列表按钮** | `.dshCc_hlToggle`（第三个，`aria-pressed`） | 开 / 关**卡片导航** | 已实现 |
