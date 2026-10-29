@@ -219,33 +219,33 @@
 | 名字 | 标识 | 说明 | 状态 |
 | --- | --- | --- | --- |
 | **预览块** | `.dshCc_preview` | 插在声明区上方（代码区与规则面板之间），只在打开某条规则时出现 | 已实现 |
-| **预览头部** | `.dshCc_previewHead` | 预览块顶部一行 | 已实现 |
-| **规则文本** | `.dshCc_previewRule` | 头部**左侧**：当前规则的原文（只读、省略号） | 已实现 |
-| **预览工具组** | `.dshCc_previewTools` | 头部**右侧**：全屏 / 对比 / 列表（背景在 `.dshCc_previewCanvasTools`） | 已实现 |
-| **画布背景** | `.dshUi_choice`（在 `.dshCc_previewCanvasTools` 里，`aria-label` = 画布背景） | 换画布背景：页面（默认）/ 棋盘 / 方格 / 斜纹 / 点阵 / 渐变 / 纯色 | 已实现 |
-| **画布** | `.dshCc_canvas`（`data-canvas` = 预设 id） | 样本坐着的那块**可拖动**的画布；平移量按窗格（`data-pane`）各记各的，全屏左右可以分开拖 | 已实现 |
+| **预览工具条** | `.dshCc_previewBar`（28px 一行，全高 `ui.*` 控件） | 视图分段 / 状态芯片 / 命中菜单 / 背景 / 适应 / 全屏 | 已实现 |
+| **规则文本** | `.dshCc_previewRule` | **全屏顶栏**左侧：当前规则的原文（只读、省略号）；行内不再重复一份（选择器框就在上面） | 已实现 |
+| **视图分段** | `.dshUi_segments`（`aria-label` = 预览视图） | 单屏 / 对比，二选一 | 已实现 |
+| **画布背景** | `.dshUi_choice.dshUi_choiceSm`（`aria-label` = 画布背景） | 换画布背景：页面（默认）/ 棋盘 / 方格 / 斜纹 / 点阵 / 渐变 / 纯色 | 已实现 |
+| **画布** | `.dshCc_canvas`（`data-canvas` = 预设 id） | 样本坐着的那块**可拖动**的画布；**一份**平移量写进每个 `[data-pane]`，行内与全屏一起走；夹取保证样本至少露 48px | 已实现 |
 | **窗格** | `.dshCc_previewBox`（`overflow:hidden`，带描边与「当前/修改后」标签） | **窗口**：组件在它里面按原始尺寸排版，装不下的部分裁掉 | 已实现 |
 | **样本层** | `.dshCc_previewAfter[data-pane="modified"]` / `.dshCc_previewCurrent[data-pane="current"]` | 拖动实际作用在它身上（`transform` 写在这层，不是窗格或舞台上）；宽度由实测值写死，不压缩 | 已实现 |
-| **归位** | `.dshCc_canvasReset` | 画布右下角：所有样本层平移量清零（双击画布同效） | 已实现 |
-| **全屏按钮** | `.dshCc_hlToggle`（工具组里第一个） | 打开全屏视图 | 已实现 |
-| **对比按钮** | `.dshCc_hlToggle`（第二个，`aria-pressed`） | 开**对比模式** | 已实现 |
-| **列表按钮** | `.dshCc_hlToggle`（第三个，`aria-pressed`） | 开 / 关**卡片导航** | 已实现 |
+| **归位** | `.dshCc_canvasReset`（里面是 `ui.button({ size:'sm', icon:true })`） | 画布右下角：所有样本层平移量清零（双击画布同效） | 已实现 |
+| **全屏按钮** | `.dshUi_button.dshUi_buttonSm` | 打开全屏视图 | 已实现 |
+| **对比段** | `.dshUi_segment`（视图分段里的第二段） | 开**对比模式** | 已实现 |
+| **命中菜单** | `.dshUi_choice.dshUi_choiceSm`（`aria-label` = 预览第几个命中元素） | 命中多于一个时选看哪个（`div · 2/5`）；替代了「列表 + 卡片导航」 | 已实现 |
 | **预览视口** | `.dshCc_previewStage` | 装样本的框（**不是 iframe**） | 已实现 |
-| **单屏预览** | — | 默认：只有一块「修改后」 | 规划中 |
-| **对比模式** | — | **左侧多出一块「当前」**，右侧「修改后」 | 规划中 |
+| **单屏预览** | — | 默认：只有一块「修改后」 | 已实现 |
+| **对比模式** | — | **左侧多出一块「当前」**，右侧「修改后」 | 已实现 |
 | **当前面板** | `.dshCc_previewCurrent`（带 `data-dshcc-owned`） | 对比模式左边那块：**打开这条规则时**的文本；标记为插件界面，不参与匹配 | 已实现 |
 | **修改后面板** | `.dshCc_previewAfter`（带 `data-dshcc-owned`） | 一直有：现在的文本；同上，不参与匹配 | 已实现 |
-| **卡片导航** | `.dshCc_sampleCards` | 「列表」按钮打开的那一排卡片（一次最多 6 张，多了一行内滚） | 已实现 |
-| **样本卡片** | `.dshCc_hlToggle`（在 `.dshCc_sampleCards` 里） | 一张卡 = 一个命中元素，写 `div · 2/5`；选中态 `aria-pressed` | 已实现 |
+| ~~卡片导航~~ | — | 已去掉：命中切换改由「命中菜单」承担 | 已移除（v4） |
+| ~~样本卡片~~ | — | 同上，已移除（v4） | 已移除（v4） |
 | **样本** | `.dshCc_sample` | 克隆元素 + **冻结的计算样式**（内联），一个面板里一个 | 规划中 |
 | **伪元素样本** | `.dshCc_samplePseudo` | `::before` / `::after` 合成出来的那个 span（近似，见 [预览块](./preview.md)） | 已实现 |
-| **演示中标记** | `.dshCc_previewDemo` | 强制态生效时那一行警告色小字 | 已实现 |
+| **演示中标记** | `.dshUi_status[data-state=warn]`（`ui.status`） | 强制态生效时那一行警告色小字 | 已实现 |
 | **视口标签** | — | 面板左上角小字：`当前` / `修改后` | 已实现 |
 | **尺寸读数** | — | 面板角上的 `320×180` | 规划中 |
-| **冻结口径说明** | `.dshCc_previewNote` | 底部那行小字：样本冻结了什么、没冻结什么 | 已实现 |
+| **冻结口径说明** | `.dshUi_hint`（在 `.dshCc_previewFoot` 里） | 底部那行小字：样本冻结了什么、没冻结什么 | 已实现 |
 | **合成样本** | `.dshCc_sampleSynthetic` | 命中 0 个时用规则自己的声明拼的方框，标注「不是页面上的元素」 | 已实现 |
-| **状态芯片组** | `.dshCc_stateChips` | 单屏模式下的那排芯片（对比 / 全屏时隐藏） | 已实现 |
-| **状态芯片** | `.dshCc_hlToggle`（在 `.dshCc_stateChips` 里，`aria-pressed`） | 悬停 / 聚焦 / 占位符（真页面强制）+ `::before` / `::after`（样本里合成） | 已实现 |
+| ~~状态芯片组~~ | — | 芯片直接排在工具条里（对比 / 全屏时隐藏） | 已移除（v4） |
+| **状态芯片** | `.dshUi_button.dshUi_buttonSm`（`aria-pressed`） | 悬停 / 聚焦 / 占位符（真页面强制）+ `::before` / `::after`（样本里合成）；**只列选择器里真有的状态** | 已实现 |
 
 > **为什么不用 iframe**：`--dsw-*` 令牌在宿主 `body` 上，iframe 里没有；更要紧的是
 > `backdrop-filter` 在 iframe 里模糊的是 iframe 自己的内容 —— 玻璃预览会变成一块空盒子。
@@ -279,7 +279,7 @@
 | **全屏顶栏** | `.dshCc_fullHead` | 卡片最上面一行 | 已实现 |
 | **全屏选择器框** | `.dshCc_previewRule`（在顶栏里） | **只显示**该规则的选择器（只读） | 已实现 |
 | **全屏命中读数** | `.dshCc_fullMeta` | 顶栏里的 `N 个命中 · 第 i 个`（行内面板有它，全屏也要有） | 已实现 |
-| **全屏切换钮** | `.dshCc_fullNav` | 顶栏里的 `‹ ›`，28px 图标按钮（同 `.dshCc_panelClose`）；一个命中时不出现 | 已实现 |
+| **全屏命中菜单** | `.dshUi_choice.dshUi_choiceSm`（顶栏里） | 命中多于一个时选看哪个；与行内那枚是同一个控件 | 已实现 |
 | **全屏退出提示** | `.dshCc_fullEsc` | 顶栏里的 `Esc 退出`；≤900px 时隐藏 | 已实现 |
 | **全屏退出钮** | `.dshCc_panelClose`（顶栏里） | 顶栏右侧的 `×` | 已实现 |
 | **全屏预览区** | `.dshCc_fullStage` | 顶栏下方：**左「当前」/ 右「修改后」**（强制并排），外面包一层 `.dshCc_canvas` | 已实现 |

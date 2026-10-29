@@ -22,13 +22,14 @@ const lines = text.split('\n');
 
 /** 组件库拥有的类：控件、行布局、反馈、小节。 */
 const KIT_CLASSES = [
-  'dshUi_button', 'dshUi_buttonDanger', 'dshUi_spinner',
+  'dshUi_button', 'dshUi_buttonDanger', 'dshUi_buttonSm', 'dshUi_buttonIcon', 'dshUi_spinner',
+  'dshUi_segments', 'dshUi_segment',
   'dshUi_switch', 'dshUi_switchTrack', 'dshUi_switchThumb', 'dshUi_switchLabel',
   'dshUi_badge', 'dshUi_choiceWrap', 'dshUi_field', 'dshUi_fieldInvalid',
   'dshUi_fieldFail', 'dshUi_fieldMessage', 'dshUi_slider',
   'dshUi_row', 'dshUi_rowLabel', 'dshUi_rowControls',
   'dshUi_group', 'dshUi_hint', 'dshUi_value', 'dshUi_facts',
-  'dshUi_status', 'dshUi_statusBad', 'dshUi_statusOk', 'dshUi_statusBusy',
+  'dshUi_status', 'dshUi_statusBad', 'dshUi_statusOk', 'dshUi_statusWarn', 'dshUi_statusBusy',
   'dshUi_empty', 'dshUi_section', 'dshUi_sectionTitle', 'dshUi_desc', 'dshUi_link',
 ];
 

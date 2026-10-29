@@ -15,7 +15,8 @@
 
 | 组件 | 调用 | props | 状态 |
 | --- | --- | --- | --- |
-| **按钮** | `ui.button(props, '文字')` | `disabled` · `busy` · `danger` · `title` · `className` · `onClick` | hover / focus-visible / disabled / **busy**（转圈 + 禁用 + `aria-busy`）/ danger |
+| **按钮** | `ui.button(props, '文字')` | `disabled` · `busy` · `danger` · **`pressed`** · **`size: 'md'\|'sm'`** · **`icon`** · `title` · `className` · `onClick` | hover / focus-visible / disabled / **busy**（转圈 + 禁用 + `aria-busy`）/ danger / **按下**（`aria-pressed`）/ **sm**（28px）/ **icon**（28×28 方形） |
+| **分段控件** | `ui.segments({ ariaLabel, value, choices, onChange })` | `ariaLabel` · `value` · `choices: [[value, label]]` · `disabled` · `onChange(value)` | 同组内只有一段 `aria-pressed` / focus-visible / disabled |
 | **开关** | `ui.switch({ checked, ariaLabel, labelText, onChange })` | `checked` · `ariaLabel` · `labelText` · `disabled` · `title` · `onChange(next)` | on / off（`aria-checked` 上色）/ disabled / focus-visible |
 | **徽标** | `ui.badge('文字')` | —（只读） | — |
 | **下拉** | `ui.choice({ ariaLabel, choices, value, onChange })` | `choices: [[value, label]]` · `value` · `disabled` · `onChange(value)` · `className` | hover / focus / open / disabled |
@@ -30,11 +31,20 @@
 - `className` 是**追加**，不替换默认类。
 - `ui.slider` 的 `onInput` 持续触发（拖动时即时预览），`onCommit` 在手势结束（pointerup /
   keyup / blur）触发一次 —— 落盘放这里，一次拖动不该写一百次。
+- `ui.button` 的 `pressed` 只有**真的传了**才写 `aria-pressed`：给普通按钮写 `"false"` 会让
+  读屏器把每颗按钮都念成「未按下」。
+- 尺寸只有**两档**：默认 36px、`size: 'sm'` 28px（`icon` 也是 28）。第三个高度不许出现 ——
+  这是 [设计一致性](./design-tokens.md) 的硬规定。**要按下的语义用 `pressed`，不要自己拼
+  `aria-pressed` 的胶囊**；要「二选一」用 `ui.segments`，不要用两颗独立开关冒充。
 
 ```js
 // 一个忙碌按钮 + 一个无效字段
 ui.button({ busy: saving, onClick: save }, saving ? '保存中…' : '保存')
 ui.field({ value: url, invalid: true, message: '只接受 http(s) 或 file://', onChange })
+// 28px 工具条：分段 + 有按下态的按钮 + 方形图标钮
+ui.segments({ ariaLabel: '视图', value: view, choices: [['single', '单屏'], ['compare', '对比']], onChange: setView })
+ui.button({ size: 'sm', pressed: fit, onClick: toggleFit }, '适应')
+ui.button({ size: 'sm', icon: true, ariaLabel: '关闭', onClick: close }, '×')
 ```
 
 ## 行布局
@@ -52,7 +62,7 @@ ui.field({ value: url, invalid: true, message: '只接受 http(s) 或 file://', 
 
 | 组件 | 调用 | 说明 |
 | --- | --- | --- |
-| **状态行** | `ui.status({ state, text })` | `state` = `idle` / `busy` / `ok` / `error`；带 `role=status` + `aria-live=polite`，所以变化会被读屏器念出来 |
+| **状态行** | `ui.status({ state, text })` | `state` = `idle` / `busy` / `ok` / **`warn`** / `error`；带 `role=status` + `aria-live=polite`，所以变化会被读屏器念出来。`warn` 是「要注意但不是错误」—— DSH 只有一个红，它留给「出错」与「重置」 |
 | **空态** | `ui.empty('还没有壁纸：…')` | 虚线框 + 一行灰字，表达「这里还没有东西」而不是「出错了」 |
 
 ## 菜单必须在 top layer

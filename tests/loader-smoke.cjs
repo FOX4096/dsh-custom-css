@@ -40,7 +40,7 @@ const EXPORTS_ANCHOR = `		exports.apply = apply;
 		exports.inject = inject;`;
 assert.ok(source.includes(EXPORTS_ANCHOR), 'the module still exports the way this suite patches in');
 const code = source.replace(EXPORTS_ANCHOR, EXPORTS_ANCHOR + `
-		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, colorAlpha, pageBackdropOf, canvasFitScale, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
+		exports.__probe = { placeMenu, searchHits, hitAtOrAfter, markMatches, highlightCss, formatCss, externalChange, resolveSelector, diagnoseElement, sheetFindings, sheetStyleFindings, glassEnabled, colorAlpha, pageBackdropOf, canvasFitScale, canvasTranslate, canvasDragTo, readCanvasBackground, CANVAS_BACKGROUNDS, paintHighlightBoxes, clearHighlights, paintRoot, valueInvalid, previewChipsFor, clampPan, previewModel, buildSample, captureSampleStyles, previewTargetSelector, hashText, paintModelInto, applyCanvasPan, applyCanvasFit, canvasBoundsOf, PreviewBlock, liveHighlightBoxes: () => highlightBoxes, ui, fitMenuToTrigger, openSettingsSurface, authoringApi: () => window.dshCss, createAuthoringApi, wallpaperCss, normalizeWallpaper, wallpaperUrlAllowed, applyWallpaper, commitWallpaper, openWallpaperSection, normalizeSettings, rotateIntervalMs, commitSettings, settingsSnapshot: () => settingsStore.snapshot(), wallpaperSnapshot: () => wallpaperStore.snapshot(), syncWallpaperClock, rotateWallpaperOnce, syncWallpaperRotation, clockId: () => CLOCK_ELEMENT_ID, bodyList: () => document.body.children.map(child => child.tagName + '#' + child.id).join(','), appendStray: (id) => { const made = document.createElement('div'); made.id = id; document.body.appendChild(made); return document.body.children.length; } };`);
 
 /** Hook slots reused across one render pass, mirroring React's call order. */
 let hookSlots = [];
@@ -118,6 +118,61 @@ function runEffect(effect, deps) {
   effects.push(slot);
 }
 
+/**
+ * Run `fn` with a fresh hook-slot array, then put the caller's slots back.
+ *
+ * The harness keeps ONE slot array for «whatever is rendering», the way React keeps one per
+ * component instance. A test that renders a second component (the preview block, which is a real
+ * component now) and leaves its slots in place makes the next row render read the wrong state —
+ * a corruption that looks exactly like a product bug. Renders that need to share state across
+ * calls go in the SAME `fn`, which is what one component instance is.
+ * @param fn - the render work.
+ * @returns whatever `fn` returns.
+ */
+function withFreshSlots(fn) {
+  const saved = hookSlots.splice(0, hookSlots.length);
+  hookIndex = 0;
+  try {
+    return fn();
+  }
+  finally {
+    hookSlots.splice(0, hookSlots.length);
+    for (const slot of saved) hookSlots.push(slot);
+    hookIndex = 0;
+  }
+}
+
+/**
+ * A component "instance" for tests: its own hook-slot array, swapped in on demand.
+ *
+ * `useState`'s setter writes into the CURRENT slot array, so a test cannot render a component,
+ * swap its slots out, click one of its buttons, and expect the click to land — it would write
+ * into whatever component is mounted at that moment. Everything that touches the component
+ * (render, click, key) therefore goes through `act`.
+ * @param render - `(props) => element` for the component.
+ * @returns `{ render, act }`.
+ */
+function componentIsland(render) {
+  let slots = [];
+  const run = (fn) => {
+    const saved = hookSlots.splice(0, hookSlots.length);
+    for (const slot of slots) hookSlots.push(slot);
+    hookIndex = 0;
+    try {
+      return fn();
+    }
+    finally {
+      slots = hookSlots.splice(0, hookSlots.length);
+      for (const slot of saved) hookSlots.push(slot);
+      hookIndex = 0;
+    }
+  };
+  return {
+    render: (props) => run(() => render(props)),
+    act: (fn) => run(fn),
+  };
+}
+
 const fakeReact = {
   useState(initial) {
     const index = beginHook();
@@ -127,6 +182,28 @@ const fakeReact = {
     }];
   },
   useEffect: runEffect,
+  /**
+   * `useMemo`, with React's own caching rule: recompute only when the deps array changed.
+   *
+   * Not just `factory()`: the preview block's whole "don't recompute the model on every keystroke"
+   * contract is this hook, and an uncached double would hide a broken deps array by recomputing
+   * anyway. Cached, a wrong deps array shows up as a stale model — which is a visible failure.
+   * @param factory - the computation.
+   * @param deps - the dependency array.
+   * @returns the cached or fresh value.
+   */
+  useMemo(factory, deps) {
+    const index = beginHook();
+    const slot = hookSlots[index] ?? { value: undefined, deps: undefined, ran: false };
+    slot.hit = slot.ran === true && sameDeps(slot.deps, deps);
+    if (!slot.hit) {
+      slot.value = factory();
+      slot.deps = deps;
+      slot.ran = true;
+    }
+    hookSlots[index] = slot;
+    return slot.value;
+  },
   useRef(value) {
     const index = beginHook();
     if (hookSlots[index] === undefined) hookSlots[index] = { current: value };
@@ -1428,9 +1505,10 @@ async function main() {
     'and every value field is named',
   );
 
-  // 预览画布：样本坐在一块画布里（可拖动、右下角归位、背景可选）。拖动本身是纯函数 +
-  // 直接写 DOM（见 canvasTranslate / canvasDragTo 的注释），这里只钉住三件在渲染层就能看出来的事。
+  // 预览块：现在是一个**组件**（PreviewBlock），状态与绘制都在它里面。测试床不展开函数组件，
+  // 所以这里按它的 props 直接渲染 —— 那正是 React 要做的事，只是这里手动做一次。
   {
+    const probe = host.mod.__probe;
     const byClass = (view, wanted) => {
       const found = [];
       (function walk(current) {
@@ -1440,32 +1518,42 @@ async function main() {
       })(view);
       return found;
     };
-    const canvasNodes = byClass(panelView, 'dshCc_canvas');
+    const previewElement = findNode(panelView, probe.PreviewBlock);
+    assert.ok(previewElement !== null,
+      'the panel asks for the preview block — the panel only hands it data, the block owns its state');
+    // 两次渲染共用一套槽位 = 同一个组件实例（「拖过之后归位可点」要靠 state 保留）。
+    withFreshSlots(() => {
+    const preview = probe.PreviewBlock(previewElement.props);
+    const canvasNodes = byClass(preview, 'dshCc_canvas');
     assert.strictEqual(canvasNodes.length, 1, 'the preview has exactly one canvas — got: ' + canvasNodes.length);
     const canvasNode = canvasNodes[0];
     assert.strictEqual(canvasNode.props['data-canvas'], 'page', 'and it starts on the page background (the preview looks like it always did)');
-    const resetBtns = byClass(panelView, 'dshCc_canvasReset');
-    assert.strictEqual(resetBtns.length, 1, 'with a reset control in its corner — got: ' + resetBtns.length);
-    assert.strictEqual(textOf(resetBtns[0]), '归位', 'labelled 归位');
-    assert.strictEqual(typeof resetBtns[0].props.onClick, 'function', 'that does something when clicked');
+    const resetButtons = [];
+    (function walk(current) {
+      if (current === null || typeof current !== 'object') return;
+      if (current.type === 'button' && current.props?.['aria-label'] === '归位') resetButtons.push(current);
+      for (const child of current.children ?? []) walk(child);
+    })(preview);
+    assert.strictEqual(resetButtons.length, 1, 'with a reset control in its corner — got: ' + resetButtons.length);
+    assert.strictEqual(typeof resetButtons[0].props.onClick, 'function', 'that does something when clicked');
     // 键盘：画布可聚焦、方向键能挪（拖动之外的第二条路）。
     assert.strictEqual(canvasNode.props.tabIndex, 0, 'the canvas can take focus');
     assert.strictEqual(typeof canvasNode.props.onKeyDown, 'function', 'and handles arrow keys');
     // 没拖过时归位是禁用的：一颗「点了也不会变」的按钮比没有更让人困惑。
-    assert.strictEqual(resetBtns[0].props.disabled, true, 'reset starts disabled because nothing has moved yet');
-    // 常驻那一排：状态芯片在这里（命中只有 1 个，所以没有游标、也没有卡片）。
-    // 三层排布（卡片 / 芯片 / 演示中）换成一层这件事，就从这里钉住。
-    const picks = byClass(panelView, 'dshCc_previewPicks');
-    assert.strictEqual(picks.length, 1, 'the preview keeps exactly one persistent picks row — got: ' + picks.length);
-    assert.ok(
-      (picks[0].children ?? []).some(child => String(child?.props?.className ?? '') === 'dshCc_stateChips'),
-      'with the state chips inside it',
-    );
+    assert.strictEqual(resetButtons[0].props.disabled, true, 'reset starts disabled because nothing has moved yet');
+    // 工具条里的控件全部来自组件库：分段（视图）+ 28px 按钮 + 28px 下拉。
+    // 这一条是 v4 的核心要求（docs/preview-v4.md §4）——不给预览块留一套自绘控件。
+    const bar = byClass(preview, 'dshCc_previewBar');
+    assert.strictEqual(bar.length, 1, 'one toolbar row — got: ' + bar.length);
+    const barClasses = (bar[0].children ?? []).map(child => String(child?.props?.className ?? ''));
+    assert.ok(barClasses.some(name => name.includes('dshUi_segments')), 'with the view segmented control — got: ' + JSON.stringify(barClasses));
+    assert.ok(barClasses.some(name => name.includes('dshUi_button')), 'and kit buttons');
+    // 这条规则的选择器里没有状态伪类 → 芯片一个都不出现（见 previewChipsFor）。
+    assert.strictEqual(byClass(preview, 'dshCc_stateChips').length, 0, 'no chips for a rule without a state pseudo');
     // 干净的样本没有提示区：漏报比误报重要，这一块不该空着占位。
-    assert.strictEqual(byClass(panelView, 'dshCc_previewHints').length, 0, 'a clean sample shows no hints block');
+    assert.strictEqual(byClass(preview, 'dshCc_previewHints').length, 0, 'a clean sample shows no hints block');
     // 拖动一次不该抛：ref 在测试床里是空的（假 React 不挂 DOM），所以这条同时钉住「形状变了也
     // 不能让面板崩」—— 面板一崩，整行的预览就没了。
-    // 指针现在必须落在**某个窗格**上（左右分开拖），所以事件得带上一个 `closest` 能认的盒子。
     assert.strictEqual(typeof canvasNode.props.onPointerDown, 'function', 'the canvas takes a pointerdown');
     const fakePane = { dataset: { pane: 'modified' } };
     // 假 target 要按选择器回答：`closest('.dshCc_canvasReset')` 必须给 null，否则会被当成「按在归位上」。
@@ -1486,10 +1574,10 @@ async function main() {
     assert.ok(true, 'pressing the padding does not throw either');
     // 拖过之后，同一颗按钮要变成可点 —— 这条钉的是「拖动状态确实传到了渲染层」。
     hookIndex = 0;
-    const dragged = panelRoot(renderRow());
+    const dragged = probe.PreviewBlock(previewElement.props);
     const resetAfterDrag = (function find(node) {
       if (node === null || typeof node !== 'object') return null;
-      if (String(node.props?.className ?? '') === 'dshCc_canvasReset') return node;
+      if (node.type === 'button' && node.props?.['aria-label'] === '归位') return node;
       for (const child of node.children ?? []) {
         const hit = find(child);
         if (hit !== null) return hit;
@@ -1500,6 +1588,7 @@ async function main() {
     assert.strictEqual(resetAfterDrag.props.disabled, false, 'after a drag, 归位 becomes clickable');
     resetAfterDrag.props.onClick();
     assert.ok(true, 'and resetting from there does not throw');
+    });
   }
 
   // The add-property control sits below the declarations grid: after reading the
@@ -5309,6 +5398,79 @@ const injected = { textContent: ownSheet };
     'and so does the gutter',
   );
 
+  // --- 拾取之后把设置拉回来（openSettingsSurface）------------------------
+  // 真机复现过的那条：拾取时点到设置对话框外面 → 对话框关掉、行被卸载；再点「插入规则」，
+  // 规则写进去了，但什么都没回来 —— 面板自然也不会出现（也就是「拾取之后面板不自动打开」）。
+  // 根因不是拾取，而是「重新打开设置」的找法：这一代 DSH 的侧栏入口在一个
+  // `data-slot="sidebar.settings"` 的包装里（盒子 0×0、文字写着「更多」），名字叫「设置」的
+  // 按钮根本不存在；而且旧实现点一下就当成功了，从没回头看过结果。
+  {
+    const double = (tagName, props = {}) => {
+      const node = {
+        tagName,
+        className: props.className ?? '',
+        children: [],
+        parentElement: null,
+        attributes: props.attributes ?? {},
+        style: {},
+        dataset: {},
+        rect: props.rect ?? { width: 120, height: 32, top: 0, left: 0 },
+        getAttribute(name) { return name in node.attributes ? node.attributes[name] : null; },
+        setAttribute(name, value) { node.attributes[name] = String(value); },
+        getBoundingClientRect() { return node.rect; },
+        closest() { return null; },
+        appendChild(child) { child.parentElement = node; node.children.push(child); return child; },
+        querySelectorAll(selector) {
+          const found = [];
+          const walk = (current) => {
+            for (const child of current.children ?? []) {
+              if (matchesSelector(child, selector)) found.push(child);
+              walk(child);
+            }
+          };
+          walk(node);
+          return found;
+        },
+        click() { if (typeof props.onClick === 'function') props.onClick(); },
+      };
+      return node;
+    };
+    const bootWith = async (nodes) => boot({
+      dom: { nodes },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.x{color:red}' });
+        if (url.endsWith('/write')) return jsonResponse({ ok: true, name: 'custom.css', bytes: 1 });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+
+    // ① 侧栏 slot 里的入口：点开它就出现一行。
+    const slotNodes = [];
+    const slotHost = double('div', { attributes: { 'data-slot': 'sidebar.settings' } });
+    slotHost.appendChild(double('button', { onClick: () => { slotNodes.push(double('div', { className: 'dshCc_row' })); } }));
+    slotNodes.push(slotHost);
+    const slotBoot = await bootWith(slotNodes);
+    assert.strictEqual(
+      await slotBoot.mod.__probe.openSettingsSurface(), true,
+      'the sidebar slot entry is clicked, and the row it opens is detected',
+    );
+
+    // ② 名字就叫「设置」的控件：同样要能开。
+    const namedNodes = [];
+    namedNodes.push(double('button', {
+      attributes: { 'aria-label': '设置' },
+      onClick: () => { namedNodes.push(double('div', { className: 'dshCc_row' })); },
+    }));
+    const namedBoot = await bootWith(namedNodes);
+    assert.strictEqual(await namedBoot.mod.__probe.openSettingsSurface(), true, 'a control named 设置 is clicked too');
+
+    // ③ 一条入口都没有：返回 false，不抛（测试床没有 KeyboardEvent，这一步必须自己兜住）。
+    const emptyBoot = await bootWith([]);
+    assert.strictEqual(await emptyBoot.mod.__probe.openSettingsSurface(), false,
+      'nothing to click and no shortcut support: it reports "not reopened" instead of throwing');
+  }
+
   // --- a pick taken mid-debounce must still report "已保存" -----------------
   // The picker takes this row's pending debounced write out of the way before it writes
   // through: without that, the stale text fires after the pick and puts the old sheet
@@ -5774,20 +5936,37 @@ const injected = { textContent: ownSheet };
   // 规则面板：点高亮层里的选择器（假 React 不渲染 dangerouslySetInnerHTML，直接调 onClick）
   findNode(renderEnglish(), 'pre').props.onClick({ target: { getAttribute: () => '0' } });
   sweep('rule panel');
-  // 全屏视图（原生 dialog 里的文案也要扫）
-  buttonWith(renderEnglish(), 'Full screen').props.onClick();
-  const fullTree = renderEnglish();
-  sweep('full screen');
-  const leaveFull = (function find(node) {
+  // 全屏视图（原生 dialog 里的文案也要扫）。
+  // 预览块是组件：它的工具条与 dialog 都在它自己的树里，所以要在它自己的槽位里渲染。
+  const previewSlots = [];
+  const renderPreview = (view) => {
+    const element = findNode(view, sweepHost.mod.__probe.PreviewBlock);
+    if (element === null) return null;
+    const rowSlots = hookSlots.splice(0, hookSlots.length);
+    for (const slot of previewSlots) hookSlots.push(slot);
+    hookIndex = 0;
+    const tree = sweepHost.mod.__probe.PreviewBlock(element.props);
+    previewSlots.length = 0;
+    for (const slot of hookSlots.splice(0, hookSlots.length)) previewSlots.push(slot);
+    for (const slot of rowSlots) hookSlots.push(slot);
+    hookIndex = 0;
+    return tree;
+  };
+  const findButtonNamed = (root, label) => (function find(node) {
     if (node === null || typeof node !== 'object') return null;
-    if (node.type === 'button' && node.props?.['aria-label'] === 'Leave full screen') return node;
+    if (node.type === 'button' && node.props?.['aria-label'] === label) return node;
     for (const child of node.children ?? []) {
       const hit = find(child);
       if (hit !== null) return hit;
     }
     return null;
-  })(fullTree);
+  })(root);
+  findButtonNamed(renderPreview(renderEnglish()), 'Full screen').props.onClick();
+  const fullTree = renderPreview(renderEnglish());
+  sweep('full screen');
+  const leaveFull = findButtonNamed(fullTree, 'Leave full screen');
   if (leaveFull !== null) leaveFull.props.onClick();
+  renderPreview(renderEnglish());
   // 令牌页（更多操作 → 令牌）
   buttonWith(renderEnglish(), 'Back').props.onClick();
   buttonWith(renderEnglish(), 'Tokens').props.onClick();
@@ -5845,71 +6024,82 @@ const injected = { textContent: ownSheet };
     renderedText.length = 0;
     renderedClasses.length = 0;
     const previewRow = previewHost.registrations[0].component();
-    assert.ok(!renderedClasses.includes('dshCc_preview'), 'no preview block while no rule is open');
+    assert.strictEqual(findNode(previewRow, previewHost.mod.__probe.PreviewBlock), null,
+      'no preview block while no rule is open');
     findNode(previewRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
     hookIndex = 0;
     renderedText.length = 0;
     renderedClasses.length = 0;
     const previewPanel = previewHost.registrations[0].component();
-    assert.ok(renderedClasses.includes('dshCc_preview'), 'opening a rule brings the preview block — classes: ' + JSON.stringify(renderedClasses.slice(0, 40)));
-    // 三个按钮，顺序：全屏 / 对比 / 列表。前两个之外的两个这一版只占位。
-    assert.ok(renderedText.includes('全屏') && renderedText.includes('对比') && renderedText.includes('列表'),
-      'three buttons — got: ' + JSON.stringify(renderedText.slice(0, 12)));
-    const previewButtons = [];
-    (function collect(node) {
-      if (node === null || typeof node !== 'object') return;
-      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshCc_hlToggle')) previewButtons.push(node);
-      for (const child of node.children ?? []) collect(child);
-    })(previewPanel);
-    const fullButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('全屏'));
-    const listButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('列表'));
-    assert.ok(fullButton?.props.disabled !== true, 'the full-screen button works now');
-    assert.ok(
-      String(fullButton?.props.title ?? '').includes('全屏'),
-      'and its tooltip says what it opens — got: ' + JSON.stringify(fullButton?.props.title),
-    );
-    // 列表（卡片导航）现在是真的：点一下出一排卡，一张对应一个命中元素。
-    assert.ok(listButton?.props.disabled !== true, 'the list button works now');
-    listButton.props.onClick();
-    hookIndex = 0;
-    renderedText.length = 0;
-    renderedClasses.length = 0;
-    // 这一次渲染的树留着：再调一次 component() 而不重置 hookIndex，状态槽会错位（卡片就不见了）。
-    const withCards = previewHost.registrations[0].component();
-    assert.ok(renderedClasses.includes('dshCc_sampleCards'), 'the list button opens card navigation');
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('· 1/1')),
-      'one card per match, labelled with its type and position — got: ' + JSON.stringify(renderedText.slice(0, 12)),
-    );
-    // 点卡片：选中态换到那一张，预览跟着换（只有一个命中时仍是第一张）。
-    const cards = [];
-    (function collectCards(node) {
-      if (node === null || typeof node !== 'object') return;
-      if (node.type === 'button' && String(node.props?.className ?? '').includes('dshCc_hlToggle') && String(node.props?.title ?? '') !== '') cards.push(node);
-      for (const child of node.children ?? []) collectCards(child);
-    })(withCards);
-    assert.ok(cards.length >= 1, 'the card is a button');
-    // 回到单屏 / 对比：卡片排仍然在，因为它是一个开关而不是第三种模式。
-    const compareFromCards = cards.find(node => JSON.stringify(node.children ?? []).includes('对比'));
-    assert.ok(compareFromCards !== undefined, 'the compare button is still reachable with cards open');
+    assert.ok(findNode(previewPanel, previewHost.mod.__probe.PreviewBlock) !== null,
+      'opening a rule brings the preview block — the panel hands it data and nothing else');
+
+    // 预览块是一个组件：它有自己的状态槽（同一实例跨多次渲染保留），所以这里按实例渲染。
+    const island = componentIsland((props) => previewHost.mod.__probe.PreviewBlock(props));
+    const renderPreview = (view) => {
+      const element = findNode(view, previewHost.mod.__probe.PreviewBlock);
+      return element === null ? null : island.render(element.props);
+    };
+    const byClass = (view, wanted) => {
+      const found = [];
+      (function walk(current) {
+        if (current === null || typeof current !== 'object') return;
+        if (String(current.props?.className ?? '') === wanted) found.push(current);
+        for (const child of current.children ?? []) walk(child);
+      })(view);
+      return found;
+    };
+    const allText = (view) => {
+      const out = [];
+      (function walk(current) {
+        if (current === null || typeof current !== 'object') return;
+        for (const child of current.children ?? []) {
+          if (typeof child === 'string') out.push(child);
+          else walk(child);
+        }
+      })(view);
+      return out;
+    };
+    const buttonWithText = (view, label) => {
+      let found = null;
+      (function walk(current) {
+        if (found !== null || current === null || typeof current !== 'object') return;
+        if (current.type === 'button' && JSON.stringify(current.children ?? []).includes(label)) found = current;
+        for (const child of current.children ?? []) walk(child);
+      })(view);
+      return found;
+    };
+    const buttonWithAria = (view, label) => {
+      let found = null;
+      (function walk(current) {
+        if (found !== null || current === null || typeof current !== 'object') return;
+        if (current.type === 'button' && current.props?.['aria-label'] === label) found = current;
+        for (const child of current.children ?? []) walk(child);
+      })(view);
+      return found;
+    };
+
+    let preview = renderPreview(previewPanel);
+    assert.strictEqual(byClass(preview, 'dshCc_previewBar').length, 1, 'the block has one toolbar row');
+    assert.ok(allText(preview).includes('单屏') && allText(preview).includes('对比'),
+      'with the view segmented control — got: ' + JSON.stringify(allText(preview).slice(0, 8)));
+    const fullButton = buttonWithAria(preview, '全屏');
+    assert.ok(fullButton !== null, 'and a full-screen button');
+    assert.ok(String(fullButton.props.title ?? '').includes('全屏'),
+      'whose tooltip says what it opens — got: ' + JSON.stringify(fullButton.props.title));
     // 单屏：只有「修改后」一块。
-    assert.ok(renderedClasses.includes('dshCc_previewAfter'), 'single-screen shows the modified sample');
-    assert.ok(!renderedClasses.includes('dshCc_previewCurrent'), 'and not the current one');
-    assert.ok(renderedText.includes('当前') === false, 'no current label in single-screen mode');
-    // 点对比：左边多出「当前」那一块。
-    const compareButton = previewButtons.find(node => JSON.stringify(node.children ?? []).includes('对比'));
-    assert.ok(compareButton !== undefined, 'the compare button exists');
-    compareButton.props.onClick();
-    hookIndex = 0;
-    renderedText.length = 0;
-    renderedClasses.length = 0;
-    previewHost.registrations[0].component();
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('还没改动')),
-      'compare mode on an unchanged rule says so instead of showing an empty box — got: '
-        + JSON.stringify(renderedText.slice(-5)),
-    );
-    assert.ok(renderedText.includes('当前') && renderedText.includes('修改后'), 'with both labels');
+    assert.ok(byClass(preview, 'dshCc_previewAfter').length === 1, 'single-screen shows the modified sample');
+    assert.strictEqual(byClass(preview, 'dshCc_previewCurrent').length, 0, 'and not the current one');
+    assert.ok(!allText(preview).includes('当前'), 'no current label in single-screen mode');
+    // 口径说明一直在：预览的价值取决于它说的这句实话。
+    assert.ok(allText(preview).some(text => text.includes('冻结')), 'the freeze caveat is always shown');
+
+    // 点对比：左边多出「当前」那一块；还没改过时说清楚，而不是摆一个空盒子。
+    island.act(() => buttonWithText(preview, '对比').props.onClick());
+    preview = renderPreview(previewPanel);
+    assert.ok(allText(preview).includes('当前') && allText(preview).includes('修改后'), 'with both labels');
+    assert.ok(allText(preview).some(text => text.includes('还没改动')),
+      'compare mode on an unchanged rule says so — got: ' + JSON.stringify(allText(preview).slice(-5)));
     // 改一行之后再比：左边那块才真的出现（它代表「打开时」的样子）。
     hookIndex = 0;
     findNode(previewHost.registrations[0].component(), 'textarea').props.onChange({
@@ -5917,20 +6107,10 @@ const injected = { textContent: ownSheet };
       nativeEvent: { inputType: 'insertText' },
     });
     hookIndex = 0;
-    renderedText.length = 0;
-    renderedClasses.length = 0;
-    previewHost.registrations[0].component();
-    assert.ok(renderedClasses.includes('dshCc_previewCurrent'), 'after an edit the current sample appears');
-    assert.ok(
-      !renderedText.some(text => typeof text === 'string' && text.includes('还没改动')),
-      'and the "nothing changed" note is gone',
-    );
-    assert.ok(compareButton.props['aria-pressed'] === false, 'the button reports the state it started in');
-    // 口径说明一直在：预览的价值取决于它说的这句实话。
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('冻结')),
-      'the freeze caveat is always shown — got: ' + JSON.stringify(renderedText.slice(-4)),
-    );
+    const editedPanel = previewHost.registrations[0].component();
+    preview = renderPreview(editedPanel);
+    assert.strictEqual(byClass(preview, 'dshCc_previewCurrent').length, 1, 'after an edit the current sample appears');
+    assert.ok(!allText(preview).some(text => text.includes('还没改动')), 'and the "nothing changed" note is gone');
   }
 
   // --- 预览块：状态芯片 / 合成样本 / 全屏视图 --------------------------------
@@ -5972,7 +6152,7 @@ const injected = { textContent: ownSheet };
       },
       fetchImpl: async (url) => {
         if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
-        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }\n.card:hover { color: blue; }' });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }\n.card:hover { color: blue; }\n.card::before { content: "→"; }' });
         if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
         throw new Error('unexpected request: ' + url);
       },
@@ -5992,108 +6172,94 @@ const injected = { textContent: ownSheet };
     const buttonsByAria = (root) => nodesMatching(root, node => node.type === 'button' && typeof node.props?.['aria-label'] === 'string')
       .map(node => ({ label: node.props['aria-label'], node }));
 
-    // 打开规则，并把面板容器换成两个假盒子：effect 会往它们里面放样本。
-    hookIndex = 0;
-    const chipRow = chipHost.registrations[0].component();
-    findNode(chipRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
-    const boxes = [fakeElement('dshCc_previewAfter'), fakeElement('dshCc_previewCurrent')];
-    const fakePanel = { querySelectorAll: () => boxes };
-    hookIndex = 0;
-    renderedText.length = 0;
-    renderedClasses.length = 0;
-    const chipPanel = chipHost.registrations[0].component();
-    findByClass(chipPanel, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    await chipHost.runEffects();
-    await settle();
+    const island = componentIsland((props) => chipHost.mod.__probe.PreviewBlock(props));
+    const previewOf = (view) => {
+      const element = findNode(view, chipHost.mod.__probe.PreviewBlock);
+      return element === null ? null : island.render(element.props);
+    };
+    const findNodesByClass = (view, cls) => findByClass(view, cls);
+    const chipLabelsOf = (view) => buttonsByAria(view)
+      .map(entry => entry.label)
+      .filter(label => ['悬停', '聚焦', '占位符', '::before', '::after'].includes(label));
+    const buttonByLabel = (view, label) => buttonsByAria(view).find(entry => entry.label === label).node;
+    const buttonWithTextIn = (view, label) => nodesMatching(view, node => node.type === 'button'
+      && JSON.stringify(node.children ?? []).includes(label))[0];
+    // 打开一条规则再渲染面板：`openRule` 只负责点那条规则的 <pre>，返回新面板的树。
+    let chipPanel = null;
+    const openRule = (view, index) => {
+      const tree = chipHost.registrations[0].component();
+      findNode(tree, 'pre').props.onClick({ target: { getAttribute: () => String(index) } });
+      hookIndex = 0;
+      return chipHost.registrations[0].component();
+    };
 
-    assert.ok(renderedClasses.includes('dshCc_stateChips'), 'chips show in single-screen mode');
-    const chipLabels = buttonsByAria(chipPanel).map(entry => entry.label);
-    for (const label of ['悬停', '聚焦', '占位符', '::before', '::after']) {
-      assert.ok(chipLabels.includes(label), 'chip ' + label + ' is offered — got: ' + JSON.stringify(chipLabels));
-    }
-    // 悬停：真页面上加类 + 注入强制表。
-    buttonsByAria(chipPanel).find(entry => entry.label === '悬停').node.props.onClick();
+    // 规则 0 是 .card：选择器里没有任何状态伪类 —— 芯片一个都不出现。
+    // 以前它照样摆五枚，其中四枚点下去是空操作（临时表注入了，但改写后的选择器根本不存在）。
+    const cardPanel = openRule(null, 0);
+    let preview = previewOf(cardPanel);
+    assert.deepStrictEqual(chipLabelsOf(preview), [],
+      'and none of the five chips is rendered — got: ' + JSON.stringify(chipLabelsOf(preview)));
+
+    // 规则 1 是 .card:hover：芯片**只**有它真有的那个状态。
+    const hoverPanel = openRule(null, 1);
+    preview = previewOf(hoverPanel);
+    assert.strictEqual(chipLabelsOf(preview).length, 1, 'the toolbar carries one chip for this rule');
+    assert.deepStrictEqual(chipLabelsOf(preview), ['悬停'],
+      'and only the states this selector really has — got: ' + JSON.stringify(chipLabelsOf(preview)));
+    // 悬停：真页面上加类 + 注入强制表，选择器被改写成状态类。
+    island.act(() => buttonByLabel(preview, '悬停').props.onClick());
+    preview = previewOf(hoverPanel);
+    await chipHost.runEffects();
     const forceTag = chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force');
     assert.ok(forceTag !== undefined, 'the hover chip injects the force sheet');
-    assert.ok(
-      String(forceTag.textContent).includes('color: red'),
-      'carrying the rule body — got: ' + String(forceTag.textContent),
-    );
-    assert.ok(
-      String(card.className).includes('dshCcStateHover'),
-      'and the target element carries it — got: ' + card.className,
-    );
-    // ::before：不改页面，往样本里合成一个 span。
-    hookIndex = 0;
-    const pseudoTree = chipHost.registrations[0].component();
-    findByClass(pseudoTree, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    buttonsByAria(pseudoTree).find(entry => entry.label === '::before').node.props.onClick();
-    hookIndex = 0;
-    renderedText.length = 0;
-    const pseudoPainted = chipHost.registrations[0].component();
-    findByClass(pseudoPainted, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    await chipHost.runEffects();
-    await settle();
-    assert.ok(boxes[0].children.length >= 1, 'a sample was painted into the box');
-    const paintedClone = boxes[0].children[0];
-    assert.ok(
-      String(paintedClone.style.cssText ?? '').includes('rgb(255, 0, 0)'),
-      'the clone carries the frozen computed style — got: ' + String(paintedClone.style.cssText).slice(0, 80),
-    );
-    assert.ok(
-      (paintedClone.children ?? []).some(child => String(child.className).includes('dshCc_samplePseudo')),
-      'and the ::before content is synthesised into it — clone: ' + JSON.stringify({ cls: paintedClone.className, kids: (paintedClone.children ?? []).map(child => child.className), boxes: boxes.map(box => box.children.length) }),
-    );
-
-    // 第二条规则的选择器里有 :hover：把它打开、再点悬停，强制表里应该是**改写过的**选择器。
-    hookIndex = 0;
-    const rewriteTree = chipHost.registrations[0].component();
-    findByClass(rewriteTree, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    findNode(rewriteTree, 'pre').props.onClick({ target: { getAttribute: () => '1' } });
-    hookIndex = 0;
-    const rewritePanel = chipHost.registrations[0].component();
-    findByClass(rewritePanel, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    buttonsByAria(rewritePanel).find(entry => entry.label === '悬停').node.props.onClick();
-    const rewriteTag = chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force');
-    assert.ok(rewriteTag !== undefined, 'the sheet is injected for the :hover rule too');
-    assert.ok(
-      String(rewriteTag.textContent).includes('.dshCcStateHover'),
-      'and its selector was rewritten — got: ' + String(rewriteTag.textContent),
-    );
-    assert.ok(renderedText.some(text => typeof text === 'string' && text.includes('演示中'))
-      || true, 'the demoting marker is rendered by the next pass');
+    assert.ok(String(forceTag.textContent).includes('color: blue'),
+      'carrying the rule body — got: ' + String(forceTag.textContent));
+    assert.ok(String(forceTag.textContent).includes('.dshCcStateHover'),
+      'and its selector was rewritten — got: ' + String(forceTag.textContent));
+    assert.ok(String(card.className).includes('dshCcStateHover'),
+      'and the target element carries it — got: ' + card.className);
     // 关掉：表和类都撤掉，页面上不留痕迹。
-    hookIndex = 0;
-    const chipOff = chipHost.registrations[0].component();
-    findByClass(chipOff, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    buttonsByAria(chipOff).find(entry => entry.label === '悬停').node.props.onClick();
-    assert.strictEqual(
-      chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force'),
-      undefined,
-      'turning the chip off removes the force sheet',
-    );
+    preview = previewOf(hoverPanel);
+    island.act(() => buttonByLabel(preview, '悬停').props.onClick());
+    preview = previewOf(hoverPanel);
+    await chipHost.runEffects();
+    assert.strictEqual(chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force'), undefined,
+      'turning the chip off removes the force sheet');
     assert.ok(!String(card.className).includes('dshCcStateHover'), 'and the class — got: ' + card.className);
 
-    // 对比模式：芯片隐藏（左右会被强制态一起污染）。
-    hookIndex = 0;
-    const compareChips = chipHost.registrations[0].component();
-    findByClass(compareChips, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    buttonsByAria(compareChips).find(entry => entry.label === '对比').node.props.onClick();
-    hookIndex = 0;
-    renderedClasses.length = 0;
-    const hiddenChips = chipHost.registrations[0].component();
-    findByClass(hiddenChips, 'dshCc_row')[0].props.ref.current = { querySelector: () => fakePanel };
-    assert.ok(!renderedClasses.includes('dshCc_stateChips'), 'chips are hidden in compare mode');
+    // 对比模式：芯片隐藏（左右会被强制态一起污染），而切过去时强制态本身也要撤掉。
+    preview = previewOf(hoverPanel);
+    island.act(() => buttonByLabel(preview, '悬停').props.onClick());
+    preview = previewOf(hoverPanel);
+    await chipHost.runEffects();
+    island.act(() => buttonWithTextIn(preview, '对比').props.onClick());
+    preview = previewOf(hoverPanel);
+    await chipHost.runEffects();
+    assert.deepStrictEqual(chipLabelsOf(preview), [], 'chips are hidden in compare mode');
+    assert.strictEqual(chipHost.styleTags.find(element => element.id === 'dsh-custom-css-preview-force'), undefined,
+      'and the forced state is cleared when the comparison needs a clean left pane');
+
+    // 规则 2 是 .card::before：伪元素规则预览的是**宿主元素**（::before 以前让整条规则掉进
+    // 合成样本分支），芯片只有 ::before。视图是「看的时候的偏好」，换规则不重置 —— 先切回单屏。
+    const pseudoPanel = openRule(null, 2);
+    preview = previewOf(pseudoPanel);
+    island.act(() => buttonWithTextIn(preview, '单屏').props.onClick());
+    preview = previewOf(pseudoPanel);
+    assert.deepStrictEqual(chipLabelsOf(preview), ['::before'],
+      'a pseudo-element rule offers only that pseudo-element chip — got: ' + JSON.stringify(chipLabelsOf(preview)));
   }
 
-  // --- 合成样本：规则命中 0 个 ------------------------------------------------
+  // --- 绘制：合成样本与真样本（paintModelInto 直接驱动）---------------------
+  // 绘制这一层只碰 DOM、不碰 React（组件只负责「什么时候画」），所以测试可以自己造假盒子。
   {
-    const fakeElement = (className) => {
+    const probe = host.mod.__probe;
+    const box = (className) => {
       const node = {
         className,
         children: [],
         text: undefined,
         style: {},
+        dataset: {},
         get textContent() {
           return node.text !== undefined ? node.text : node.children.map(child => child.textContent ?? '').join('');
         },
@@ -6104,50 +6270,96 @@ const injected = { textContent: ownSheet };
         appendChild(child) { node.children.push(child); return child; },
         insertBefore(child) { node.children.unshift(child); return child; },
         removeAttribute() {},
-        cloneNode() { return fakeElement(className); },
+        cloneNode() { return box(className); },
       };
       return node;
     };
-    const emptyHost = await boot({
+    // 真样本要被克隆，所以池子里的节点要带 cloneNode（测试床的通用 double 没有）。
+    const makePageNode = (className) => {
+      const node = {
+        tagName: 'DIV',
+        className,
+        children: [],
+        style: {},
+        attributes: {},
+        appendChild(child) { node.children.push(child); return child; },
+        insertBefore(child) { node.children.unshift(child); return child; },
+        removeAttribute(name) { delete node.attributes[name]; },
+        cloneNode() { return makePageNode(className); },
+        matches: (selector) => matchesSelector(node, selector),
+      };
+      return node;
+    };
+    const host4 = await boot({
+      dom: {
+        nodes: [makePageNode('card')],
+        computed: () => ({
+          length: 2,
+          0: 'color',
+          1: 'content',
+          getPropertyValue: name => (name === 'content' ? '"→"' : 'rgb(255, 0, 0)'),
+        }),
+      },
       fetchImpl: async (url) => {
         if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 30, mtime: 1 }], active: 'custom.css', disabled: [] });
-        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.nowhere { background: red; border-radius: 8px; }' });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }\n.nowhere { background: red; }' });
         if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
         throw new Error('unexpected request: ' + url);
       },
     });
-    hookIndex = 0;
-    const emptyRow = emptyHost.registrations[0].component();
-    findNode(emptyRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
-    const boxes = [fakeElement('dshCc_previewAfter'), fakeElement('dshCc_previewCurrent')];
-    const fakePanel = { querySelectorAll: () => boxes };
-    hookIndex = 0;
-    renderedText.length = 0;
-    const emptyPanel = emptyHost.registrations[0].component();
-    const rowNode = (function find(node) {
-      if (node === null || typeof node !== 'object') return null;
-      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
-      for (const child of node.children ?? []) {
-        const hit = find(child);
-        if (hit !== null) return hit;
-      }
-      return null;
-    })(emptyPanel);
-    rowNode.props.ref.current = { querySelector: () => fakePanel };
-    await emptyHost.runEffects();
-    await settle();
-    assert.ok(boxes[0].children.length >= 1, 'a synthetic sample was painted');
-    assert.ok(
-      String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
-      'and it is marked as synthetic — got: ' + String(boxes[0].children[0].className),
-    );
-    assert.ok(
-      String(boxes[0].children[0].textContent ?? boxes[0].children[0].text ?? '').includes('合成样本'),
-      'with a label saying it is not on the page',
-    );
+    const probe4 = host4.mod.__probe;
+    const boxes = [box('dshCc_previewAfter'), box('dshCc_previewCurrent')];
+    const root = {
+      querySelectorAll: (selector) => (String(selector).includes('dshCc_canvas') ? [] : boxes),
+    };
+
+    // a) 命中 0 个：合成样本，并**明确标注**它不是页面上的元素。
+    const nowhereCss = '.nowhere { background: red; border-radius: 8px; }';
+    // 合成样本用的是规则**自己的声明**，所以 rule 要带上正文偏移（面板里那份是 parseRules 给的）。
+    const nowhereRule = { selector: '.nowhere', bodyStart: nowhereCss.indexOf('{') + 1, bodyEnd: nowhereCss.indexOf('}') };
+    const syntheticModel = probe4.previewModel({
+      rule: nowhereRule,
+      css: nowhereCss,
+      baselineCss: nowhereCss,
+      index: 0,
+      exclusions: [],
+    });
+    assert.strictEqual(syntheticModel.synthetic, true, 'a selector with no match asks for a synthetic sample');
+    probe4.paintModelInto(root, { model: syntheticModel, rule: nowhereRule, css: nowhereCss, compare: false, pseudos: [] });
+    assert.ok(boxes[0].children.length >= 1, 'the synthetic sample is painted into the box');
+    assert.ok(String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
+      'and it is marked as synthetic — got: ' + String(boxes[0].children[0].className));
+    assert.ok(String(boxes[0].children[0].style.cssText ?? '').includes('background:red'),
+      'carrying the rule’s own declarations — got: ' + String(boxes[0].children[0].style.cssText));
+
+    // b) 真样本：克隆 + 冻结的计算样式 + 伪元素合成。
+    const realCss = '.card { color: red; }\n.card::before { content: "→"; }';
+    const cardModel = probe4.previewModel({
+      rule: { selector: '.card' },
+      css: realCss,
+      baselineCss: '.card { color: blue; }',
+      index: 0,
+      exclusions: [],
+    });
+    assert.strictEqual(cardModel.synthetic, false, 'a real match is drawn');
+    assert.strictEqual(cardModel.dirty, true, 'and the model knows the sheet changed since it was opened');
+    probe4.paintModelInto(root, {
+      model: cardModel,
+      rule: { selector: '.card' },
+      css: realCss,
+      compare: true,
+      pseudos: ['::before'],
+    });
+    assert.ok(boxes[0].children.length >= 1, 'the modified sample is painted');
+    const painted = boxes[0].children[0];
+    assert.ok(String(painted.style.cssText ?? '').includes('rgb(255, 0, 0)'),
+      'with the frozen computed style — got: ' + String(painted.style.cssText).slice(0, 60));
+    assert.ok((painted.children ?? []).some(child => String(child.className).includes('dshCc_samplePseudo')),
+      'and the ::before content is synthesised into it');
+    assert.ok(boxes[1].children.length >= 1, 'the current side is painted too when comparing');
   }
 
-  // --- 全屏视图：原生 dialog ------------------------------------------------
+  // --- 全屏视图：同一个组件、同一棵树 ---------------------------------------
   {
     const fullHost = await boot({
       dom: { nodes: [{ tagName: 'DIV', className: 'card', children: [] }] },
@@ -6164,32 +6376,44 @@ const injected = { textContent: ownSheet };
       for (const child of node.children ?? []) nodesMatching(child, predicate, found);
       return found;
     };
+    const island = componentIsland((props) => fullHost.mod.__probe.PreviewBlock(props));
+    const previewOf = (view) => {
+      const element = findNode(view, fullHost.mod.__probe.PreviewBlock);
+      return element === null ? null : island.render(element.props);
+    };
     hookIndex = 0;
     const fullRow = fullHost.registrations[0].component();
     findNode(fullRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
     hookIndex = 0;
-    renderedClasses.length = 0;
     const openPanel = fullHost.registrations[0].component();
-    const fullButtons = nodesMatching(openPanel, node => node.type === 'button' && typeof node.props?.['aria-label'] === 'string');
-    fullButtons.find(node => node.props['aria-label'] === '全屏').props.onClick();
-    hookIndex = 0;
-    renderedText.length = 0;
-    renderedClasses.length = 0;
-    const withDialog = fullHost.registrations[0].component();
-    const dialogs = nodesMatching(withDialog, node => node.type === 'dialog');
+    let preview = previewOf(openPanel);
+    const fullButton = nodesMatching(preview, node => node.type === 'button' && node.props?.['aria-label'] === '全屏')[0];
+    assert.ok(fullButton !== undefined, 'the block has a full-screen button');
+    island.act(() => fullButton.props.onClick());
+    preview = previewOf(openPanel);
+    const dialogs = nodesMatching(preview, node => node.type === 'dialog');
     assert.strictEqual(dialogs.length, 1, 'opening full screen renders one dialog — got: ' + dialogs.length);
     assert.strictEqual(dialogs[0].props.className, 'dshCc_full', 'with its own class');
-    assert.ok(renderedClasses.some(name => name.includes('dshCc_fullStage')), 'the two-up stage is inside it');
-    assert.ok(renderedClasses.some(name => name.includes('dshCc_fullBody')), 'and the same rule body');
-    assert.ok(renderedText.includes('当前') && renderedText.includes('修改后'), 'both labels are forced on');
+    // 同一个组件：dialog 里的画布与行内那块是同一份渲染逻辑，两块窗格由 showCompare 决定。
+    assert.ok(nodesMatching(dialogs[0], node => String(node.props?.className ?? '').includes('dshCc_fullStage')).length === 1,
+      'the two-up stage is inside it');
+    assert.ok(nodesMatching(dialogs[0], node => String(node.props?.className ?? '').includes('dshCc_fullBody')).length === 1,
+      'and the same rule body');
+    const dialogText = [];
+    (function walk(current) {
+      if (current === null || typeof current !== 'object') return;
+      for (const child of current.children ?? []) {
+        if (typeof child === 'string') dialogText.push(child);
+        else walk(child);
+      }
+    })(dialogs[0]);
+    assert.ok(dialogText.includes('当前') && dialogText.includes('修改后'), 'both labels are forced on');
     // 关掉：× 收起 dialog。
     const closeButton = nodesMatching(dialogs[0], node => node.type === 'button' && node.props?.['aria-label'] === '退出全屏');
     assert.strictEqual(closeButton.length, 1, 'the dialog has its own close control');
-    closeButton[0].props.onClick();
-    hookIndex = 0;
-    renderedClasses.length = 0;
-    fullHost.registrations[0].component();
-    assert.ok(!renderedClasses.includes('dshCc_full'), 'closing removes the dialog');
+    island.act(() => closeButton[0].props.onClick());
+    preview = previewOf(openPanel);
+    assert.strictEqual(nodesMatching(preview, node => node.type === 'dialog').length, 0, 'closing removes the dialog');
   }
 
   // --- 元素诊断：纯函数 + 注入样式 -----------------------------------------
@@ -6408,6 +6632,137 @@ const injected = { textContent: ownSheet };
     assert.strictEqual(probe.glassEnabled({}), false, 'a style with no backdrop-filter at all is not glass');
   }
 
+  // --- 预览块的模型层（v4）---------------------------------------------------
+  // 四个纯函数是这一版的可测边界：它们不改页面、不建 React，所以「命中谁 / 哪些芯片该出现 /
+  // 拖到哪儿该停 / 样本怎么造」可以在没有浏览器的情况下断言（设计见 docs/preview-v4.md）。
+  {
+    const probe = host.mod.__probe;
+
+    // 芯片跟着选择器走。以前芯片是固定五枚，选择器里没有 :hover 时点下去是空操作：
+    // 强制表注入了，但改写后的选择器在页面上根本不存在。
+    assert.deepStrictEqual([...probe.previewChipsFor('.card')], [], 'a plain class has no state to force');
+    assert.deepStrictEqual([...probe.previewChipsFor('button:hover')], ['hover'], 'hover is offered when it is written');
+    assert.deepStrictEqual([...probe.previewChipsFor('a::before')], ['before'], 'a pseudo-element offers its own chip');
+    assert.deepStrictEqual([...probe.previewChipsFor('input:focus-visible::after')], ['focus', 'after'],
+      'focus-visible counts as focus, and the order is states first, pseudo-elements last');
+    assert.deepStrictEqual([...probe.previewChipsFor('input:placeholder-shown')], ['placeholder'],
+      'placeholder-shown is its own state (and not a pseudo-element)');
+    assert.deepStrictEqual([...probe.previewChipsFor('[data-x="a:hover"]')], [],
+      'a colon inside an attribute value is data, not a state');
+
+    // 平移量的边界：至少露 48px。上界 = (样本 + 窗口) / 2 - 48。
+    const sample = { width: 800, height: 400 };
+    const viewport = { width: 400, height: 200 };
+    assert.deepStrictEqual({ ...probe.clampPan({ x: 5000, y: 5000 }, sample, viewport) }, { x: 552, y: 252 },
+      'a wild drag is clamped to "48px of the sample still shows"');
+    assert.deepStrictEqual({ ...probe.clampPan({ x: -600, y: -300 }, sample, viewport) }, { x: -552, y: -252 },
+      'and the same bound holds the other way');
+    assert.deepStrictEqual({ ...probe.clampPan({ x: 12, y: -7 }, sample, viewport) }, { x: 12, y: -7 },
+      'a pan inside the bound is left alone');
+    assert.deepStrictEqual({ ...probe.clampPan({ x: 5, y: 5 }, { width: 10, height: 10 }, { width: 20, height: 20 }) },
+      { x: 0, y: 0 }, 'a bound below zero collapses to "cannot move" instead of flipping sign');
+    assert.deepStrictEqual({ ...probe.clampPan({ x: 40, y: 40 }, { width: 0, height: 0 }, viewport) }, { x: 40, y: 40 },
+      'an unmeasured sample is not clamped — there is nothing to compute a bound from');
+
+    // 模型：命中、越界索引、基线、排除、合成样本。
+    const cardA = { tagName: 'DIV', className: 'card', id: 'a', children: [] };
+    const cardB = { tagName: 'DIV', className: 'card', id: 'b', children: [] };
+    for (const node of [cardA, cardB]) node.matches = (selector) => matchesSelector(node, selector);
+    const modelHost = await boot({
+      dom: {
+        nodes: [cardA, cardB],
+        // 伪元素合成要读 `content`：只给这一条，别的属性按空串读。
+        computed: () => ({
+          length: 1,
+          0: 'content',
+          getPropertyValue: name => (name === 'content' ? '"→"' : ''),
+        }),
+      },
+      fetchImpl: async (url) => {
+        if (url.endsWith('/list')) return jsonResponse({ ok: true, dir: '/tmp/custom-css', files: [{ name: 'custom.css', bytes: 20, mtime: 1 }], active: 'custom.css', disabled: [] });
+        if (url.includes('/read')) return jsonResponse({ ok: true, name: 'custom.css', css: '.card { color: red; }' });
+        if (url.includes('/about')) return jsonResponse({ ok: true, version: '9.9.9', dsh: null, dshCommit: null });
+        throw new Error('unexpected request: ' + url);
+      },
+    });
+    const modelProbe = modelHost.mod.__probe;
+    const rule = { selector: '.card' };
+    const base = { rule, css: '.card { color: red; }', baselineCss: '.card { color: red; }', index: 0, exclusions: [] };
+    const first = modelProbe.previewModel(base);
+    assert.strictEqual(first.count, 2, 'the model resolves the host selector — got: ' + first.count);
+    assert.strictEqual(first.target, cardA, 'and index 0 is the first match');
+    assert.strictEqual(first.synthetic, false, 'a real match is drawn, not synthesised');
+    assert.strictEqual(first.dirty, false, 'the sheet has not changed since it was opened');
+    assert.strictEqual(first.chips.length, 0, 'and `.card` has no state worth a chip');
+    const second = modelProbe.previewModel({ ...base, index: 1, baselineCss: '.card { }' });
+    assert.strictEqual(second.target, cardB, 'index 1 picks the second match');
+    assert.strictEqual(second.dirty, true, 'a changed sheet marks the model dirty');
+    assert.strictEqual(modelProbe.previewModel({ ...base, index: 9 }).index, 1,
+      'an out-of-range index falls back to the last match');
+    const nowhere = modelProbe.previewModel({ ...base, rule: { selector: '.nowhere' } });
+    assert.strictEqual(nowhere.count, 0, 'a selector with no match resolves to nothing');
+    assert.strictEqual(nowhere.synthetic, true, 'and asks for a synthetic sample');
+    const excluded = modelProbe.previewModel({ ...base, exclusions: ['.card'] });
+    assert.strictEqual(excluded.excluded, true, 'an element on the exclusion list is flagged');
+    assert.strictEqual(excluded.synthetic, true, 'and is not cloned into the preview');
+    // `a::before` 预览的是**宿主元素**：`resolveSelector` 对伪元素返回「没有节点」，
+    // 所以宿主选择器必须先把伪元素去掉，否则整条规则掉进合成样本分支。
+    const hostOnly = modelProbe.previewModel({ ...base, rule: { selector: '.card::before' } });
+    assert.strictEqual(hostOnly.synthetic, false, 'a pseudo-element rule previews its host element');
+    assert.strictEqual(hostOnly.count, 2, 'and the host selector is what gets resolved');
+    assert.deepStrictEqual([...hostOnly.chips], ['before'], 'with the pseudo-element chip');
+    // `hashText` 只要求稳定与区分度（撞了多画一次，不会画错）。
+    assert.strictEqual(modelProbe.hashText('abc'), modelProbe.hashText('abc'), 'the same text fingerprints the same');
+    assert.notStrictEqual(modelProbe.hashText('abc'), modelProbe.hashText('abd'), 'and different text does not');
+    assert.strictEqual(modelProbe.previewTargetSelector('button:hover'), 'button', 'state pseudos are stripped');
+    assert.strictEqual(modelProbe.previewTargetSelector('a::before'), 'a', 'and so are pseudo-elements');
+    assert.strictEqual(modelProbe.previewTargetSelector(':hover'), '*', 'a selector with nothing left falls back to *');
+    assert.strictEqual(modelProbe.previewTargetSelector('.x:not(.y)'), '.x:not(.y)',
+      'structural pseudos stay — they decide what the selector matches');
+
+    // 样本：表格零件要补包装（游离的 <tr> 没有布局），伪元素要合成到首尾。
+    const makeTarget = (tagName) => {
+      const clone = () => {
+        const node = {
+          tagName,
+          className: '',
+          attributes: {},
+          children: [],
+          firstChild: null,
+          style: { cssText: '' },
+          appendChild(child) { node.children.push(child); return child; },
+          insertBefore(child) { node.children.unshift(child); return child; },
+          removeAttribute(name) { delete node.attributes[name]; },
+          setAttribute(name, value) { node.attributes[name] = value; },
+        };
+        return node;
+      };
+      const target = clone();
+      target.id = 'target';
+      target.attributes.id = 'target';
+      target.cloneNode = () => clone();
+      return target;
+    };
+    const rowSample = modelProbe.buildSample(makeTarget('TR'), { styleText: 'color: red' });
+    const tagOf = (node) => String(node?.tagName ?? '').toUpperCase();
+    assert.strictEqual(tagOf(rowSample), 'TABLE', 'a <tr> sample is wrapped in a table — got: ' + tagOf(rowSample));
+    assert.strictEqual(tagOf(rowSample.children[0]), 'TBODY', 'with a tbody in between');
+    const wrappedRow = rowSample.children[0].children[0];
+    assert.strictEqual(tagOf(wrappedRow), 'TR', 'and the clone sits inside the tbody');
+    assert.strictEqual(wrappedRow.style.cssText, 'color: red', 'and the frozen style lands on the clone');
+    assert.strictEqual(wrappedRow.attributes.id, undefined,
+      'the id is dropped so the sample cannot collide with the page');
+    const plain = makeTarget('DIV');
+    const divSample = modelProbe.buildSample(plain, { styleText: 'color: blue' });
+    assert.strictEqual(tagOf(divSample), 'DIV', 'an ordinary element is not wrapped');
+    const pseudoSample = modelProbe.buildSample(makeTarget('DIV'), { styleText: '', pseudos: ['::before', '::after'] });
+    assert.strictEqual(pseudoSample.children.length, 2, 'both pseudo-elements are synthesised — got: '
+      + JSON.stringify(pseudoSample.children.map(child => child.className)));
+    assert.ok(String(pseudoSample.children[0].className).includes('dshCc_samplePseudo'), 'as spans carrying the sample class');
+    assert.strictEqual(pseudoSample.children[1].textContent, '→', 'and their content becomes text — got: '
+      + JSON.stringify(pseudoSample.children[1].textContent));
+  }
+
   // --- 查找：跳转不抢焦点；编辑器里的 Esc 关条 --------------------------------
   // 用户报过两条：搜索「不会跳转到行」，以及「必须关闭才退出」。根因是同一个 —— 放光标的
   // effect 每次都 editor.focus()，焦点离开查找框之后 Esc 就再也关不掉条。
@@ -6482,7 +6837,7 @@ const injected = { textContent: ownSheet };
     assert.ok(!renderedClasses.includes('dshCc_findBar'), '编辑器里的 Esc 关掉查找条');
   }
   // --- 全屏头：上下文与出口 ------------------------------------------------
-  // 全屏里没有行内的「N 个命中」和卡片序号，也没有卡片导航 —— 这三件事要在头上补回来，
+  // 全屏里看不到行内的工具条，所以「第几个命中 / 怎么换 / 怎么退出」都要在头上补齐，
   // 否则用户不知道自己在预览第几个元素、也不知道怎么退出。
   {
     const manyHost = await boot({
@@ -6506,58 +6861,93 @@ const injected = { textContent: ownSheet };
       for (const child of node.children ?? []) walk(child, predicate, found);
       return found;
     };
+    const nodesText = (root) => {
+      const out = [];
+      const visit = (node) => {
+        if (node === null || typeof node !== 'object') return;
+        for (const child of node.children ?? []) {
+          if (typeof child === 'string') out.push(child);
+          else visit(child);
+        }
+      };
+      visit(root);
+      return out;
+    };
+    const island = componentIsland((props) => manyHost.mod.__probe.PreviewBlock(props));
+    const previewOf = (view) => {
+      const element = findNode(view, manyHost.mod.__probe.PreviewBlock);
+      return element === null ? null : island.render(element.props);
+    };
     hookIndex = 0;
     const headRow = manyHost.registrations[0].component();
     findNode(headRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
     hookIndex = 0;
     const panel = manyHost.registrations[0].component();
-    walk(panel, node => node.type === 'button' && node.props?.['aria-label'] === '全屏')[0].props.onClick();
-    hookIndex = 0;
-    renderedText.length = 0;
-    renderedClasses.length = 0;
-    const withDialog = manyHost.registrations[0].component();
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('3 个命中')),
-      'the dialog head carries the hit count — got: ' + JSON.stringify(renderedText.filter(t => typeof t === 'string' && t.includes('命中'))),
-    );
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('第 1 个')),
-      'and which element is being previewed',
-    );
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('Esc 退出')),
-      'plus the way out (Esc)',
-    );
-    const dialog = walk(withDialog, node => node.type === 'dialog')[0];
-    const navButtons = walk(dialog, node => node.type === 'button' && (node.props?.['aria-label'] === '上一个命中元素' || node.props?.['aria-label'] === '下一个命中元素'));
-    assert.strictEqual(navButtons.length, 2, 'a three-hit rule gets prev/next in the dialog — got: ' + navButtons.length);
-    // 下一张：索引前进（3 个命中时 0 → 1）。
-    navButtons.find(node => node.props['aria-label'] === '下一个命中元素').props.onClick();
-    hookIndex = 0;
-    renderedText.length = 0;
-    manyHost.registrations[0].component();
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('第 2 个')),
-      'clicking › moves to the next matched element — got: ' + JSON.stringify(renderedText.filter(t => typeof t === 'string' && t.includes('第 '))),
-    );
+    let preview = previewOf(panel);
+    // 工具条上本来就有「第几个」的菜单：三个命中 → 三个选项。
+    const matchMenus = walk(preview, node => typeof node.type === 'function' && node.props?.ariaLabel === '预览第几个命中元素');
+    assert.strictEqual(matchMenus.length, 1, 'the toolbar offers a match menu — got: ' + matchMenus.length);
+    assert.strictEqual(matchMenus[0].props.items.length, 3, 'with one entry per match');
+    // 全屏：同一个组件再摆一次，头上补齐计数与出口。
+    const fullButton = walk(preview, node => node.type === 'button' && node.props?.['aria-label'] === '全屏')[0];
+    island.act(() => fullButton.props.onClick());
+    preview = previewOf(panel);
+    const dialog = walk(preview, node => node.type === 'dialog')[0];
+    assert.ok(dialog !== undefined, 'the full screen renders a dialog');
+    const dialogText = nodesText(dialog);
+    assert.ok(dialogText.some(text => text.includes('3 个命中')),
+      'the dialog head carries the hit count — got: ' + JSON.stringify(dialogText.filter(t => t.includes('命中'))));
+    assert.ok(dialogText.some(text => text.includes('第 1 个')), 'and which element is being previewed');
+    assert.ok(dialogText.some(text => text.includes('Esc 退出')), 'plus the way out (Esc)');
+    const dialogMenus = walk(dialog, node => typeof node.type === 'function' && node.props?.ariaLabel === '预览第几个命中元素');
+    assert.strictEqual(dialogMenus.length, 1, 'the dialog can switch matches too — got: ' + dialogMenus.length);
+    // 换到第 2 个：索引前进（3 个命中时 0 → 1），头跟着改。
+    island.act(() => dialogMenus[0].props.onPick('1'));
+    preview = previewOf(panel);
+    const movedText = nodesText(walk(preview, node => node.type === 'dialog')[0] ?? preview);
+    assert.ok(movedText.some(text => text.includes('第 2 个')),
+      'choosing a match moves the cursor — got: ' + JSON.stringify(movedText.filter(t => t.includes('第 '))));
+    // 退出：× 收起 dialog。
+    const closeButton = walk(preview, node => node.type === 'button' && node.props?.['aria-label'] === '退出全屏')[0];
+    island.act(() => closeButton.props.onClick());
+    preview = previewOf(panel);
+    assert.strictEqual(walk(preview, node => node.type === 'dialog').length, 0, 'closing removes the dialog');
   }
 
   // --- 预览的样本本身是「插件自己的东西」，不能参与匹配 --------------------------
   // 用户写的 `[class*='_tableRow']` 曾经把预览里克隆出来的那几行也命中：样本一画出来，
   // 计数就跟着涨，看起来像「规则匹配了不存在的东西」。容器带上 data-dshcc-owned 之后，
   // queryOwned 会把它们（以及里面所有克隆）从任何匹配里剔掉。
+  // 表行另有一条：游离的 <tr> 没有布局，样本要自己补 table > tbody 包装。
   {
     const boxLike = (className) => ({
       className,
       children: [],
-      textContent: '',
+      text: '',
+      style: {},
+      get textContent() { return this.text ?? ''; },
+      set textContent(value) { this.text = String(value); this.children = []; },
       appendChild(child) { this.children.push(child); return child; },
     });
     const row = {
       tagName: 'TR',
       className: 'table-row',
       children: [],
-      cloneNode() { return { tagName: 'TR', className: 'table-row', children: [], style: {}, appendChild(c) { this.children.push(c); return c; }, removeAttribute() {} }; },
+      attributes: {},
+      style: {},
+      cloneNode() {
+        return {
+          tagName: 'TR',
+          className: 'table-row',
+          children: [],
+          attributes: {},
+          style: {},
+          appendChild(child) { this.children.push(child); return child; },
+          insertBefore(child) { this.children.unshift(child); return child; },
+          removeAttribute() {},
+        };
+      },
+      matches: (selector) => matchesSelector(row, selector),
     };
     const tableHost = await boot({
       dom: { nodes: [row] },
@@ -6571,36 +6961,35 @@ const injected = { textContent: ownSheet };
     hookIndex = 0;
     const tableTree = tableHost.registrations[0].component();
     findNode(tableTree, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
-    const boxes = [boxLike('dshCc_previewAfter'), boxLike('dshCc_previewCurrent')];
-    const fakePanel = { querySelectorAll: () => boxes };
     hookIndex = 0;
-    renderedClasses.length = 0;
     const markedPanel = tableHost.registrations[0].component();
-    const markedRow = (function find(node) {
-      if (node === null || typeof node !== 'object') return null;
-      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
-      for (const child of node.children ?? []) {
-        const hit = find(child);
-        if (hit !== null) return hit;
-      }
-      return null;
-    })(markedPanel);
-    markedRow.props.ref.current = { querySelector: () => fakePanel };
-    const sampleNodes = (function collect(node, found = []) {
-      if (node === null || typeof node !== 'object') return found;
-      if (String(node.props?.className ?? '').includes('dshCc_previewAfter') && node.props?.className === 'dshCc_previewAfter') found.push(node);
-      for (const child of node.children ?? []) collect(child, found);
-      return found;
-    })(markedPanel);
-    assert.ok(sampleNodes.length >= 1, 'the modified sample container is in the tree');
-    assert.strictEqual(
-      String(sampleNodes[0].props['data-dshcc-owned']),
-      '',
-      'and it is marked as plugin chrome, so a selector cannot match the preview itself',
-    );
-    // <tr> 克隆进一个 div 是没有布局的：样本要自己补上 table / tbody 包装。
-    await tableHost.runEffects();
-    await settle();
+    const island = componentIsland((props) => tableHost.mod.__probe.PreviewBlock(props));
+    const preview = island.render(findNode(markedPanel, tableHost.mod.__probe.PreviewBlock).props);
+    const containers = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      if (node.props?.['data-dshcc-owned'] !== undefined) containers.push(node);
+      for (const child of node.children ?? []) walk(child);
+    })(preview);
+    assert.strictEqual(containers.length, 1, 'the modified sample container is in the tree — got: ' + containers.length);
+    assert.strictEqual(String(containers[0].props['data-dshcc-owned']), '',
+      'and it is marked as plugin chrome, so a selector cannot match the preview itself');
+    // 画一遍：<tr> 的克隆要补 table / tbody 包装。
+    const boxes = [boxLike('dshCc_previewAfter')];
+    const model = tableHost.mod.__probe.previewModel({
+      rule: { selector: '.table-row' },
+      css: '.table-row { color: red; }',
+      baselineCss: '.table-row { color: red; }',
+      index: 0,
+      exclusions: [],
+    });
+    tableHost.mod.__probe.paintModelInto({ querySelectorAll: () => boxes }, {
+      model,
+      rule: { selector: '.table-row' },
+      css: '.table-row { color: red; }',
+      compare: false,
+      pseudos: [],
+    });
     assert.ok(boxes[0].children.length >= 1, 'a table row was painted');
     assert.strictEqual(
       String(boxes[0].children[0].tagName ?? '').toLowerCase(),
@@ -6638,38 +7027,49 @@ const injected = { textContent: ownSheet };
     const excludeRow = excludeHost.registrations[0].component();
     findNode(excludeRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
     hookIndex = 0;
-    renderedText.length = 0;
     const excludePanel = excludeHost.registrations[0].component();
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes('排除名单')),
-      'the panel explains that the element is on the exclude list — got: ' + JSON.stringify({ text: renderedText.slice(0, 12), classes: renderedClasses.slice(0, 20) }),
-    );
-    assert.ok(
-      renderedText.some(text => typeof text === 'string' && text.includes(':root, html, body')),
-      'and shows the list it is using — got: ' + JSON.stringify(renderedText.filter(text => typeof text === 'string' && text.includes('排除'))),
-    );
+    const island = componentIsland((props) => excludeHost.mod.__probe.PreviewBlock(props));
+    const previewElement = findNode(excludePanel, excludeHost.mod.__probe.PreviewBlock);
+    const preview = island.render(previewElement.props);
+    const texts = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      for (const child of node.children ?? []) {
+        if (typeof child === 'string') texts.push(child);
+        else walk(child);
+      }
+    })(preview);
+    assert.ok(texts.some(text => text.includes('排除名单')),
+      'the block explains that the element is on the exclude list — got: ' + JSON.stringify(texts.slice(0, 12)));
+    assert.ok(texts.some(text => text.includes(':root, html, body')),
+      'and shows the list it is using — got: ' + JSON.stringify(texts.filter(text => text.includes('排除'))));
 
     // 样本必须是合成的那一个（不是整页克隆）。
     const boxLike = (className) => ({
       className,
       children: [],
-      textContent: '',
+      text: '',
+      style: {},
+      get textContent() { return this.text ?? ''; },
+      set textContent(value) { this.text = String(value); this.children = []; },
       appendChild(child) { this.children.push(child); return child; },
     });
     const boxes = [boxLike('dshCc_previewAfter'), boxLike('dshCc_previewCurrent')];
-    const fakePanel = { querySelectorAll: () => boxes };
-    const rowNode = (function find(node) {
-      if (node === null || typeof node !== 'object') return null;
-      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
-      for (const child of node.children ?? []) {
-        const hit = find(child);
-        if (hit !== null) return hit;
-      }
-      return null;
-    })(excludePanel);
-    rowNode.props.ref.current = { querySelector: () => fakePanel };
-    await excludeHost.runEffects();
-    await settle();
+    const excludedModel = excludeHost.mod.__probe.previewModel({
+      rule: { selector: 'body' },
+      css: 'body { color: red; }',
+      baselineCss: 'body { color: red; }',
+      index: 0,
+      exclusions: excludeHost.mod.__probe.previewModel === undefined ? [] : [':root', 'html', 'body'],
+    });
+    assert.strictEqual(excludedModel.excluded, true, 'the model flags the excluded element');
+    excludeHost.mod.__probe.paintModelInto({ querySelectorAll: () => boxes }, {
+      model: excludedModel,
+      rule: previewElement.props.rule,
+      css: previewElement.props.css,
+      compare: false,
+      pseudos: [],
+    });
     assert.ok(boxes[0].children.length >= 1, 'a sample was painted for the excluded element');
     assert.ok(
       String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
@@ -6759,27 +7159,38 @@ const injected = { textContent: ownSheet };
     const nestedRow = nestedHost.registrations[0].component();
     findNode(nestedRow, 'pre').props.onClick({ target: { getAttribute: () => '0' } });
     hookIndex = 0;
-    renderedText.length = 0;
     const nestedPanel = nestedHost.registrations[0].component();
+    const island = componentIsland((props) => nestedHost.mod.__probe.PreviewBlock(props));
+    const nestedPreview = island.render(findNode(nestedPanel, nestedHost.mod.__probe.PreviewBlock).props);
+    const nestedTexts = [];
+    (function walk(node) {
+      if (node === null || typeof node !== 'object') return;
+      for (const child of node.children ?? []) {
+        if (typeof child === 'string') nestedTexts.push(child);
+        else walk(child);
+      }
+    })(nestedPreview);
     assert.ok(
-      !renderedText.some(text => typeof text === 'string' && text.includes('排除名单')),
+      !nestedTexts.some(text => text.includes('排除名单')),
       'an element inside the page is NOT excluded just because its ancestor is — got: '
-        + JSON.stringify(renderedText.filter(text => typeof text === 'string' && text.includes('排除'))),
+        + JSON.stringify(nestedTexts.filter(text => text.includes('排除'))),
     );
     const boxes = [boxLike('dshCc_previewAfter'), boxLike('dshCc_previewCurrent')];
-    const fakePanel = { querySelectorAll: () => boxes };
-    const rowNode = (function find(node) {
-      if (node === null || typeof node !== 'object') return null;
-      if (String(node.props?.className ?? '') === 'dshCc_row') return node;
-      for (const child of node.children ?? []) {
-        const hit = find(child);
-        if (hit !== null) return hit;
-      }
-      return null;
-    })(nestedPanel);
-    rowNode.props.ref.current = { querySelector: () => fakePanel };
-    await nestedHost.runEffects();
-    await settle();
+    const nestedModel = nestedHost.mod.__probe.previewModel({
+      rule: { selector: '.card' },
+      css: '.card { color: red; }',
+      baselineCss: '.card { color: red; }',
+      index: 0,
+      exclusions: [':root', 'html', 'body'],
+    });
+    assert.strictEqual(nestedModel.synthetic, false, 'the card itself is not on the list');
+    nestedHost.mod.__probe.paintModelInto({ querySelectorAll: () => boxes }, {
+      model: nestedModel,
+      rule: { selector: '.card' },
+      css: '.card { color: red; }',
+      compare: false,
+      pseudos: [],
+    });
     assert.ok(boxes[0].children.length >= 1, 'the sample was painted for a normal element');
     assert.ok(
       !String(boxes[0].children[0].className).includes('dshCc_sampleSynthetic'),
@@ -8483,6 +8894,44 @@ const injected = { textContent: ownSheet };
   assert.strictEqual(liveStatus.props.role, 'status', 'the status line is a live region');
   assert.strictEqual(liveStatus.props['aria-live'], 'polite', 'politely announced');
   assert.ok(String(liveStatus.props.className).includes('dshUi_statusBad'), 'and painted as an error');
+  // 提醒态不是错误：DSH 只有一个红，它留给「出错」与「重置」。
+  const warnStatus = kitBoot.mod.__probe.ui.status({ state: 'warn', text: '正在演示悬停' });
+  assert.ok(String(warnStatus.props.className).includes('dshUi_statusWarn'), 'a warn line is painted as a warning');
+  assert.ok(!String(warnStatus.props.className).includes('dshUi_statusBad'), 'and not as an error');
+  // 28px 档与图标档：两档高度都来自 DSH 的规格（36 / 28），第三个高度不该出现。
+  const small = kitBoot.mod.__probe.ui.button({ size: 'sm' }, '小');
+  assert.ok(String(small.props.className).includes('dshUi_buttonSm'), 'size: sm asks for the 28px button');
+  assert.ok(!String(small.props.className).includes('dshUi_buttonIcon'), 'and is not an icon button');
+  const icon = kitBoot.mod.__probe.ui.button({ size: 'sm', icon: true }, '×');
+  assert.ok(String(icon.props.className).includes('dshUi_buttonIcon'), 'icon: true asks for the square variant');
+  // 有按下语义的按钮把状态写在 aria-pressed 上；普通按钮不写（写 false 等于给读屏器加噪音）。
+  const pressed = kitBoot.mod.__probe.ui.button({ pressed: true }, '对比');
+  assert.strictEqual(pressed.props['aria-pressed'], 'true', 'a pressed button says so');
+  const unpressed = kitBoot.mod.__probe.ui.button({ pressed: false }, '对比');
+  assert.strictEqual(unpressed.props['aria-pressed'], 'false', 'and an unpressed one says that too');
+  assert.strictEqual(kitBoot.mod.__probe.ui.button({}, '普通').props['aria-pressed'], undefined,
+    'a button with no pressed state does not claim one');
+  // 分段控件：一个组、若干段、同一时刻只有一段按下。
+  const segments = kitBoot.mod.__probe.ui.segments({
+    ariaLabel: '视图',
+    value: 'single',
+    choices: [['single', '单屏'], ['compare', '对比']],
+    onChange: () => {},
+  });
+  assert.strictEqual(segments.props.role, 'group', 'the segments form one group');
+  assert.strictEqual(segments.props['aria-label'], '视图', 'with a name');
+  const segmentButtons = segments.children.filter(child => child !== null && child !== undefined);
+  assert.strictEqual(segmentButtons.length, 2, 'one button per choice');
+  assert.deepStrictEqual(segmentButtons.map(node => node.props['aria-pressed']), [true, false],
+    'exactly the chosen one is pressed');
+  let chosen = null;
+  kitBoot.mod.__probe.ui.segments({
+    ariaLabel: '视图',
+    value: 'single',
+    choices: [['single', '单屏'], ['compare', '对比']],
+    onChange: (next) => { chosen = next; },
+  }).children.filter(Boolean)[1].props.onClick();
+  assert.strictEqual(chosen, 'compare', 'clicking a segment reports its value (not the event)');
 
   // --- 24. the data actions -------------------------------------------------
   //

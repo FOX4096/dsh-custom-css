@@ -97,13 +97,13 @@ CI 目前采两个面：设置页里的这一行（`--open-settings`），和本
 # 状态芯片：打开一条带 :hover 的规则，点「悬停」，再确认强制表与目标元素
 node tests/visual-probe.mjs --open-settings \
   --click ".dshCc_highlight span[data-rule]" \
-  --click ".dshCc_stateChips button:nth-child(1)" \
+  --click ".dshCc_previewBar button[aria-label='悬停']" \
   --sel "#dsh-custom-css-preview-force" --sel ".dshCcStateHover" --shot
 
 # 全屏视图：dialog 必须真的是视口级尺寸（被祖先 transform 裁掉时会明显变小）
 node tests/visual-probe.mjs --height 1100 --open-settings \
   --click ".dshCc_highlight span[data-rule]" \
-  --click ".dshCc_previewTools button:nth-child(1)" \
+  --click ".dshCc_previewBar button[aria-label='全屏']" \
   --sel "dialog.dshCc_full" --sel ".dshCc_fullStage" --shot
 
 # 命中 0 个：合成样本要真的出现，并且写着「不是页面上的元素」
@@ -118,7 +118,7 @@ node tests/visual-probe.mjs --open-settings \
 
 ```bash
 node tests/visual-probe.mjs --open-settings --click ".dshCc_highlight span[data-rule]" \
-  --click ".dshCc_previewTools button:nth-child(1)" \
+  --click ".dshCc_previewBar button[aria-label='全屏']" \
   --eval "getComputedStyle(document.querySelector('dialog.dshCc_full'),'::backdrop').backdropFilter"
 ```
 
